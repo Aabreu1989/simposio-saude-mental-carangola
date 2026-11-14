@@ -102,38 +102,19 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <>
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200/90 shadow-2xs">
-        {/* Barra Superior Institucional SUS - Azul Oficial (#005BAC) */}
-        <div className="bg-[#005BAC] text-white py-1 px-3 sm:px-6 border-b border-[#004f94]">
-          <div className="max-w-7xl mx-auto flex items-center justify-between text-[10px] sm:text-[11px] font-semibold">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="font-black tracking-wider uppercase text-[9px] sm:text-[10px] bg-white text-[#005BAC] px-1.5 py-0.5 rounded font-mono shadow-xs shrink-0">
-                SUS
-              </span>
-              <span className="truncate text-white font-medium">
-                Sistema Único de Saúde · Secretaria Municipal de Saúde de Carangola - MG
-              </span>
-            </div>
-            <div className="hidden md:flex items-center gap-3 text-white/80 text-[10px] shrink-0">
-              <span>RAPS · Microrregião de Carangola</span>
-              <span className="w-1 h-1 rounded-full bg-white/40" />
-              <span>Portal Oficial</span>
-            </div>
-          </div>
-        </div>
-
         <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between gap-2 sm:gap-4 h-16 sm:h-20 lg:h-22">
+          <div className="flex items-center justify-between gap-2 sm:gap-4 h-16 sm:h-20">
             
             {/* Brand Wordmark - 100% Responsive on Mobile, Tablet & Desktop */}
             <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
               <button
                 type="button"
                 onClick={handleBrandClick}
-                className="text-left group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a3641] rounded-xl flex items-center gap-2 sm:gap-3.5 min-w-0"
+                className="text-left group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0a3641] rounded-xl flex items-center gap-2.5 sm:gap-3.5 min-w-0"
                 aria-label="Ir para página inicial do Simpósio"
               >
                 {/* Institutional SUS Logo - Prominently sized & responsive */}
-                <div className="w-10 h-10 xs:w-11 xs:h-11 sm:w-13 sm:h-13 md:w-14 md:h-14 lg:w-16 lg:h-16 rounded-full overflow-hidden bg-white shadow-md border-2 border-sky-300/80 shrink-0 flex items-center justify-center p-0.5 group-hover:scale-105 transition-transform ring-2 ring-sky-500/20">
+                <div className="w-10 h-10 xs:w-11 xs:h-11 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-full overflow-hidden bg-white shadow-md border-2 border-sky-300/80 shrink-0 flex items-center justify-center p-0.5 group-hover:scale-105 transition-transform ring-2 ring-sky-500/20">
                   <img
                     src="/assets/aistudio/Institutional_logo_displayed_ver__4c1d163d_2K__1__2b74545f.jpg"
                     alt="Logo Oficial SUS"
@@ -144,14 +125,8 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {/* Title: 100% responsive, never clamped or cut off on tablet or desktop */}
                 <div className="min-w-0 flex flex-col justify-center">
-                  <span className="text-[9px] xs:text-[10px] sm:text-xs font-mono font-extrabold text-[#d96522] uppercase tracking-wider leading-none block mb-0.5 sm:mb-1">
-                    SUS · Carangola / MG
-                  </span>
-                  <span className="text-xs xs:text-sm sm:text-base md:text-base lg:text-lg xl:text-xl font-black text-[#0a3641] tracking-tight leading-tight group-hover:text-[#ea7a38] transition-colors block break-words xl:whitespace-nowrap">
+                  <span className="text-xs xs:text-sm sm:text-base md:text-lg lg:text-xl font-black text-[#0a3641] tracking-tight leading-snug group-hover:text-[#ea7a38] transition-colors block break-words sm:truncate">
                     {editionTitle}
-                  </span>
-                  <span className="hidden sm:block text-[10px] md:text-[11px] lg:text-xs font-semibold text-stone-500 leading-none mt-0.5 truncate">
-                    Microrregião de Carangola · RAPS
                   </span>
                 </div>
               </button>
