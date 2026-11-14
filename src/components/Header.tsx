@@ -102,6 +102,25 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <>
       <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200/90 shadow-2xs">
+        {/* Barra Superior Institucional SUS - Azul Oficial (#005BAC) */}
+        <div className="bg-[#005BAC] text-white py-1 px-3 sm:px-6 border-b border-[#004f94]">
+          <div className="max-w-7xl mx-auto flex items-center justify-between text-[10px] sm:text-[11px] font-semibold">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-black tracking-wider uppercase text-[9px] sm:text-[10px] bg-white text-[#005BAC] px-1.5 py-0.5 rounded font-mono shadow-xs shrink-0">
+                SUS
+              </span>
+              <span className="truncate text-white font-medium">
+                Sistema Único de Saúde · Secretaria Municipal de Saúde de Carangola - MG
+              </span>
+            </div>
+            <div className="hidden md:flex items-center gap-3 text-white/80 text-[10px] shrink-0">
+              <span>RAPS · Microrregião de Carangola</span>
+              <span className="w-1 h-1 rounded-full bg-white/40" />
+              <span>Portal Oficial</span>
+            </div>
+          </div>
+        </div>
+
         <div className="max-w-7xl mx-auto px-2.5 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-2 sm:gap-4 h-16 sm:h-20 lg:h-22">
             
