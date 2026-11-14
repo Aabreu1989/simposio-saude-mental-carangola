@@ -152,34 +152,47 @@ export const generateCertificateHTML = (
     .auth-brand {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
-    .sus-badge {
+    .sus-logo-circle {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      border: 2px solid ${design.accentColor};
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      flex-shrink: 0;
+    }
+    .sus-logo-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .sus-brasil-pill {
+      display: inline-block;
       background: ${design.primaryColor};
       color: #ffffff;
-      font-size: 11pt;
+      font-size: 7.5pt;
       font-weight: 900;
-      padding: 3px 10px;
-      border-radius: 6px;
-      line-height: 1;
-      text-align: center;
-    }
-    .sus-sub {
-      font-size: 6pt;
-      color: ${design.accentColor};
-      display: block;
-      font-weight: 700;
+      padding: 1.5px 6px;
+      border-radius: 4px;
       letter-spacing: 0.5px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
     .auth-text-sup {
-      font-size: 7.5pt;
+      font-size: 7pt;
       font-weight: 700;
       color: ${design.accentColor};
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
     .auth-text-main {
-      font-size: 9.5pt;
+      font-size: 9pt;
       font-weight: 800;
       color: ${design.primaryColor};
       line-height: 1.2;
@@ -199,51 +212,20 @@ export const generateCertificateHTML = (
       color: ${design.primaryColor};
     }
 
-    /* Banner Image: Exact Match to Official Visual Identity */
-    .official-banner-wrap {
-      width: 100%;
-      text-align: center;
-      margin: 4px 0 10px 0;
-      background: #ffffff;
-      padding: 6px 12px;
-      border-radius: 12px;
-      border: 1px solid #e2e8f0;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
-    }
-    .official-banner-img {
-      max-width: 100%;
-      max-height: 145px;
-      height: auto;
-      object-fit: contain;
-      display: inline-block;
-      border-radius: 8px;
-    }
-
     /* Diploma Title & Recipient */
     .cert-heading-wrap {
       text-align: center;
-      margin: 8px 0;
-    }
-    .cert-pill {
-      display: inline-block;
-      background: ${design.primaryColor};
-      color: #ffffff;
-      font-size: 7pt;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      padding: 3px 12px;
-      border-radius: 12px;
-      margin-bottom: 4px;
+      margin: 10px 0 8px 0;
     }
     .cert-title {
-      font-size: 20pt;
+      font-size: 24pt;
       font-weight: 900;
       color: ${design.primaryColor};
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 4px;
       margin: 0;
       line-height: 1.1;
+      font-family: ${fontStack};
     }
 
     .cert-recipient-pre {
@@ -475,11 +457,16 @@ export const generateCertificateHTML = (
     <!-- Top Authority Bar -->
     <div class="auth-header">
       <div class="auth-brand">
-        <div class="sus-badge">
-          SUS
-          <span class="sus-sub">BRASIL</span>
+        <div class="sus-logo-circle">
+          <img
+            src="${origin}/assets/logo-sus-oficial.jpg"
+            alt="Logo Oficial SUS"
+            class="sus-logo-img"
+            onerror="this.src='/favicon-192x192.png'"
+          />
         </div>
         <div>
+          <div><span class="sus-brasil-pill">SUS BRASIL</span></div>
           <div class="auth-text-sup">${design.institutionTopLine}</div>
           <div class="auth-text-main">${design.institutionName}</div>
           <div class="auth-text-sub">${design.institutionSub}</div>
@@ -490,20 +477,9 @@ export const generateCertificateHTML = (
       </div>
     </div>
 
-    ${design.showBannerImage && bannerSrc ? `
-    <div class="official-banner-wrap">
-      <img
-        src="${bannerSrc}"
-        alt="${config.editionTitle}"
-        class="official-banner-img"
-      />
-    </div>
-    ` : ''}
-
     <!-- Diploma Heading -->
     <div class="cert-heading-wrap">
-      ${design.badgeLabel ? `<div class="cert-pill">${design.badgeLabel}</div>` : ''}
-      <h2 class="cert-title">${design.mainTitle}</h2>
+      <h1 class="cert-title">CERTIFICADO</h1>
       <div class="cert-recipient-pre">${design.preNameText}</div>
       <div class="cert-recipient-name">${attendee.fullName.toUpperCase()}</div>
     </div>

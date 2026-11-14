@@ -110,8 +110,18 @@ export const loadStoredData = () => {
   } else {
     loadedConfig.certificateDesign = {
       ...INITIAL_CERTIFICATE_DESIGN,
-      ...loadedConfig.certificateDesign
+      ...loadedConfig.certificateDesign,
+      showBannerImage: false,
+      bannerImageUrl: '',
+      footerQuote: '',
+      badgeLabel: '',
+      mainTitle: 'CERTIFICADO',
+      primaryColor: '#0a3641',
+      accentColor: '#ea7a38',
+      secondaryColor: '#028090',
+      backgroundColor: '#ffffff'
     };
+    configChanged = true;
   }
   if (!loadedConfig.badgeDesign) {
     loadedConfig.badgeDesign = { ...INITIAL_BADGE_DESIGN };
@@ -536,10 +546,23 @@ export const isCertificateAvailableForPublic = (nowMs: number = Date.now()): boo
 };
 
 export const getCertificateDesign = (config: EventConfig): CertificateDesignConfig => {
-  return {
+  const merged: CertificateDesignConfig = {
     ...INITIAL_CERTIFICATE_DESIGN,
     ...(config.certificateDesign || {})
   };
+
+  // Enforce official design directives:
+  merged.showBannerImage = false;
+  merged.bannerImageUrl = '';
+  merged.footerQuote = '';
+  merged.badgeLabel = '';
+  merged.mainTitle = 'CERTIFICADO';
+  merged.primaryColor = '#0a3641';
+  merged.accentColor = '#ea7a38';
+  merged.secondaryColor = '#028090';
+  merged.backgroundColor = '#ffffff';
+
+  return merged;
 };
 
 export const getBadgeDesign = (config: EventConfig): BadgeDesignConfig => {
