@@ -64,7 +64,7 @@ export const Hero: React.FC<HeroProps> = ({
           <div className="w-full">
             <div className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-sm border border-stone-200/90 bg-white">
               <img
-                src="/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_96fea5bf.jpeg"
+                src={config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'}
                 alt="1º Simpósio de Saúde Mental da Microrregião de Carangola"
                 className="w-full h-auto block object-contain"
                 loading="eager"

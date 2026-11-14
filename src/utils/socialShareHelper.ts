@@ -9,7 +9,7 @@ export interface ShareCardOptions {
   config?: EventConfig;
 }
 
-const DEFAULT_EVENT_IMAGE = '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_260a5969.jpeg';
+const DEFAULT_EVENT_IMAGE = '/assets/banner-oficial-simposio-saude-mental-carangola.jpg';
 const SUS_LOGO_IMAGE = '/assets/aistudio/Institutional_logo_displayed_ver__4c1d163d_2K__1__2b74545f.jpg';
 
 const loadImage = (src: string): Promise<HTMLImageElement | null> => {

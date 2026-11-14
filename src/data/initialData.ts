@@ -27,7 +27,7 @@ export const INITIAL_CERTIFICATE_DESIGN: CertificateDesignConfig = {
   footerQuote:
     '"Um espaço de diálogo, reflexão e construção coletiva sobre os desafios e os caminhos da Saúde Mental no nosso território."',
   showBannerImage: true,
-  bannerImageUrl: '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_96fea5bf.jpeg',
+  bannerImageUrl: '/assets/banner-oficial-simposio-saude-mental-carangola.jpg',
   showThematicAxes: true,
   showBottomWaves: true,
   showWatermark: true,
@@ -76,7 +76,7 @@ export const INITIAL_EVENT_CONFIG: EventConfig = {
   contactPhone: '(32) 3741-2500',
   maxSpots: 200,
   certificateWorkload: 8,
-  bannerImage: '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_260a5969.jpeg',
+  bannerImage: '/assets/banner-oficial-simposio-saude-mental-carangola.jpg',
   isRegistrationOpen: true,
   organizer: 'Secretaria Municipal de Saúde de Carangola · Colegiado Gestor da RAPS Microrregional',
   googleFormsUrl: '',

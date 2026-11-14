@@ -122,6 +122,19 @@ export const loadStoredData = () => {
       ...loadedConfig.badgeDesign
     };
   }
+  if (!loadedConfig.bannerImage || loadedConfig.bannerImage.includes('WhatsApp_Image')) {
+    loadedConfig.bannerImage = '/assets/banner-oficial-simposio-saude-mental-carangola.jpg';
+    configChanged = true;
+  }
+  if (
+    loadedConfig.certificateDesign &&
+    (!loadedConfig.certificateDesign.bannerImageUrl ||
+      loadedConfig.certificateDesign.bannerImageUrl.includes('WhatsApp_Image'))
+  ) {
+    loadedConfig.certificateDesign.bannerImageUrl =
+      '/assets/banner-oficial-simposio-saude-mental-carangola.jpg';
+    configChanged = true;
+  }
   if (configChanged) {
     saveToStorage(STORAGE_KEYS.CONFIG, loadedConfig);
   }
