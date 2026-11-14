@@ -14,7 +14,70 @@ const STORAGE_KEYS = {
   EVALUATIONS: 'carangola_sm_evaluations',
   OFFLINE_QUEUE: 'carangola_sm_offline_queue',
   LAST_REGISTERED: 'carangola_sm_last_registered',
-  CERT_DOWNLOADS: 'carangola_sm_cert_downloads'
+  CERT_DOWNLOADS: 'carangola_sm_cert_downloads',
+  DELETED_MATERIALS: 'carangola_sm_deleted_materials',
+  DELETED_REGISTRATIONS: 'carangola_sm_deleted_registrations',
+  DELETED_POSTS: 'carangola_sm_deleted_posts'
+};
+
+export const getDeletedMaterialIds = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_MATERIALS);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+export const addDeletedMaterialId = (id: string): void => {
+  try {
+    const set = getDeletedMaterialIds();
+    set.add(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_MATERIALS, JSON.stringify(Array.from(set)));
+    broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_MATERIALS);
+  } catch (err) {
+    console.error('Error persisting deleted material id:', err);
+  }
+};
+
+export const getDeletedRegistrationIds = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_REGISTRATIONS);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+export const addDeletedRegistrationId = (id: string): void => {
+  try {
+    const set = getDeletedRegistrationIds();
+    set.add(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_REGISTRATIONS, JSON.stringify(Array.from(set)));
+    broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_REGISTRATIONS);
+  } catch (err) {
+    console.error('Error persisting deleted registration id:', err);
+  }
+};
+
+export const getDeletedPostIds = (): Set<string> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_POSTS);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+};
+
+export const addDeletedPostId = (id: string): void => {
+  try {
+    const set = getDeletedPostIds();
+    set.add(id);
+    localStorage.setItem(STORAGE_KEYS.DELETED_POSTS, JSON.stringify(Array.from(set)));
+    broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_POSTS);
+  } catch (err) {
+    console.error('Error persisting deleted post id:', err);
+  }
 };
 
 export const loadStoredData = () => {
@@ -63,14 +126,17 @@ export const loadStoredData = () => {
     saveToStorage(STORAGE_KEYS.CONFIG, loadedConfig);
   }
 
-  const loadedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
+  const deletedMatIds = getDeletedMaterialIds();
+  const loadedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS)
+    .filter((m) => !deletedMatIds.has(m.id));
   const officialIds = new Set(INITIAL_MATERIALS.map((m) => m.id));
   const countsById = new Map(loadedMaterials.map((m) => [m.id, m.downloadsCount || 0]));
 
-  // Keep any custom documents uploaded via the Admin Panel
+  // Keep any custom documents uploaded via the Admin Panel (unless explicitly deleted)
   const adminMaterials = loadedMaterials.filter(
     (m) =>
       !officialIds.has(m.id) &&
+      !deletedMatIds.has(m.id) &&
       m.id !== 'mat-6' &&
       (Boolean(m.createdAt) ||
         m.fileUrl?.startsWith('firestore-chunked://') ||
@@ -79,12 +145,14 @@ export const loadStoredData = () => {
   );
 
   const syncedMaterials: DownloadMaterial[] = [
-    ...INITIAL_MATERIALS.map((initMat) => ({
-      ...initMat,
-      downloadsCount: Math.max(initMat.downloadsCount, countsById.get(initMat.id) || 0)
-    })),
+    ...INITIAL_MATERIALS
+      .filter((initMat) => !deletedMatIds.has(initMat.id))
+      .map((initMat) => ({
+        ...initMat,
+        downloadsCount: Math.max(initMat.downloadsCount, countsById.get(initMat.id) || 0)
+      })),
     ...adminMaterials
-  ];
+  ].filter((m) => !deletedMatIds.has(m.id));
 
   const hasDiff =
     loadedMaterials.length !== syncedMaterials.length ||
@@ -97,7 +165,9 @@ export const loadStoredData = () => {
     saveToStorage(STORAGE_KEYS.MATERIALS, syncedMaterials);
   }
 
-  const rawPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, INITIAL_SOCIAL_POSTS);
+  const deletedPostIds = getDeletedPostIds();
+  const rawPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, INITIAL_SOCIAL_POSTS)
+    .filter((p) => !deletedPostIds.has(p.id));
   const existingIds = new Set(rawPosts.map((p) => p.id));
   const legacyOnly =
     rawPosts.length <= 4 &&
@@ -110,17 +180,19 @@ export const loadStoredData = () => {
   if (legacyOnly) {
     // Upgrade legacy 4-post cache cleanly to the 8 newest-first paginated posts, keeping likes count/state when matched
     const legacyByContent = new Map(rawPosts.map((p) => [p.authorName, p]));
-    mergedPosts = INITIAL_SOCIAL_POSTS.map((freshPost) => {
-      const prev = legacyByContent.get(freshPost.authorName);
-      if (prev) {
-        return {
-          ...freshPost,
-          likes: Math.max(freshPost.likes, prev.likes),
-          hasLiked: Boolean(prev.hasLiked)
-        };
-      }
-      return freshPost;
-    });
+    mergedPosts = INITIAL_SOCIAL_POSTS
+      .filter((freshPost) => !deletedPostIds.has(freshPost.id))
+      .map((freshPost) => {
+        const prev = legacyByContent.get(freshPost.authorName);
+        if (prev) {
+          return {
+            ...freshPost,
+            likes: Math.max(freshPost.likes, prev.likes),
+            hasLiked: Boolean(prev.hasLiked)
+          };
+        }
+        return freshPost;
+      });
     postsChanged = true;
   } else {
     mergedPosts = rawPosts.map((post, index) => {
@@ -138,7 +210,7 @@ export const loadStoredData = () => {
 
     // If user didn't add extra initial posts yet and has < 5 posts, append missing seeded posts with older timestamps
     if (existingIds.size < INITIAL_SOCIAL_POSTS.length) {
-      const missingSeeds = INITIAL_SOCIAL_POSTS.filter((sp) => !existingIds.has(sp.id));
+      const missingSeeds = INITIAL_SOCIAL_POSTS.filter((sp) => !existingIds.has(sp.id) && !deletedPostIds.has(sp.id));
       if (missingSeeds.length > 0 && rawPosts.length <= 5) {
         mergedPosts = [...mergedPosts, ...missingSeeds];
         postsChanged = true;
@@ -146,13 +218,16 @@ export const loadStoredData = () => {
     }
   }
 
+  mergedPosts = mergedPosts.filter((p) => !deletedPostIds.has(p.id));
   mergedPosts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
   if (postsChanged) {
     saveToStorage(STORAGE_KEYS.POSTS, mergedPosts);
   }
 
-  const rawRegistrations = getItem<Registration[]>(STORAGE_KEYS.REGISTRATIONS, INITIAL_REGISTRATIONS);
+  const deletedRegIds = getDeletedRegistrationIds();
+  const rawRegistrations = getItem<Registration[]>(STORAGE_KEYS.REGISTRATIONS, INITIAL_REGISTRATIONS)
+    .filter((r) => !deletedRegIds.has(r.id));
   let registrationsNormalized = false;
   const normalizedRegistrations = rawRegistrations.map((reg) => {
     // Regra estrita: somente participantes credenciados ('presente') podem ter certificado liberado

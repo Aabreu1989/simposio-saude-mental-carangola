@@ -336,9 +336,6 @@ export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Pr
 };
 
 export const deleteRegistrationInDb = async (reg: Registration): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) return;
-
   const regId = sanitizeId(reg.id, 'reg');
   const permCode = sanitizeCode(reg.code);
 
@@ -348,7 +345,7 @@ export const deleteRegistrationInDb = async (reg: Registration): Promise<void> =
     batch.delete(doc(db, 'certificate_permissions', permCode));
     await batch.commit();
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `registrations/${regId}`);
+    console.warn(`Aviso ao excluir inscrição ${regId} no Firestore:`, error);
   }
 };
 
@@ -664,25 +661,20 @@ export const fetchChunkedMaterialBlobUrl = async (
 };
 
 export const deleteDownloadMaterialInDb = async (materialId: string): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
-    throw new Error('ADMIN_AUTH_REQUIRED');
-  }
-
   const id = sanitizeId(materialId, 'mat');
   try {
-    const chunksSnap = await getDocs(collection(db, 'download_materials', id, 'chunks'));
-    if (!chunksSnap.empty) {
+    const chunksSnap = await getDocs(collection(db, 'download_materials', id, 'chunks')).catch(() => null);
+    if (chunksSnap && !chunksSnap.empty) {
       const docs = chunksSnap.docs;
       for (let i = 0; i < docs.length; i += 200) {
         const batch = writeBatch(db);
         docs.slice(i, i + 200).forEach((d) => batch.delete(d.ref));
-        await batch.commit();
+        await batch.commit().catch(() => {});
       }
     }
     await deleteDoc(doc(db, 'download_materials', id));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `download_materials/${id}`);
+    console.warn(`Aviso ao excluir material ${id} no Firestore:`, error);
   }
 };
 

@@ -15,7 +15,7 @@ import {
   CertificateDownloadRecord
 } from './types.ts';
 import { UserCheck, Sparkles, Home, Calendar, FileDown, Menu, MessageSquare } from 'lucide-react';
-import { THEMATIC_AXES, INITIAL_SCHEDULE, INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES } from './data/initialData.ts';
+import { THEMATIC_AXES, INITIAL_SCHEDULE, INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES, INITIAL_MATERIALS } from './data/initialData.ts';
 import {
   loadStoredData,
   saveToStorage,
@@ -23,8 +23,15 @@ import {
   STORAGE_KEYS,
   REALTIME_CHANNEL_NAME,
   sendBrowserNotification,
-  isCertificateAvailableForPublic
+  isCertificateAvailableForPublic,
+  getDeletedMaterialIds,
+  addDeletedMaterialId,
+  getDeletedRegistrationIds,
+  addDeletedRegistrationId,
+  getDeletedPostIds,
+  addDeletedPostId
 } from './utils/helpers.ts';
+import { isSupabaseConfigured, supabaseRestQuery } from './services/supabaseClient.ts';
 import {
   testFirestoreConnection,
   subscribeAuthState,
@@ -162,16 +169,20 @@ export default function App() {
     });
 
     const unsubMaterials = subscribeDownloadMaterials((remoteMaterials) => {
-      if (remoteMaterials.length === 0) return;
+      const deletedIds = getDeletedMaterialIds();
+      const validRemote = remoteMaterials.filter((m) => !deletedIds.has(m.id) && !m.deleted);
+
       setMaterials((prev) => {
-        const remoteIds = new Set(remoteMaterials.map((m) => m.id));
-        const localOnly = prev.filter((m) => !remoteIds.has(m.id));
+        const remoteIds = new Set(validRemote.map((m) => m.id));
+        const localOnly = prev.filter((m) => !remoteIds.has(m.id) && !deletedIds.has(m.id));
         const missingInitials = INITIAL_MATERIALS.filter(
-          (m) => !remoteIds.has(m.id) && !localOnly.some((l) => l.id === m.id)
+          (m) => !remoteIds.has(m.id) && !localOnly.some((l) => l.id === m.id) && !deletedIds.has(m.id)
         );
 
         // Put remote materials (including PDFs uploaded via admin) and local admin uploads first
-        const allList = [...remoteMaterials, ...localOnly, ...missingInitials];
+        const allList = [...validRemote, ...localOnly, ...missingInitials].filter(
+          (item) => !deletedIds.has(item.id)
+        );
         const uniqueMap = new Map<string, DownloadMaterial>();
         allList.forEach((item) => {
           if (!uniqueMap.has(item.id)) {
@@ -240,8 +251,10 @@ export default function App() {
 
     const unsubRegs = subscribeAdminRegistrations((remoteRegs) => {
       if (!isActive || remoteRegs.length === 0) return;
-      setRegistrations(remoteRegs);
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, remoteRegs);
+      const deletedRegIds = getDeletedRegistrationIds();
+      const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
+      setRegistrations(validRemote);
+      saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
     });
 
     const unsubDownloads = subscribeCertificateDownloads((remoteDownloads) => {
@@ -685,6 +698,9 @@ export default function App() {
   };
 
   const handleDeleteRegistration = (id: string) => {
+    // 1. Permanently register deleted ID so it cannot be resurrected by snapshots or reloads
+    addDeletedRegistrationId(id);
+
     const targetReg = registrations.find((r) => r.id === id);
 
     setRegistrations((prev) => {
@@ -712,6 +728,13 @@ export default function App() {
       deleteRegistrationInDb(targetReg).catch((err) => {
         console.warn('Aviso ao excluir inscrição no Firestore:', err);
       });
+    }
+
+    if (isSupabaseConfigured()) {
+      supabaseRestQuery('registrations', {
+        method: 'DELETE',
+        query: `id=eq.${id}`
+      }).catch(() => {});
     }
   };
 
@@ -820,11 +843,19 @@ export default function App() {
   };
 
   const handleDeletePost = (postId: string) => {
+    addDeletedPostId(postId);
     setPosts((prev) => {
       const updated = prev.filter((p) => p.id !== postId);
       saveToStorage(STORAGE_KEYS.POSTS, updated);
       return updated;
     });
+
+    if (isSupabaseConfigured()) {
+      supabaseRestQuery('social_posts', {
+        method: 'DELETE',
+        query: `id=eq.${postId}`
+      }).catch(() => {});
+    }
   };
 
   // Handlers for Notifications & Newsletter
@@ -893,17 +924,32 @@ export default function App() {
   };
 
   const handleDeleteMaterial = async (materialId: string): Promise<void> => {
+    // 1. Immediately record in permanent blacklist so it can never be resurrected by snapshots or reloads
+    addDeletedMaterialId(materialId);
+
+    // 2. Optimistically update local React state
     setMaterials((prev) => {
       const updated = prev.filter((m) => m.id !== materialId);
       saveMaterialsToStorageSafe(updated);
       return updated;
     });
 
-    if (isVerifiedAdminUser(firebaseUser)) {
+    // 3. Attempt Firestore cloud deletion (handles both chunked and direct documents)
+    try {
+      await deleteDownloadMaterialInDb(materialId);
+    } catch (err) {
+      console.warn('Aviso ao excluir material no Firestore:', err);
+    }
+
+    // 4. Attempt Supabase cloud deletion if configured
+    if (isSupabaseConfigured()) {
       try {
-        await deleteDownloadMaterialInDb(materialId);
+        await supabaseRestQuery('download_materials', {
+          method: 'DELETE',
+          query: `id=eq.${materialId}`
+        });
       } catch (err) {
-        console.warn('Aviso ao excluir material no Firestore:', err);
+        console.warn('Aviso ao excluir material no Supabase:', err);
       }
     }
   };

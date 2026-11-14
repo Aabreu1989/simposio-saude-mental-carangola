@@ -134,6 +134,7 @@ export interface DownloadMaterial {
   createdAt?: string;
   updatedAt?: string;
   pendingCloudSync?: boolean;
+  deleted?: boolean;
 }
 
 export interface SocialPost {

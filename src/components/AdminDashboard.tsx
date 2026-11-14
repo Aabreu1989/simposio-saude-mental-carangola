@@ -3568,8 +3568,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
 
                           <button
-                            onClick={() => handleDeleteMaterialItem(mat)}
-                            className="p-1.5 rounded-lg border transition-colors cursor-pointer border-rose-200 text-rose-600 hover:bg-rose-50"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteMaterialItem(mat);
+                            }}
+                            className="p-1.5 rounded-lg border transition-colors cursor-pointer border-rose-200 text-rose-600 hover:bg-rose-50 hover:border-rose-300"
                             title="Excluir este documento"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -4674,9 +4678,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   ) : newMaterialForm.fileName ? (
                     <div className="space-y-1">
-                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Arquivo Carregado ({newMaterialForm.format})!</span>
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Arquivo Carregado ({newMaterialForm.format})!</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setNewMaterialForm({
+                              ...newMaterialForm,
+                              fileUrl: '',
+                              fileName: '',
+                              size: '1.2 MB'
+                            });
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-300 transition-colors cursor-pointer z-10"
+                          title="Remover anexo selecionado"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-600" />
+                          <span>Remover anexo</span>
+                        </button>
                       </div>
                       <div className={`text-xs font-semibold truncate px-2 ${theme.textHeading}`}>
                         {newMaterialForm.fileName}
@@ -4885,7 +4908,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Delete Attendee Confirmation Modal */}
       {attendeeToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in">
           <div className="w-full max-w-md bg-white rounded-2xl p-5 sm:p-6 shadow-2xl border border-stone-200 space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
@@ -4947,7 +4970,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Delete Post Confirmation Modal */}
       {postToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-white rounded-2xl p-5 sm:p-6 shadow-2xl border border-stone-200 space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
@@ -4990,7 +5013,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Delete Material Confirmation Modal */}
       {materialToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
           <div className="w-full max-w-md bg-white rounded-2xl p-5 sm:p-6 shadow-2xl border border-stone-200 space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
