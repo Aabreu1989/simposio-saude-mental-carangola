@@ -414,22 +414,39 @@ export const generateCertificateHTML = (
       margin-top: 2px;
     }
 
-    /* Print Overrides */
+    /* Print Overrides: Exact A4 Landscape (297mm x 210mm) */
     @media print {
+      @page {
+        size: A4 landscape !important;
+        margin: 0 !important;
+      }
       .screen-control-bar {
         display: none !important;
       }
       body {
-        margin: 0;
-        padding: 0;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 297mm !important;
+        height: 210mm !important;
         background: #ffffff !important;
+        overflow: hidden !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
       .certificate-sheet {
         box-shadow: none !important;
         margin: 0 !important;
+        width: 297mm !important;
+        height: 210mm !important;
+        max-width: 297mm !important;
+        max-height: 210mm !important;
         border-width: 8px !important;
-        max-width: 100% !important;
-        page-break-inside: avoid;
+        border-radius: 0 !important;
+        box-sizing: border-box !important;
+        page-break-inside: avoid !important;
+        page-break-after: avoid !important;
+        break-inside: avoid !important;
+        overflow: hidden !important;
       }
     }
   </style>

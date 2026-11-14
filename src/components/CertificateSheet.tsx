@@ -54,9 +54,9 @@ export const CertificateSheet: React.FC<CertificateSheetProps> = ({
   return (
     <div
       id={id}
-      className={`print-certificate-container relative rounded-2xl sm:rounded-3xl p-5 sm:p-10 shadow-2xl overflow-hidden text-stone-800 ${fontClass}`}
+      className={`print-certificate-container relative rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-7 shadow-2xl overflow-hidden text-stone-800 w-full max-w-[1080px] mx-auto sm:aspect-[297/210] flex flex-col justify-between ${fontClass}`}
       style={{
-        minHeight: '600px',
+        minHeight: '520px',
         backgroundColor: design.backgroundColor,
         backgroundImage: backgroundPattern,
         backgroundSize: design.layoutTheme === 'raps_waves' ? '24px 24px, 100% 100%' : undefined,

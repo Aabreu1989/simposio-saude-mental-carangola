@@ -231,7 +231,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
       const filename = `certificado_sus_${cleanName}_${foundAttendee.code}.pdf`;
 
       const options = {
-        margin: [4, 4, 4, 4],
+        margin: [0, 0, 0, 0],
         filename,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: {
@@ -239,9 +239,11 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
           useCORS: true,
           logging: false,
           letterRendering: true,
-          backgroundColor: config.certificateDesign?.backgroundColor || '#faf8f5',
+          backgroundColor: config.certificateDesign?.backgroundColor || '#ffffff',
           scrollY: 0,
-          scrollX: 0
+          scrollX: 0,
+          windowWidth: 1122, // 297mm @ 96 DPI
+          windowHeight: 794  // 210mm @ 96 DPI
         },
         jsPDF: {
           unit: 'mm',
@@ -286,7 +288,51 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs overflow-y-auto">
-      <style>{`@media print { @page { size: landscape; margin: 6mm; } }`}</style>
+      <style>{`
+        @media print {
+          @page {
+            size: A4 landscape !important;
+            margin: 0 !important;
+          }
+          html, body {
+            width: 297mm !important;
+            height: 210mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            overflow: hidden !important;
+          }
+          body * {
+            visibility: hidden !important;
+          }
+          #certificado-oficial-impressao,
+          #certificado-oficial-impressao * {
+            visibility: visible !important;
+          }
+          #certificado-oficial-impressao {
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 297mm !important;
+            height: 210mm !important;
+            max-width: 297mm !important;
+            max-height: 210mm !important;
+            margin: 0 !important;
+            box-sizing: border-box !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            page-break-after: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            overflow: hidden !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
       <div className="relative w-full max-w-5xl bg-[#faf8f5] rounded-3xl shadow-2xl border border-stone-200 overflow-hidden my-3 sm:my-6">
         {/* Modal Toolbar (no-print) */}
         <div className="no-print px-5 py-3.5 sm:px-6 sm:py-4 bg-[#0a3641] text-white flex items-center justify-between border-b border-[#0f4b59]">
