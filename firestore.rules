@@ -31,7 +31,7 @@ service cloud.firestore {
       return isSignedIn() &&
         request.auth.token.email_verified == true &&
         (
-          request.auth.token.email == 'amandajhonnes@yahoo.com.br' ||
+          request.auth.token.email in ['farmaciademinas.marketing@gmail.com', 'amandajhonnes@yahoo.com.br'] ||
           exists(/databases/$(database)/documents/admins/$(request.auth.uid))
         );
     }

@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS public.event_config (
     location_city TEXT NOT NULL,
     location_state TEXT NOT NULL,
     certificate_validation_url TEXT,
-    manager_email TEXT NOT NULL DEFAULT 'amandajhonnes@yahoo.com.br',
+    manager_email TEXT NOT NULL DEFAULT 'farmaciademinas.marketing@gmail.com',
     certificate_design JSONB,
     badge_design JSONB,
     emailjs_config JSONB,

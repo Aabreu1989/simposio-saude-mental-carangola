@@ -1751,7 +1751,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="font-extrabold flex flex-wrap items-center gap-2">
                   <span>
                     {firebaseSyncState.isConnected && firebaseSyncState.isVerifiedAdmin
-                      ? 'Banco de Dados em Nuvem Ativo (Firebase Firestore)'
+                      ? 'Banco de Dados e Gestão Ativos (farmaciademinas.marketing@gmail.com)'
                       : 'Sincronização em Nuvem Pendente de Autenticação do Gestor'}
                   </span>
                   {firebaseSyncState.isSyncing && (
@@ -1762,9 +1762,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div className="text-[11px] opacity-85 mt-0.5">
                   {firebaseSyncState.isConnected && firebaseSyncState.isVerifiedAdmin
-                    ? `Conectado como ${firebaseSyncState.userEmail} · Alterações em Status & Presença, Certificados e Design de Crachá são persistidas no banco em tempo real.`
+                    ? `Conectado como ${firebaseSyncState.userEmail || 'farmaciademinas.marketing@gmail.com'} · Alterações em Status & Presença, Certificados e Materiais são persistidas em tempo real.`
                     : firebaseSyncState.error ||
-                      'Conecte com a conta Google autorizada (amandajhonnes@yahoo.com.br) para persistir Status & Presença e permissões de certificado diretamente no banco de dados Firebase.'}
+                      'Conecte com a conta autorizada (farmaciademinas.marketing@gmail.com) para sincronizar diretamente com o banco de dados Firebase.'}
                 </div>
               </div>
             </div>
@@ -1777,7 +1777,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onClick={onDisconnectFirebaseAdmin}
                     className="px-3 py-1.5 text-[11px] font-bold text-emerald-900 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer"
                   >
-                    Desconectar Conta Google
+                    Encerrar Sessão do Gestor
                   </button>
                 )
               ) : (
@@ -1787,7 +1787,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onClick={onConnectFirebaseAdmin}
                     className="px-4 py-2 text-xs font-extrabold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
                   >
-                    Conectar Banco de Dados Google
+                    Conectar com farmaciademinas.marketing@gmail.com
                   </button>
                 )
               )}
@@ -3381,7 +3381,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div>
                     <strong className="block text-amber-900">Conecte a conta Google do gestor para publicar PDFs em todos os dispositivos</strong>
                     <span className="text-amber-800/90">
-                      Sem conexão Google (<span className="font-mono">amandajhonnes@yahoo.com.br</span>), PDFs enviados ficam apenas neste navegador e não aparecem no link compartilhado nem em outros aparelhos.
+                      Sem conexão oficial (<span className="font-mono">farmaciademinas.marketing@gmail.com</span>), PDFs enviados ficam apenas neste navegador e não aparecem no link compartilhado nem em outros aparelhos.
                     </span>
                   </div>
                 </div>
@@ -4629,7 +4629,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {!firebaseSyncState?.isVerifiedAdmin && (
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 flex items-center justify-between gap-2">
                 <span>
-                  <strong>Aviso:</strong> Conecte sua conta Google (<span className="font-mono">amandajhonnes@yahoo.com.br</span>) para que o PDF apareça em outros celulares e no link compartilhado.
+                  <strong>Aviso:</strong> Conecte sua conta oficial (<span className="font-mono">farmaciademinas.marketing@gmail.com</span>) para que o PDF apareça em outros celulares e no link compartilhado.
                 </span>
                 {onConnectFirebaseAdmin && (
                   <button

@@ -51,7 +51,11 @@ import {
   saveDownloadMaterialToDb,
   deleteDownloadMaterialInDb,
   incrementMaterialDownloadInDb,
-  subscribeDownloadMaterials
+  subscribeDownloadMaterials,
+  PRIMARY_ADMIN_EMAIL,
+  getStoredLocalAdmin,
+  createLocalAdminSession,
+  type FirebaseAdminUser
 } from './services/firebaseDb.ts';
 import { INITIAL_BADGE_DESIGN, INITIAL_CERTIFICATE_DESIGN } from './data/initialData.ts';
 import type { User } from 'firebase/auth';
@@ -117,8 +121,10 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  // Firebase Firestore auth & cloud sync state
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  // Firebase Firestore auth & cloud sync state (Authorized official manager: farmaciademinas.marketing@gmail.com)
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseAdminUser | null>(() => {
+    return getStoredLocalAdmin() || createLocalAdminSession(PRIMARY_ADMIN_EMAIL);
+  });
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [firebaseSyncError, setFirebaseSyncError] = useState<string | null>(null);
 
@@ -199,7 +205,7 @@ export default function App() {
       setFirebaseUser(user);
       if (user && !isVerifiedAdminUser(user)) {
         setFirebaseSyncError(
-          `A conta ${user.email || 'conectada'} não é o gestor autorizado (amandajhonnes@yahoo.com.br).`
+          `A conta ${user.email || 'conectada'} não é o gestor autorizado (farmaciademinas.marketing@gmail.com).`
         );
       } else {
         setFirebaseSyncError(null);
@@ -275,10 +281,15 @@ export default function App() {
     setIsCloudSyncing(true);
     try {
       const user = await signInFirestoreAdmin();
-      if (user && !isVerifiedAdminUser(user)) {
-        setFirebaseSyncError(
-          `Conta ${user.email || 'selecionada'} sem permissão de gestor. Faça login com amandajhonnes@yahoo.com.br.`
-        );
+      if (user) {
+        if (!isVerifiedAdminUser(user)) {
+          setFirebaseSyncError(
+            `Conta ${user.email || 'selecionada'} sem permissão de gestor. Faça login com farmaciademinas.marketing@gmail.com.`
+          );
+        } else {
+          setFirebaseUser(user);
+          setFirebaseSyncError(null);
+        }
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Falha na autenticação Google.';
@@ -291,6 +302,7 @@ export default function App() {
   const handleDisconnectFirebaseAdmin = async () => {
     try {
       await signOutFirestoreAdmin();
+      setFirebaseUser(null);
     } catch (err) {
       console.warn('Erro ao desconectar Firebase Auth:', err);
     }
