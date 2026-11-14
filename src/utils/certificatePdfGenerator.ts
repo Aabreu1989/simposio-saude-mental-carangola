@@ -17,9 +17,10 @@ export const generateCertificateHTML = (
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const design = getCertificateDesign(config);
   const bodyText = formatCertificateBodyText(design.bodyTemplate, config);
-  const bannerSrc = design.bannerImageUrl.startsWith('http') || design.bannerImageUrl.startsWith('data:')
-    ? design.bannerImageUrl
-    : `${origin}${design.bannerImageUrl}`;
+  const rawBanner = design.bannerImageUrl || config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg';
+  const bannerSrc = rawBanner.startsWith('http') || rawBanner.startsWith('data:')
+    ? rawBanner
+    : `${origin}${rawBanner.startsWith('/') ? '' : '/'}${rawBanner}`;
   const fontStack =
     design.fontFamily === 'serif'
       ? 'Georgia, "Times New Roman", Times, serif'
@@ -198,19 +199,24 @@ export const generateCertificateHTML = (
       color: ${design.primaryColor};
     }
 
-    /* Banner Image: Exact Match to WhatsApp Visual */
+    /* Banner Image: Exact Match to Official Visual Identity */
     .official-banner-wrap {
       width: 100%;
       text-align: center;
       margin: 4px 0 10px 0;
-      background: transparent;
+      background: #ffffff;
+      padding: 6px 12px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
     }
     .official-banner-img {
       max-width: 100%;
-      max-height: 140px;
+      max-height: 145px;
       height: auto;
       object-fit: contain;
       display: inline-block;
+      border-radius: 8px;
     }
 
     /* Diploma Title & Recipient */

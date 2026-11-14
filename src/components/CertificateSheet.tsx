@@ -151,13 +151,14 @@ export const CertificateSheet: React.FC<CertificateSheetProps> = ({
       {/* HERO BANNER ARTWORK & QUOTE */}
       {(design.showBannerImage || design.footerQuote.trim()) && (
         <div className="relative z-10 my-3 sm:my-4 flex flex-col items-center justify-center">
-          {design.showBannerImage && design.bannerImageUrl && (
-            <div className="w-full flex justify-center items-center bg-white/75 p-2 sm:p-3 rounded-2xl border border-stone-200/80 shadow-xs">
+          {design.showBannerImage && (
+            <div className="w-full flex justify-center items-center bg-white/95 p-2 sm:p-3 rounded-2xl border border-stone-200/90 shadow-sm relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-r from-teal-500/5 via-amber-500/5 to-teal-500/5 pointer-events-none" />
               <img
-                src={design.bannerImageUrl}
+                src={design.bannerImageUrl || config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'}
                 alt={config.editionTitle}
                 referrerPolicy="no-referrer"
-                className="w-full max-h-40 sm:max-h-52 object-contain rounded-xl"
+                className="w-full max-h-36 sm:max-h-52 object-contain rounded-xl relative z-10"
               />
             </div>
           )}
