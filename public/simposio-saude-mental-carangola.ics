@@ -1,0 +1,40 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//SUS Carangola//1º Simposio de Saude Mental//PT-BR
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:1º Simpósio de Saúde Mental de Carangola
+X-WR-TIMEZONE:America/Sao_Paulo
+BEGIN:VTIMEZONE
+TZID:America/Sao_Paulo
+X-LIC-LOCATION:America/Sao_Paulo
+BEGIN:STANDARD
+TZOFFSETFROM:-0300
+TZOFFSETTO:-0300
+TZNAME:BRT
+DTSTART:19700101T000000
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:simposio-saude-mental-carangola-20261208@sus.mg.gov.br
+DTSTAMP:20261109T000000Z
+DTSTART:20261208T113000Z
+DTEND:20261208T190000Z
+SUMMARY:1º Simpósio de Saúde Mental da Microrregião de Carangola
+DESCRIPTION:Um espaço de diálogo\, reflexão e construção coletiva sobre os desafios e os caminhos da Saúde Mental no nosso território.\n\nEixos Temáticos Estratégicos:\n1. Fluxograma da RAPS (Atenção Básica & CAPS)\n2. Hospital Geral\, Leitos de Retaguarda e Urgência\n3. Judicialização da Saúde Mental e Cuidado em Liberdade\n\nCertificado oficial SUS de 8 horas.\nLocal: UEMG Carangola - Praça Cel. Maximiano\, 180 - Centro\, Carangola - MG\, 36800-000
+LOCATION:UEMG Carangola\, Praça Cel. Maximiano\, 180 - Centro\, Carangola - MG\, 36800-000
+STATUS:CONFIRMED
+TRANSP:OPAQUE
+SEQUENCE:0
+BEGIN:VALARM
+TRIGGER:-P1D
+ACTION:DISPLAY
+DESCRIPTION:Lembrete: O 1º Simpósio de Saúde Mental de Carangola é amanhã!
+END:VALARM
+BEGIN:VALARM
+TRIGGER:-PT2H
+ACTION:DISPLAY
+DESCRIPTION:Lembrete: O Simpósio de Saúde Mental de Carangola começa em 2 horas!
+END:VALARM
+END:VEVENT
+END:VCALENDAR

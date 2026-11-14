@@ -1,0 +1,344 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidCode(code) {
+      return code is string && code.size() >= 3 && code.size() <= 32 && code.matches('^[A-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email_verified == true &&
+        (
+          request.auth.token.email == 'amandajhonnes@yahoo.com.br' ||
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+    }
+
+    function isValidOptionalString(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isValidOptionalBool(data, field) {
+      return !(field in data) || (data[field] is bool);
+    }
+
+    function isValidOptionalNumber(data, field) {
+      return !(field in data) || (data[field] is number && data[field] >= 0);
+    }
+
+    function isValidOptionalMap(data, field) {
+      return !(field in data) || (data[field] is map);
+    }
+
+    function isValidRegistration(data) {
+      return data.keys().hasAll([
+          'id', 'code', 'fullName', 'cpf', 'email', 'phone',
+          'city', 'professionalRole', 'institution', 'axisInterest',
+          'status', 'registeredAt', 'certificateIssued'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'code', 'fullName', 'cpf', 'cns', 'email', 'phone',
+          'city', 'professionalRole', 'institution', 'axisInterest',
+          'accessibilityNeeds', 'status', 'registeredAt', 'checkedInAt',
+          'certificateIssued', 'certificateDownloaded', 'certificateDownloadedAt',
+          'certificateDownloadCount', 'notes', 'instagram', 'linkedin',
+          'otherSocial', 'ageGroup', 'educationLevel', 'susCareLevel',
+          'referralSource', 'acceptEmailNews', 'acceptWhatsappNews',
+          'origin', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        isValidCode(data.code) &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 160 &&
+        data.cpf is string && data.cpf.size() >= 11 && data.cpf.size() <= 20 &&
+        data.email is string && data.email.size() <= 160 &&
+        data.phone is string && data.phone.size() <= 32 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 100 &&
+        data.professionalRole is string && data.professionalRole.size() >= 2 && data.professionalRole.size() <= 120 &&
+        data.institution is string && data.institution.size() >= 1 && data.institution.size() <= 180 &&
+        data.axisInterest is string && data.axisInterest.size() >= 2 && data.axisInterest.size() <= 160 &&
+        data.status in ['confirmada', 'presente', 'cancelada'] &&
+        data.registeredAt is string && data.registeredAt.size() <= 40 &&
+        data.certificateIssued is bool &&
+        // Invariant: certificate can ONLY be issued when status is 'presente'
+        (data.certificateIssued == false || data.status == 'presente') &&
+        isValidOptionalString(data, 'cns', 32) &&
+        isValidOptionalString(data, 'accessibilityNeeds', 200) &&
+        isValidOptionalString(data, 'checkedInAt', 40) &&
+        isValidOptionalBool(data, 'certificateDownloaded') &&
+        isValidOptionalString(data, 'certificateDownloadedAt', 40) &&
+        isValidOptionalNumber(data, 'certificateDownloadCount') &&
+        isValidOptionalString(data, 'notes', 500) &&
+        isValidOptionalString(data, 'instagram', 120) &&
+        isValidOptionalString(data, 'linkedin', 200) &&
+        isValidOptionalString(data, 'otherSocial', 200) &&
+        isValidOptionalString(data, 'ageGroup', 40) &&
+        isValidOptionalString(data, 'educationLevel', 80) &&
+        isValidOptionalString(data, 'susCareLevel', 120) &&
+        isValidOptionalString(data, 'referralSource', 120) &&
+        isValidOptionalBool(data, 'acceptEmailNews') &&
+        isValidOptionalBool(data, 'acceptWhatsappNews') &&
+        (!( 'origin' in data ) || data.origin in ['portal', 'google_forms', 'presencial']);
+    }
+
+    function isValidCertificatePermission(data) {
+      return data.keys().hasAll(['code', 'registrationId', 'status', 'certificateIssued']) &&
+        data.keys().hasOnly([
+          'code', 'registrationId', 'status', 'certificateIssued',
+          'certificateDownloaded', 'certificateDownloadCount', 'checkedInAt',
+          'participantName', 'city', 'professionalRole', 'institution', 'updatedAt'
+        ]) &&
+        isValidCode(data.code) &&
+        isValidId(data.registrationId) &&
+        data.status in ['confirmada', 'presente', 'cancelada'] &&
+        data.certificateIssued is bool &&
+        // Invariant: certificate permission ONLY granted when accredited ('presente')
+        (data.certificateIssued == false || data.status == 'presente') &&
+        isValidOptionalBool(data, 'certificateDownloaded') &&
+        isValidOptionalNumber(data, 'certificateDownloadCount') &&
+        isValidOptionalString(data, 'checkedInAt', 40) &&
+        isValidOptionalString(data, 'participantName', 160) &&
+        isValidOptionalString(data, 'city', 100) &&
+        isValidOptionalString(data, 'professionalRole', 120) &&
+        isValidOptionalString(data, 'institution', 180);
+    }
+
+    function isValidCertificateDownload(data) {
+      return data.keys().hasAll(['id', 'registrationId', 'code', 'fullName', 'downloadedAt', 'method']) &&
+        data.keys().hasOnly([
+          'id', 'registrationId', 'code', 'fullName', 'cpf', 'city',
+          'professionalRole', 'institution', 'downloadedAt', 'method'
+        ]) &&
+        isValidId(data.id) &&
+        isValidId(data.registrationId) &&
+        isValidCode(data.code) &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 160 &&
+        data.downloadedAt is string && data.downloadedAt.size() <= 40 &&
+        data.method in ['pdf', 'print'] &&
+        isValidOptionalString(data, 'cpf', 20) &&
+        isValidOptionalString(data, 'city', 100) &&
+        isValidOptionalString(data, 'professionalRole', 120) &&
+        isValidOptionalString(data, 'institution', 180);
+    }
+
+    function isValidEventConfig(data) {
+      return data.keys().hasAll(['editionTitle', 'regionTitle']) &&
+        data.keys().hasOnly([
+          'editionTitle', 'regionTitle', 'subtitle', 'eventDate', 'eventFullDate',
+          'eventHours', 'locationName', 'locationAddress', 'contactEmail', 'contactPhone',
+          'maxSpots', 'certificateWorkload', 'bannerImage', 'isRegistrationOpen', 'organizer',
+          'googleFormsUrl', 'googleSheetsSyncUrl', 'enableGoogleFormsOption',
+          'certificateDesign', 'badgeDesign', 'emailJsConfig', 'updatedAt'
+        ]) &&
+        data.editionTitle is string && data.editionTitle.size() >= 2 && data.editionTitle.size() <= 160 &&
+        data.regionTitle is string && data.regionTitle.size() >= 2 && data.regionTitle.size() <= 160 &&
+        isValidOptionalString(data, 'subtitle', 500) &&
+        isValidOptionalString(data, 'eventDate', 60) &&
+        isValidOptionalString(data, 'eventFullDate', 80) &&
+        isValidOptionalString(data, 'eventHours', 60) &&
+        isValidOptionalString(data, 'locationName', 120) &&
+        isValidOptionalString(data, 'locationAddress', 240) &&
+        isValidOptionalString(data, 'contactEmail', 160) &&
+        isValidOptionalString(data, 'contactPhone', 40) &&
+        isValidOptionalNumber(data, 'maxSpots') &&
+        isValidOptionalNumber(data, 'certificateWorkload') &&
+        isValidOptionalString(data, 'bannerImage', 300) &&
+        isValidOptionalBool(data, 'isRegistrationOpen') &&
+        isValidOptionalString(data, 'organizer', 240) &&
+        isValidOptionalString(data, 'googleFormsUrl', 400) &&
+        isValidOptionalString(data, 'googleSheetsSyncUrl', 400) &&
+        isValidOptionalBool(data, 'enableGoogleFormsOption') &&
+        isValidOptionalMap(data, 'certificateDesign') &&
+        isValidOptionalMap(data, 'badgeDesign') &&
+        isValidOptionalMap(data, 'emailJsConfig');
+    }
+
+    function isValidDownloadMaterial(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'category', 'author', 'format',
+          'size', 'description', 'pages', 'downloadsCount', 'fileUrl'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'title', 'category', 'author', 'format', 'size', 'description',
+          'pages', 'downloadsCount', 'fileUrl', 'chunkCount', 'fileName',
+          'mimeType', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 240 &&
+        data.category in ['Apostila', 'Legislação', 'Apresentação', 'Fluxograma', 'Cartilha'] &&
+        data.author is string && data.author.size() >= 2 && data.author.size() <= 200 &&
+        data.format in ['PDF', 'DOCX', 'ZIP'] &&
+        data.size is string && data.size.size() >= 1 && data.size.size() <= 40 &&
+        data.description is string && data.description.size() >= 2 && data.description.size() <= 2000 &&
+        data.pages is number && data.pages >= 1 && data.pages <= 2000 &&
+        data.downloadsCount is number && data.downloadsCount >= 0 &&
+        data.fileUrl is string && data.fileUrl.size() <= 600000 &&
+        isValidOptionalNumber(data, 'chunkCount') &&
+        isValidOptionalString(data, 'fileName', 240) &&
+        isValidOptionalString(data, 'mimeType', 120) &&
+        isValidOptionalString(data, 'createdAt', 40) &&
+        isValidOptionalString(data, 'updatedAt', 40);
+    }
+
+    function isValidMaterialChunk(data) {
+      return data.keys().hasAll(['index', 'data']) &&
+        data.keys().hasOnly(['index', 'data']) &&
+        data.index is number && data.index >= 0 && data.index <= 200 &&
+        data.data is string && data.data.size() >= 1 && data.data.size() <= 600000;
+    }
+
+    match /admins/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list, create, update, delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /registrations/{registrationId} {
+      // PII protected: only verified admin can read or list full registration documents
+      allow get: if isValidId(registrationId) && isAdmin();
+      allow list: if isAdmin();
+
+      // Public registrations start strictly as 'confirmada' and certificateIssued == false; admins can seed/import
+      allow create: if isValidId(registrationId) &&
+        isValidRegistration(incoming()) &&
+        incoming().id == registrationId &&
+        (
+          isAdmin() ||
+          (incoming().status == 'confirmada' && incoming().certificateIssued == false)
+        );
+
+      allow update: if isValidId(registrationId) &&
+        isAdmin() &&
+        isValidRegistration(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().registeredAt == existing().registeredAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'checkedInAt', 'certificateIssued', 'certificateDownloaded',
+          'certificateDownloadedAt', 'certificateDownloadCount', 'notes', 'updatedAt',
+          'fullName', 'city', 'professionalRole', 'institution', 'axisInterest'
+        ]);
+
+      allow delete: if isValidId(registrationId) && isAdmin();
+    }
+
+    match /certificate_permissions/{permissionId} {
+      // Non-PII public lookup by participant code for certificate verification
+      allow get: if isValidId(permissionId);
+      allow list: if isAdmin();
+
+      allow create: if isValidId(permissionId) &&
+        isValidCertificatePermission(incoming()) &&
+        incoming().code == permissionId &&
+        (
+          isAdmin() ||
+          (incoming().status == 'confirmada' && incoming().certificateIssued == false)
+        );
+
+      allow update: if isValidId(permissionId) &&
+        isValidCertificatePermission(incoming()) &&
+        incoming().code == existing().code &&
+        incoming().registrationId == existing().registrationId &&
+        (
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'certificateIssued', 'checkedInAt',
+              'certificateDownloaded', 'certificateDownloadCount',
+              'participantName', 'city', 'professionalRole', 'institution', 'updatedAt'
+            ])
+          ) ||
+          (
+            existing().status == 'presente' &&
+            existing().certificateIssued == true &&
+            incoming().status == 'presente' &&
+            incoming().certificateIssued == true &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'certificateDownloaded', 'certificateDownloadCount', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isValidId(permissionId) && isAdmin();
+    }
+
+    match /certificate_downloads/{downloadId} {
+      allow get: if isValidId(downloadId) && isAdmin();
+      allow list: if isAdmin();
+
+      // Only allow recording a download if admin OR participant code is accredited (status == 'presente' && certificateIssued == true)
+      allow create: if isValidId(downloadId) &&
+        isValidCertificateDownload(incoming()) &&
+        incoming().id == downloadId &&
+        (
+          isAdmin() ||
+          (
+            exists(/databases/$(database)/documents/certificate_permissions/$(incoming().code)) &&
+            get(/databases/$(database)/documents/certificate_permissions/$(incoming().code)).data.status == 'presente' &&
+            get(/databases/$(database)/documents/certificate_permissions/$(incoming().code)).data.certificateIssued == true
+          )
+        );
+
+      allow update, delete: if isValidId(downloadId) && isAdmin();
+    }
+
+    match /event_config/{configId} {
+      // Event configuration, certificate design, and custom badge design
+      allow get: if isValidId(configId);
+      allow list: if false;
+      allow create, update: if isValidId(configId) && isAdmin() && isValidEventConfig(incoming());
+      allow delete: if isValidId(configId) && isAdmin();
+    }
+
+    match /download_materials/{materialId} {
+      // Public repository materials visible and downloadable across all devices
+      allow get: if isValidId(materialId);
+      allow list: if true;
+      allow create: if isValidId(materialId) &&
+        isAdmin() &&
+        isValidDownloadMaterial(incoming()) &&
+        incoming().id == materialId;
+      allow update: if isValidId(materialId) &&
+        isValidDownloadMaterial(incoming()) &&
+        incoming().id == existing().id &&
+        (
+          isAdmin() ||
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['downloadsCount']) &&
+            incoming().downloadsCount == existing().downloadsCount + 1
+          )
+        );
+      allow delete: if isValidId(materialId) && isAdmin();
+
+      match /chunks/{chunkId} {
+        allow get: if isValidId(materialId) && isValidId(chunkId);
+        allow list: if true;
+        allow create, update: if isValidId(materialId) &&
+          isValidId(chunkId) &&
+          isAdmin() &&
+          isValidMaterialChunk(incoming()) &&
+          exists(/databases/$(database)/documents/download_materials/$(materialId));
+        allow delete: if isValidId(materialId) && isValidId(chunkId) && isAdmin();
+      }
+    }
+  }
+}

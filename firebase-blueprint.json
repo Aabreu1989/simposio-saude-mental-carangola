@@ -1,0 +1,470 @@
+{
+  "entities": {
+    "Registration": {
+      "title": "Registration",
+      "description": "Dados completos de inscrição, credenciamento presencial e elegibilidade para certificado de participante do Simpósio.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Identificador único do documento de inscrição."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$",
+          "description": "Código único do participante (ex: CAR-SM-001)."
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160,
+          "description": "Nome completo do participante."
+        },
+        "cpf": {
+          "type": "string",
+          "minLength": 11,
+          "maxLength": 20,
+          "description": "CPF do participante."
+        },
+        "cns": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Cartão Nacional de Saúde (opcional)."
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "E-mail do participante."
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Telefone ou WhatsApp do participante."
+        },
+        "city": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100,
+          "description": "Município de atuação ou residência."
+        },
+        "professionalRole": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Cargo ou categoria profissional."
+        },
+        "institution": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180,
+          "description": "Instituição ou unidade de saúde de lotação."
+        },
+        "axisInterest": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160,
+          "description": "Eixo temático de interesse."
+        },
+        "accessibilityNeeds": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Necessidades de acessibilidade informadas."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["confirmada", "presente", "cancelada"],
+          "description": "Status de credenciamento e presença do participante."
+        },
+        "registeredAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Carimbo ISO de inscrição."
+        },
+        "checkedInAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Carimbo ISO do credenciamento presencial."
+        },
+        "certificateIssued": {
+          "type": "boolean",
+          "description": "Permissão efetiva para acesso e impressão do certificado (somente true quando presente)."
+        },
+        "certificateDownloaded": {
+          "type": "boolean",
+          "description": "Indica se o participante já realizou o download do certificado."
+        },
+        "certificateDownloadedAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data/hora do último download do certificado."
+        },
+        "certificateDownloadCount": {
+          "type": "number",
+          "description": "Contador de downloads do certificado."
+        },
+        "origin": {
+          "type": "string",
+          "enum": ["portal", "google_forms", "presencial"],
+          "description": "Canal de origem da inscrição."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Data/hora de atualização do servidor."
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "fullName",
+        "cpf",
+        "email",
+        "phone",
+        "city",
+        "professionalRole",
+        "institution",
+        "axisInterest",
+        "status",
+        "registeredAt",
+        "certificateIssued"
+      ]
+    },
+    "CertificatePermission": {
+      "title": "CertificatePermission",
+      "description": "Espelho público sem PII contendo o status de presença e permissão de certificado por código do participante.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$",
+          "description": "Código único do participante."
+        },
+        "registrationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Referência ao documento de inscrição."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["confirmada", "presente", "cancelada"],
+          "description": "Status de presença do participante."
+        },
+        "certificateIssued": {
+          "type": "boolean",
+          "description": "Somente verdadeiro quando credenciado como presente."
+        },
+        "certificateDownloaded": {
+          "type": "boolean",
+          "description": "Indica se o certificado já foi baixado."
+        },
+        "certificateDownloadCount": {
+          "type": "number",
+          "description": "Total de downloads registrados."
+        },
+        "checkedInAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Horário do credenciamento presencial."
+        },
+        "participantName": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Nome do participante exibido na validação e certificado."
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Município do participante."
+        },
+        "professionalRole": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Categoria profissional exibida no certificado."
+        },
+        "institution": {
+          "type": "string",
+          "maxLength": 180,
+          "description": "Instituição de lotação."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Carimbo temporal de sincronização."
+        }
+      },
+      "required": ["code", "registrationId", "status", "certificateIssued"]
+    },
+    "CertificateDownload": {
+      "title": "CertificateDownload",
+      "description": "Registro de auditoria de downloads e impressões de certificados.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID do evento de download."
+        },
+        "registrationId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID da inscrição associada."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[A-Z0-9_\\-]+$",
+          "description": "Código do participante."
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160,
+          "description": "Nome do participante."
+        },
+        "city": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Município do participante."
+        },
+        "professionalRole": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Cargo do participante."
+        },
+        "institution": {
+          "type": "string",
+          "maxLength": 180,
+          "description": "Instituição do participante."
+        },
+        "downloadedAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data/hora do download."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["pdf", "print"],
+          "description": "Método utilizado."
+        }
+      },
+      "required": ["id", "registrationId", "code", "fullName", "downloadedAt", "method"]
+    },
+    "EventConfigDoc": {
+      "title": "EventConfigDoc",
+      "description": "Configurações gerais do simpósio, design do certificado e design personalizável do crachá.",
+      "type": "object",
+      "properties": {
+        "editionTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160,
+          "description": "Título principal do evento."
+        },
+        "regionTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160,
+          "description": "Subtítulo regional."
+        },
+        "eventDate": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Data resumida."
+        },
+        "eventHours": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Horário do evento."
+        },
+        "locationName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Local do evento."
+        },
+        "certificateDesign": {
+          "type": "object",
+          "description": "Configuração visual do certificado."
+        },
+        "badgeDesign": {
+          "type": "object",
+          "description": "Configuração visual personalizável do crachá."
+        },
+        "emailJsConfig": {
+          "type": "object",
+          "description": "Configuração pública da integração EmailJS para disparo automático de confirmações."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Última atualização."
+        }
+      },
+      "required": ["editionTitle", "regionTitle"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Registro de administradores autorizados no Painel do Gestor.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "E-mail verificado do gestor."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Papel administrativo."
+        }
+      },
+      "required": ["email", "role"]
+    },
+    "DownloadMaterialDoc": {
+      "title": "DownloadMaterialDoc",
+      "description": "Metadados e referência de documentos técnicos e PDFs disponíveis na Área de Downloads.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Identificador único do documento."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 240,
+          "description": "Título do material técnico."
+        },
+        "category": {
+          "type": "string",
+          "enum": ["Apostila", "Legislação", "Apresentação", "Fluxograma", "Cartilha"],
+          "description": "Categoria documental."
+        },
+        "author": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200,
+          "description": "Autoria ou órgão expedidor."
+        },
+        "format": {
+          "type": "string",
+          "enum": ["PDF", "DOCX", "ZIP"],
+          "description": "Formato do arquivo."
+        },
+        "size": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Tamanho legível do arquivo."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 2000,
+          "description": "Descrição técnica do conteúdo."
+        },
+        "pages": {
+          "type": "number",
+          "description": "Número estimado ou oficial de páginas."
+        },
+        "downloadsCount": {
+          "type": "number",
+          "description": "Contagem de downloads realizados."
+        },
+        "fileUrl": {
+          "type": "string",
+          "maxLength": 600000,
+          "description": "URL direta, caminho estático, marcador firestore-chunked:// ou data URI compacta."
+        },
+        "chunkCount": {
+          "type": "number",
+          "description": "Quantidade de fragmentos binários armazenados na subcoleção chunks."
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Nome original do arquivo enviado."
+        },
+        "mimeType": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "MIME type do documento."
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data/hora de criação em ISO."
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Data/hora da última atualização em ISO."
+        }
+      },
+      "required": ["id", "title", "category", "author", "format", "size", "description", "pages", "downloadsCount", "fileUrl"]
+    },
+    "MaterialChunk": {
+      "title": "MaterialChunk",
+      "description": "Fragmento Base64 de arquivo PDF grande para contornar o limite de 1 MiB por documento do Firestore.",
+      "type": "object",
+      "properties": {
+        "index": {
+          "type": "number",
+          "description": "Índice sequencial (0..N-1) do fragmento."
+        },
+        "data": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600000,
+          "description": "Conteúdo Base64 do fragmento."
+        }
+      },
+      "required": ["index", "data"]
+    }
+  },
+  "firestore": {
+    "/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/Registration" },
+      "description": "Coleção principal de inscritos, status de credenciamento e permissões de certificado (acesso completo ao gestor; criação pública validada)."
+    },
+    "/certificate_permissions/{permissionId}": {
+      "schema": { "$ref": "#/entities/CertificatePermission" },
+      "description": "Espelho público sem PII com status de presença e permissão efetiva de impressão/PDF de certificados por código."
+    },
+    "/certificate_downloads/{downloadId}": {
+      "schema": { "$ref": "#/entities/CertificateDownload" },
+      "description": "Log persistente de emissões/downloads de certificados."
+    },
+    "/event_config/{configId}": {
+      "schema": { "$ref": "#/entities/EventConfigDoc" },
+      "description": "Configurações globais do simpósio e modelos personalizados de certificado e crachá."
+    },
+    "/download_materials/{materialId}": {
+      "schema": { "$ref": "#/entities/DownloadMaterialDoc" },
+      "description": "Acervo persistente de PDFs e documentos de apoio publicados pelo gestor para acesso público em qualquer dispositivo."
+    },
+    "/download_materials/{materialId}/chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/MaterialChunk" },
+      "description": "Fragmentos Base64 dos PDFs anexados diretamente pelo Painel do Gestor."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Lista de gestores autorizados."
+    }
+  }
+}
