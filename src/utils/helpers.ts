@@ -64,69 +64,36 @@ export const loadStoredData = () => {
   }
 
   const loadedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
-  const latestMat2 = INITIAL_MATERIALS.find((m) => m.id === 'mat-2');
-  const latestMat3 = INITIAL_MATERIALS.find((m) => m.id === 'mat-3');
-  const latestMat4 = INITIAL_MATERIALS.find((m) => m.id === 'mat-4');
-  const latestMat5 = INITIAL_MATERIALS.find((m) => m.id === 'mat-5');
-  let materialsChanged = false;
-  const syncedMaterials = loadedMaterials.map((mat) => {
-    if (
-      latestMat2 &&
-      mat.id === 'mat-2' &&
-      (mat.fileUrl === '#' || mat.title.includes('Protocolo de Manejo de Crises Psiquiátricas'))
-    ) {
-      materialsChanged = true;
-      return {
-        ...latestMat2,
-        downloadsCount: mat.downloadsCount || latestMat2.downloadsCount
-      };
-    }
-    if (
-      latestMat3 &&
-      mat.id === 'mat-3' &&
-      (mat.fileUrl === '#' || mat.title.includes('Caderno Temático: A Lei 10.216/2001'))
-    ) {
-      materialsChanged = true;
-      return {
-        ...latestMat3,
-        downloadsCount: mat.downloadsCount || latestMat3.downloadsCount
-      };
-    }
-    if (
-      latestMat4 &&
-      mat.id === 'mat-4' &&
-      (mat.fileUrl === '#' || mat.title.includes('Apresentação Completa dos Palestrantes'))
-    ) {
-      materialsChanged = true;
-      return {
-        ...latestMat4,
-        downloadsCount: mat.downloadsCount || latestMat4.downloadsCount
-      };
-    }
-    if (
-      latestMat5 &&
-      mat.id === 'mat-5' &&
-      (mat.fileUrl === '#' || mat.title.includes('Cartilha do Agente Comunitário'))
-    ) {
-      materialsChanged = true;
-      return {
-        ...latestMat5,
-        downloadsCount: mat.downloadsCount || latestMat5.downloadsCount
-      };
-    }
-    return mat;
-  });
+  const officialIds = new Set(INITIAL_MATERIALS.map((m) => m.id));
+  const countsById = new Map(loadedMaterials.map((m) => [m.id, m.downloadsCount || 0]));
 
-  const hasMat6 = syncedMaterials.some((m) => m.id === 'mat-6');
-  if (!hasMat6) {
-    const mat6 = INITIAL_MATERIALS.find((m) => m.id === 'mat-6');
-    if (mat6) {
-      syncedMaterials.push(mat6);
-      materialsChanged = true;
-    }
-  }
+  // Keep any custom documents uploaded via the Admin Panel
+  const adminMaterials = loadedMaterials.filter(
+    (m) =>
+      !officialIds.has(m.id) &&
+      m.id !== 'mat-6' &&
+      (Boolean(m.createdAt) ||
+        m.fileUrl?.startsWith('firestore-chunked://') ||
+        Boolean(m.chunkCount && m.chunkCount > 0) ||
+        m.id.length > 8)
+  );
 
-  if (materialsChanged) {
+  const syncedMaterials: DownloadMaterial[] = [
+    ...INITIAL_MATERIALS.map((initMat) => ({
+      ...initMat,
+      downloadsCount: Math.max(initMat.downloadsCount, countsById.get(initMat.id) || 0)
+    })),
+    ...adminMaterials
+  ];
+
+  const hasDiff =
+    loadedMaterials.length !== syncedMaterials.length ||
+    loadedMaterials.some((m, idx) => {
+      const target = syncedMaterials[idx];
+      return !target || target.id !== m.id || target.fileUrl !== m.fileUrl || target.title !== m.title;
+    });
+
+  if (hasDiff) {
     saveToStorage(STORAGE_KEYS.MATERIALS, syncedMaterials);
   }
 
