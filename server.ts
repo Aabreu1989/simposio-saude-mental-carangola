@@ -200,6 +200,118 @@ app.post('/api/email/confirm-registration', async (req, res) => {
   }
 });
 
+// Official Broadcast Announcement Email Endpoint
+app.post('/api/email/broadcast', async (req, res) => {
+  try {
+    const { recipients, subject, bodyHtml, bodyText, replyTo } = req.body;
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: 'Lista de destinatários obrigatória.' });
+    }
+    if (!subject) {
+      return res.status(400).json({ error: 'Assunto do e-mail é obrigatório.' });
+    }
+
+    const emailSubject = subject;
+    const resendApiKey = process.env.RESEND_API_KEY;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+
+    let successfulSends = 0;
+    let failedSends = 0;
+    let deliveryProvider: 'resend' | 'smtp' | 'none' = 'none';
+    let deliveryError: string | undefined = undefined;
+
+    // 1. Resend API
+    if (resendApiKey) {
+      deliveryProvider = 'resend';
+      const fromAddress = process.env.RESEND_FROM_EMAIL || '1º Simpósio de Saúde Mental <onboarding@resend.dev>';
+      for (const to of recipients) {
+        try {
+          const resendRes = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${resendApiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              from: fromAddress,
+              to: [to],
+              reply_to: replyTo || 'farmaciademinas.marketing@gmail.com',
+              subject: emailSubject,
+              html: bodyHtml || bodyText,
+              text: bodyText
+            })
+          });
+          if (resendRes.ok) {
+            successfulSends++;
+          } else {
+            failedSends++;
+          }
+        } catch {
+          failedSends++;
+        }
+      }
+    } else if (smtpUser && smtpPass) {
+      // 2. SMTP
+      deliveryProvider = 'smtp';
+      try {
+        const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+        const smtpPort = Number(process.env.SMTP_PORT) || 465;
+        const transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass
+          }
+        });
+        const fromAddress =
+          process.env.SMTP_FROM || `"1º Simpósio de Saúde Mental - SUS Carangola" <${smtpUser}>`;
+
+        for (const to of recipients) {
+          try {
+            await transporter.sendMail({
+              from: fromAddress,
+              to,
+              replyTo: replyTo || smtpUser || 'farmaciademinas.marketing@gmail.com',
+              subject: emailSubject,
+              text: bodyText,
+              html: bodyHtml || bodyText
+            });
+            successfulSends++;
+          } catch {
+            failedSends++;
+          }
+        }
+      } catch (err: any) {
+        deliveryError = err?.message || String(err);
+      }
+    } else {
+      deliveryError = 'Nenhum provedor de SMTP ou Resend configurado nas variáveis de ambiente do servidor.';
+    }
+
+    console.log(
+      `[E-mail SUS Broadcast] Disparo (${deliveryProvider}): ${successfulSends} enviados com sucesso, ${failedSends} falhas para ${recipients.length} participantes.`
+    );
+
+    return res.json({
+      success: successfulSends > 0 || deliveryProvider === 'none',
+      deliveryProvider,
+      successfulSends,
+      failedSends,
+      totalRecipients: recipients.length,
+      deliveryError,
+      message: successfulSends > 0
+        ? `Broadcast concluído: ${successfulSends} e-mails entregues aos participantes via ${deliveryProvider.toUpperCase()}.`
+        : deliveryError || 'Nenhum provedor ativo no servidor.'
+    });
+  } catch (error: any) {
+    console.error('Erro no broadcast de e-mail:', error);
+    return res.status(500).json({ error: error.message || 'Erro ao processar broadcast de e-mail.' });
+  }
+});
+
 // Always serve Service Worker without aggressive HTTP cache so updates propagate immediately
 app.get('/sw.js', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

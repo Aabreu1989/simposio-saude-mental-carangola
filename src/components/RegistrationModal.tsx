@@ -26,7 +26,8 @@ import {
   Check,
   FileText,
   ExternalLink,
-  Lock
+  Lock,
+  MessageSquare
 } from 'lucide-react';
 import { Registration, EventConfig, NewsletterSubscriber } from '../types.ts';
 import { REGIONAL_CITIES, PROFESSIONAL_ROLES, INITIAL_SCHEDULE } from '../data/initialData.ts';
@@ -36,6 +37,7 @@ import {
   buildRegistrationConfirmationEmail,
   ConfirmationEmailResult
 } from '../services/confirmationEmailService.ts';
+import { formatRegistrationWhatsAppMessage, createWhatsAppChatUrl } from '../utils/whatsapp.ts';
 
 // Strategic choices for SUS Management Dashboard metrics
 export const SUS_CARE_LEVELS = [
@@ -677,8 +679,32 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                 );
               })()}
 
-              {/* Call-to-action cards: Calendar & Sharing */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              {/* Call-to-action cards: WhatsApp, Calendar & Sharing */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                {/* Salvar Comprovante no WhatsApp */}
+                <a
+                  href={createWhatsAppChatUrl(
+                    submittedVoucher.phone,
+                    formatRegistrationWhatsAppMessage(submittedVoucher, config)
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-50/70 hover:bg-emerald-100/80 transition-colors flex items-center gap-3 text-left cursor-pointer group"
+                  title="Abrir no WhatsApp e salvar comprovante oficial"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-[#25D366] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-emerald-950 group-hover:text-emerald-700">
+                      Salvar no WhatsApp
+                    </div>
+                    <div className="text-[11px] text-emerald-800/80">
+                      Comprovante no seu celular
+                    </div>
+                  </div>
+                </a>
+
                 {/* Adicionar ao Calendário (Requisito 3) */}
                 <button
                   type="button"
@@ -693,7 +719,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                       Adicionar ao Calendário
                     </div>
                     <div className="text-[11px] text-stone-500">
-                      Google, Apple Calendar ou Outlook
+                      Google, Apple ou Outlook
                     </div>
                   </div>
                 </button>
@@ -712,7 +738,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                       Divulgar para Minha Equipe
                     </div>
                     <div className="text-[11px] text-stone-500">
-                      Link direto e mensagem para WhatsApp
+                      Link direto e mensagem WhatsApp
                     </div>
                   </div>
                 </button>

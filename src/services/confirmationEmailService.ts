@@ -622,3 +622,62 @@ export async function sendRegistrationConfirmationEmail(
 
   return result;
 }
+
+export interface BroadcastEmailResult {
+  success: boolean;
+  deliveryProvider: string;
+  successfulSends: number;
+  failedSends: number;
+  totalRecipients: number;
+  message: string;
+  deliveryError?: string;
+}
+
+/**
+ * Dispatches a broadcast email to multiple recipients via server (Resend/SMTP)
+ */
+export async function sendBroadcastEmailToAttendees(
+  recipients: string[],
+  subject: string,
+  bodyText: string,
+  bodyHtml?: string,
+  replyTo?: string
+): Promise<BroadcastEmailResult> {
+  try {
+    const res = await fetch('/api/email/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipients,
+        subject,
+        bodyText,
+        bodyHtml: bodyHtml || `<div style="font-family:sans-serif;line-height:1.6;color:#1e293b;max-width:600px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:16px;"><h2 style="color:#0a3641;margin-top:0;">${subject}</h2><p style="white-space:pre-wrap;">${bodyText}</p><hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0;"/><p style="font-size:12px;color:#64748b;">1º Simpósio de Saúde Mental da Microrregião de Carangola · SUS</p></div>`,
+        replyTo: replyTo || 'farmaciademinas.marketing@gmail.com'
+      })
+    });
+
+    if (res.ok) {
+      return await res.json();
+    }
+    const errText = await res.text();
+    return {
+      success: false,
+      deliveryProvider: 'none',
+      successfulSends: 0,
+      failedSends: recipients.length,
+      totalRecipients: recipients.length,
+      message: `Erro no servidor: ${errText}`,
+      deliveryError: errText
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      deliveryProvider: 'none',
+      successfulSends: 0,
+      failedSends: recipients.length,
+      totalRecipients: recipients.length,
+      message: err?.message || 'Falha na conexão com o servidor de e-mail.',
+      deliveryError: String(err)
+    };
+  }
+}

@@ -54,7 +54,8 @@ import {
   IdCard,
   AlertCircle,
   Loader2,
-  Link2
+  Link2,
+  X
 } from 'lucide-react';
 import {
   Registration,
@@ -78,8 +79,15 @@ import {
 } from '../utils/helpers.ts';
 import {
   sendRegistrationConfirmationEmail,
-  buildRegistrationConfirmationEmail
+  buildRegistrationConfirmationEmail,
+  sendBroadcastEmailToAttendees
 } from '../services/confirmationEmailService.ts';
+import {
+  formatNotificationWhatsAppMessage,
+  formatRegistrationWhatsAppMessage,
+  createWhatsAppChatUrl,
+  createWhatsAppBroadcastUrl
+} from '../utils/whatsapp.ts';
 import { BadgeModal } from './BadgeModal.tsx';
 import { AdminBadgeDesigner } from './AdminBadgeDesigner.tsx';
 import { GmailNotificationHub } from './GmailNotificationHub.tsx';
@@ -256,6 +264,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [notifCategory, setNotifCategory] = useState<'lembrete' | 'aviso' | 'material' | 'certificado' | 'urgente'>('lembrete');
   const [notifAudience, setNotifAudience] = useState<'todos' | 'inscritos' | 'presentes' | 'profissionais'>('todos');
   const [notifSentNotice, setNotifSentNotice] = useState(false);
+  const [notifChannelPortal, setNotifChannelPortal] = useState(true);
+  const [notifChannelWhatsapp, setNotifChannelWhatsapp] = useState(true);
+  const [notifChannelEmail, setNotifChannelEmail] = useState(false);
+  const [isBroadcastingEmail, setIsBroadcastingEmail] = useState(false);
+  const [whatsappDispatchModal, setWhatsappDispatchModal] = useState<PushNotificationItem | null>(null);
+  const [emailBroadcastNotice, setEmailBroadcastNotice] = useState<string | null>(null);
+  const [whatsappSearchFilter, setWhatsappSearchFilter] = useState('');
 
   // Analytics Math
   const totalRegistrations = registrations.length;
@@ -1254,10 +1269,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       totalSent: totalRegistrations || 150
     };
 
-    onSendNotification(newNotif);
+    // 1. Channel Portal & Web Push
+    if (notifChannelPortal) {
+      onSendNotification(newNotif);
+      await sendBrowserNotification(newNotif.title, newNotif.body);
+    }
 
-    // Fire real browser notification if granted
-    await sendBrowserNotification(newNotif.title, newNotif.body);
+    // 2. Channel E-mail Broadcast
+    if (notifChannelEmail) {
+      setIsBroadcastingEmail(true);
+      let targetEmails: string[] = [];
+      if (notifAudience === 'presentes') {
+        targetEmails = registrations.filter(r => r.status === 'presente' && r.email).map(r => r.email);
+      } else if (notifAudience === 'profissionais') {
+        targetEmails = registrations.filter(r => r.professionalRole !== 'Estudante' && r.professionalRole !== 'Outro' && r.email).map(r => r.email);
+      } else {
+        targetEmails = registrations.filter(r => r.email).map(r => r.email);
+      }
+
+      if (targetEmails.length > 0) {
+        const emailRes = await sendBroadcastEmailToAttendees(
+          targetEmails,
+          `[SUS Carangola] ${newNotif.title}`,
+          newNotif.body,
+          undefined,
+          'farmaciademinas.marketing@gmail.com'
+        );
+        setEmailBroadcastNotice(emailRes.message);
+        setTimeout(() => setEmailBroadcastNotice(null), 6000);
+      } else {
+        setEmailBroadcastNotice('Nenhum e-mail de participante encontrado para o público selecionado.');
+        setTimeout(() => setEmailBroadcastNotice(null), 4000);
+      }
+      setIsBroadcastingEmail(false);
+    }
+
+    // 3. Channel WhatsApp (opens WhatsApp transmission modal)
+    if (notifChannelWhatsapp) {
+      setWhatsappDispatchModal(newNotif);
+    }
 
     setNotifSentNotice(true);
     setTimeout(() => setNotifSentNotice(false), 3000);
@@ -3077,6 +3127,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        {reg.phone && (
+                          <a
+                            href={createWhatsAppChatUrl(
+                              reg.phone,
+                              formatRegistrationWhatsAppMessage(reg, config)
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-xs font-semibold text-emerald-800 cursor-pointer transition-colors"
+                            title="Disparar Comprovante e Lembrete no WhatsApp do Participante"
+                          >
+                            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>WhatsApp</span>
+                          </a>
+                        )}
+
                         <button
                           type="button"
                           onClick={() => handleManagerResendConfirmationEmail(reg)}
@@ -3314,6 +3380,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              {reg.phone && (
+                                <a
+                                  href={createWhatsAppChatUrl(
+                                    reg.phone,
+                                    formatRegistrationWhatsAppMessage(reg, config)
+                                  )}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
+                                  title="Disparar Comprovante e Lembrete via WhatsApp"
+                                >
+                                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>WhatsApp</span>
+                                </a>
+                              )}
+
                               <button
                                 type="button"
                                 onClick={() => handleManagerResendConfirmationEmail(reg)}
@@ -3900,17 +3982,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   />
                 </div>
 
+                {/* Multi-Channel Selection */}
+                <div className={`p-4 rounded-xl border space-y-2.5 ${isDarkMode ? 'bg-[#06151c]/60 border-[#1a414e]' : 'bg-stone-50 border-stone-200'}`}>
+                  <span className={`text-xs font-bold uppercase tracking-wider block font-mono ${theme.textMuted}`}>
+                    Canais de Disparo Ativos:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* Canal 1: Alerta no Portal & Push Web */}
+                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      notifChannelPortal
+                        ? (isDarkMode ? 'bg-[#102a33] border-sky-500/50 text-white' : 'bg-sky-50 border-sky-300 text-[#0a3641]')
+                        : (isDarkMode ? 'bg-transparent border-white/10 text-stone-400' : 'bg-white border-stone-200 text-stone-500')
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={notifChannelPortal}
+                        onChange={(e) => setNotifChannelPortal(e.target.checked)}
+                        className="rounded text-[#0a3641]"
+                      />
+                      <div className="text-xs">
+                        <div className="font-bold flex items-center gap-1">
+                          <Bell className="w-3.5 h-3.5 text-sky-500" />
+                          <span>Portal & Push Web</span>
+                        </div>
+                        <div className="text-[10px] opacity-80">Banner ao vivo & sino</div>
+                      </div>
+                    </label>
+
+                    {/* Canal 2: WhatsApp */}
+                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      notifChannelWhatsapp
+                        ? (isDarkMode ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200' : 'bg-emerald-50 border-emerald-300 text-emerald-950')
+                        : (isDarkMode ? 'bg-transparent border-white/10 text-stone-400' : 'bg-white border-stone-200 text-stone-500')
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={notifChannelWhatsapp}
+                        onChange={(e) => setNotifChannelWhatsapp(e.target.checked)}
+                        className="rounded text-emerald-600"
+                      />
+                      <div className="text-xs">
+                        <div className="font-bold flex items-center gap-1">
+                          <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>WhatsApp</span>
+                        </div>
+                        <div className="text-[10px] opacity-80">Transmissão & Contatos</div>
+                      </div>
+                    </label>
+
+                    {/* Canal 3: E-mail Broadcast */}
+                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      notifChannelEmail
+                        ? (isDarkMode ? 'bg-amber-950/40 border-amber-500/50 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-950')
+                        : (isDarkMode ? 'bg-transparent border-white/10 text-stone-400' : 'bg-white border-stone-200 text-stone-500')
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={notifChannelEmail}
+                        onChange={(e) => setNotifChannelEmail(e.target.checked)}
+                        className="rounded text-[#ea7a38]"
+                      />
+                      <div className="text-xs">
+                        <div className="font-bold flex items-center gap-1">
+                          <Mail className="w-3.5 h-3.5 text-[#ea7a38]" />
+                          <span>E-mail Broadcast</span>
+                        </div>
+                        <div className="text-[10px] opacity-80">Disparo para inscritos</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Email broadcast status feedback */}
+                {emailBroadcastNotice && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-[#ea7a38]" />
+                    <span>{emailBroadcastNotice}</span>
+                  </div>
+                )}
+
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
                   <div className={`text-xs ${theme.textMuted}`}>
-                    O disparo acionará a API de Notificações Web e ficará gravado no feed histórico.
+                    O disparo sincronizará os canais selecionados com a infraestrutura oficial do SUS Carangola.
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-[#d96522] hover:bg-[#c25516] rounded-xl shadow-sm transition-colors cursor-pointer shrink-0"
+                    disabled={isBroadcastingEmail}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-[#d96522] hover:bg-[#c25516] rounded-xl shadow-sm transition-colors cursor-pointer shrink-0 disabled:opacity-50"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Disparar Notificação Agora</span>
+                    <Send className={`w-3.5 h-3.5 ${isBroadcastingEmail ? 'animate-spin' : ''}`} />
+                    <span>{isBroadcastingEmail ? 'Disparando E-mails...' : 'Disparar Notificação Agora'}</span>
                   </button>
                 </div>
               </form>
@@ -3927,7 +4089,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   const openRate = Math.min(100, Math.round((n.readCount / n.totalSent) * 100));
 
                   return (
-                    <div key={n.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div key={n.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded ${
@@ -3943,6 +4105,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                         <h5 className={`text-sm font-bold ${isDarkMode ? 'text-stone-100' : 'text-stone-900'}`}>{n.title}</h5>
                         <p className={`text-xs max-w-2xl ${isDarkMode ? 'text-stone-300' : 'text-stone-600'}`}>{n.body}</p>
+
+                        {/* Quick Action buttons for history */}
+                        <div className="flex items-center gap-2 pt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setWhatsappDispatchModal(n)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-bold text-emerald-800 transition-colors cursor-pointer"
+                          >
+                            <Smartphone className="w-3 h-3 text-emerald-600" />
+                            <span>Transmitir no WhatsApp</span>
+                          </button>
+                        </div>
                       </div>
 
                       <div className={`flex items-center gap-4 text-xs shrink-0 p-2.5 rounded-xl border transition-colors ${theme.subCard}`}>
@@ -3964,6 +4138,175 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 })}
               </div>
             </div>
+
+            {/* WHATSAPP DISPATCH MODAL */}
+            {whatsappDispatchModal && (() => {
+              const notif = whatsappDispatchModal;
+              const formattedMessage = formatNotificationWhatsAppMessage(notif, config);
+
+              // Filter participants based on notification audience
+              const eligibleAttendees = registrations.filter((r) => {
+                if (!r.phone) return false;
+                if (notif.targetAudience === 'presentes') return r.status === 'presente';
+                if (notif.targetAudience === 'profissionais') return r.professionalRole !== 'Estudante' && r.professionalRole !== 'Outro';
+                return true;
+              });
+
+              const filteredAttendees = eligibleAttendees.filter((r) => {
+                if (!whatsappSearchFilter.trim()) return true;
+                const q = whatsappSearchFilter.toLowerCase();
+                return (
+                  r.fullName.toLowerCase().includes(q) ||
+                  r.phone.includes(q) ||
+                  r.city.toLowerCase().includes(q)
+                );
+              });
+
+              const handleCopyMessage = () => {
+                navigator.clipboard.writeText(formattedMessage);
+                alert('Mensagem formatada para o WhatsApp copiada para a área de transferência!');
+              };
+
+              const handleCopyPhones = () => {
+                const phones = eligibleAttendees.map((r) => r.phone).filter(Boolean).join('; ');
+                navigator.clipboard.writeText(phones);
+                alert(`${eligibleAttendees.length} telefones copiados para criar Lista de Transmissão no WhatsApp!`);
+              };
+
+              return (
+                <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+                  <div className={`w-full max-w-2xl rounded-2xl shadow-2xl border overflow-hidden my-6 ${isDarkMode ? 'bg-[#0a232c] border-[#163f4c]' : 'bg-white border-stone-200'}`}>
+                    {/* Header */}
+                    <div className="p-4 bg-emerald-600 text-white flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
+                          <Smartphone className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-sm sm:text-base leading-tight">
+                            Central de Disparo Oficial via WhatsApp
+                          </h3>
+                          <p className="text-[11px] text-white/80">
+                            {eligibleAttendees.length} participantes elegíveis com telefone cadastrado
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setWhatsappDispatchModal(null)}
+                        className="p-1.5 rounded-lg hover:bg-white/20 text-white cursor-pointer"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <div className="p-4 sm:p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+                      {/* Message Preview */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-bold uppercase tracking-wider font-mono text-emerald-600">
+                            Mensagem Formatada (Visualização WhatsApp):
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyMessage}
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copiar Texto</span>
+                          </button>
+                        </div>
+                        <div className={`p-3.5 rounded-xl border font-mono text-xs whitespace-pre-wrap leading-relaxed ${isDarkMode ? 'bg-[#06151c] border-[#133540] text-stone-200' : 'bg-stone-50 border-stone-200 text-stone-800'}`}>
+                          {formattedMessage}
+                        </div>
+                      </div>
+
+                      {/* Broadcast Trigger Actions */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <a
+                          href={createWhatsAppBroadcastUrl(formattedMessage)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-center gap-2 px-4 py-3 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer text-center"
+                        >
+                          <Send className="w-4 h-4" />
+                          <span>Abrir no WhatsApp Web / Celular</span>
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={handleCopyPhones}
+                          className="flex items-center justify-center gap-2 px-4 py-3 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs rounded-xl border border-stone-300 transition-colors cursor-pointer text-center"
+                        >
+                          <Copy className="w-4 h-4" />
+                          <span>Copiar Lista para Transmissão ({eligibleAttendees.length})</span>
+                        </button>
+                      </div>
+
+                      {/* Individual Participant Fast Transmission List */}
+                      <div className="space-y-3 pt-2 border-t border-stone-200">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">
+                            Disparo Individual em 1 Clique aos Participantes:
+                          </h4>
+                          <input
+                            type="text"
+                            placeholder="Filtrar por nome ou cidade..."
+                            value={whatsappSearchFilter}
+                            onChange={(e) => setWhatsappSearchFilter(e.target.value)}
+                            className="text-xs px-3 py-1.5 rounded-lg border border-stone-300 focus:outline-none w-full sm:w-56"
+                          />
+                        </div>
+
+                        <div className="divide-y divide-stone-100 max-h-56 overflow-y-auto border border-stone-200 rounded-xl">
+                          {filteredAttendees.length === 0 ? (
+                            <div className="p-4 text-center text-xs text-stone-500">
+                              Nenhum participante com telefone encontrado para este filtro.
+                            </div>
+                          ) : (
+                            filteredAttendees.map((att) => (
+                              <div key={att.id} className="p-2.5 flex items-center justify-between gap-3 hover:bg-stone-50 transition-colors">
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-stone-900 truncate">
+                                    {att.fullName}
+                                  </div>
+                                  <div className="text-[11px] text-stone-500 font-mono">
+                                    {att.phone} · {att.city} ({att.professionalRole})
+                                  </div>
+                                </div>
+
+                                <a
+                                  href={createWhatsAppChatUrl(att.phone, formattedMessage)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-semibold rounded-lg shrink-0 cursor-pointer transition-colors"
+                                  title={`Enviar comunicado para ${att.fullName}`}
+                                >
+                                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Enviar</span>
+                                </a>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    <div className="p-3 bg-stone-50 border-t border-stone-200 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setWhatsappDispatchModal(null)}
+                        className="px-4 py-2 text-xs font-bold text-stone-600 hover:text-stone-800 bg-stone-200 hover:bg-stone-300 rounded-xl cursor-pointer"
+                      >
+                        Fechar Janela
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })()}
 
           </div>
         )}

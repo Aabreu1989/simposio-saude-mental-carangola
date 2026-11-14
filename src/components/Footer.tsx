@@ -137,9 +137,6 @@ export const Footer: React.FC<FooterProps> = ({
               © 2026 Sistema Único de Saúde (SUS) · Prefeitura Municipal de Carangola - MG.
             </span>
           </div>
-          <div className="text-[10px] font-mono text-stone-500">
-            RAPS Carangola · SUS-MG
-          </div>
         </div>
 
       </div>

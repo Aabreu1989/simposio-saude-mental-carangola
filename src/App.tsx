@@ -77,6 +77,7 @@ import { AdminLogin } from './components/AdminLogin.tsx';
 import { AddToCalendarModal } from './components/AddToCalendarModal.tsx';
 import { ShareModal } from './components/ShareModal.tsx';
 import { EventLocationMap } from './components/EventLocationMap.tsx';
+import { AlertBanner } from './components/AlertBanner.tsx';
 
 const getInitialView = (): 'public' | 'admin' | 'inscricao' => {
   if (typeof window !== 'undefined') {
@@ -1035,7 +1036,17 @@ export default function App() {
         onOpenCertificate={handleOpenCertificate}
         isMobileMenuOpen={isMobileMenuOpen}
         setIsMobileMenuOpen={setIsMobileMenuOpen}
+        notifications={notifications}
       />
+
+      {/* Live Alert & Notification Banner for Public Portal */}
+      {currentView === 'public' && (
+        <AlertBanner
+          notifications={notifications}
+          onOpenCertificate={handleOpenCertificate}
+          onOpenRegister={handleOpenRegistration}
+        />
+      )}
 
       {/* Main View Router: Direct Dedicated Registration Form vs Public Landing vs Admin Dashboard */}
       {currentView === 'inscricao' ? (

@@ -18,9 +18,11 @@ import {
   Share2,
   Award,
   Lock,
-  Users
+  Users,
+  Bell
 } from 'lucide-react';
-import { isCertificateAvailableForPublic, CERTIFICATE_RELEASE_LABEL } from '../utils/helpers.ts';
+import { isCertificateAvailableForPublic, CERTIFICATE_RELEASE_LABEL, sendBrowserNotification } from '../utils/helpers.ts';
+import { PushNotificationItem } from '../types.ts';
 
 interface HeaderProps {
   currentView: 'public' | 'admin' | 'inscricao';
@@ -32,6 +34,7 @@ interface HeaderProps {
   onOpenCertificate?: () => void;
   isMobileMenuOpen?: boolean;
   setIsMobileMenuOpen?: (open: boolean) => void;
+  notifications?: PushNotificationItem[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -43,10 +46,12 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCalendar,
   onOpenCertificate,
   isMobileMenuOpen: externalMenuOpen,
-  setIsMobileMenuOpen: setExternalMenuOpen
+  setIsMobileMenuOpen: setExternalMenuOpen,
+  notifications = []
 }) => {
   // Support either controlled state from parent or internal state
   const [internalMenuOpen, setInternalMenuOpen] = useState(false);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
   const isMenuOpen = externalMenuOpen !== undefined ? externalMenuOpen : internalMenuOpen;
   const setMenuOpen = setExternalMenuOpen !== undefined ? setExternalMenuOpen : setInternalMenuOpen;
   const certificateAvailable = isCertificateAvailableForPublic();
@@ -203,6 +208,94 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="hidden sm:inline">Inscrição Gratuita</span>
                     <span className="sm:hidden font-extrabold">Inscrição</span>
                   </button>
+
+                  {/* Notification Bell Button & Popover */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsNotifOpen(!isNotifOpen)}
+                      className={`relative p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all cursor-pointer border ${
+                        isNotifOpen
+                          ? 'bg-[#0a3641] text-white border-[#0a3641]'
+                          : 'bg-stone-50 hover:bg-stone-100 text-[#0a3641] border-stone-200 hover:border-stone-300'
+                      }`}
+                      title="Comunicados e Alertas do Simpósio"
+                      aria-label="Abrir comunicados do Simpósio"
+                    >
+                      <Bell className="w-4 h-4" />
+                      {notifications.length > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-rose-600 text-[9px] font-mono font-bold text-white flex items-center justify-center shadow-xs animate-pulse">
+                          {notifications.length > 9 ? '9+' : notifications.length}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Popover Dropdown */}
+                    {isNotifOpen && (
+                      <div
+                        className="fixed inset-x-3 top-20 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80 md:w-96 bg-white rounded-2xl shadow-2xl border border-stone-200 z-50 overflow-hidden"
+                        role="dialog"
+                        aria-label="Central de Alertas"
+                      >
+                        <div className="bg-[#0a3641] text-white px-4 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Bell className="w-4 h-4 text-[#ea7a38]" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Alertas & Comunicados</span>
+                          </div>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/15 text-white">
+                            {notifications.length} {notifications.length === 1 ? 'aviso' : 'avisos'}
+                          </span>
+                        </div>
+
+                        <div className="max-h-72 overflow-y-auto divide-y divide-stone-100 p-2">
+                          {notifications.length === 0 ? (
+                            <div className="py-6 text-center text-xs text-stone-500">
+                              Nenhum comunicado recente no momento.
+                            </div>
+                          ) : (
+                            notifications.map((n) => (
+                              <div key={n.id} className="p-2.5 rounded-xl hover:bg-stone-50 transition-colors">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <span className="text-[10px] uppercase font-bold font-mono px-1.5 py-0.5 rounded bg-sky-100 text-sky-800">
+                                    {n.category}
+                                  </span>
+                                  <span className="text-[10px] text-stone-400 font-mono">
+                                    {new Date(n.sentAt).toLocaleDateString('pt-BR')}
+                                  </span>
+                                </div>
+                                <h4 className="text-xs font-bold text-[#0a3641]">{n.title}</h4>
+                                <p className="text-[11px] text-stone-600 mt-0.5 leading-snug">{n.body}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        <div className="p-3 bg-stone-50 border-t border-stone-100 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await sendBrowserNotification(
+                                'Notificações Ativadas · SUS Carangola',
+                                'Você receberá avisos oficiais, lembretes de programação e liberação de certificados.'
+                              );
+                              setIsNotifOpen(false);
+                            }}
+                            className="text-[11px] font-bold text-[#028090] hover:text-[#0a3641] transition-colors cursor-pointer flex items-center gap-1"
+                          >
+                            <Bell className="w-3 h-3" />
+                            <span>Ativar no Celular</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsNotifOpen(false)}
+                            className="text-xs text-stone-400 hover:text-stone-600 cursor-pointer p-1"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Mobile & Tablet MENU Button: High contrast, dark navy, highly prominent */}
                   <button
