@@ -150,8 +150,13 @@ export const loadStoredData = () => {
   }
 
   const deletedMatIds = getDeletedMaterialIds();
+  if (!deletedMatIds.has('mat-0')) {
+    addDeletedMaterialId('mat-0');
+    deletedMatIds.add('mat-0');
+  }
+
   const loadedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS)
-    .filter((m) => !deletedMatIds.has(m.id));
+    .filter((m) => !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
   const officialIds = new Set(INITIAL_MATERIALS.map((m) => m.id));
   const countsById = new Map(loadedMaterials.map((m) => [m.id, m.downloadsCount || 0]));
 
@@ -161,6 +166,8 @@ export const loadStoredData = () => {
       !officialIds.has(m.id) &&
       !deletedMatIds.has(m.id) &&
       m.id !== 'mat-6' &&
+      m.id !== 'mat-0' &&
+      m.fileUrl !== '#' &&
       (Boolean(m.createdAt) ||
         m.fileUrl?.startsWith('firestore-chunked://') ||
         Boolean(m.chunkCount && m.chunkCount > 0) ||
@@ -169,13 +176,13 @@ export const loadStoredData = () => {
 
   const syncedMaterials: DownloadMaterial[] = [
     ...INITIAL_MATERIALS
-      .filter((initMat) => !deletedMatIds.has(initMat.id))
+      .filter((initMat) => !deletedMatIds.has(initMat.id) && initMat.id !== 'mat-0' && initMat.fileUrl !== '#')
       .map((initMat) => ({
         ...initMat,
         downloadsCount: Math.max(initMat.downloadsCount, countsById.get(initMat.id) || 0)
       })),
     ...adminMaterials
-  ].filter((m) => !deletedMatIds.has(m.id));
+  ].filter((m) => !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
 
   const hasDiff =
     loadedMaterials.length !== syncedMaterials.length ||

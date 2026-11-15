@@ -12,7 +12,6 @@ import {
   Menu,
   X,
   FileDown,
-  Layers,
   MessageSquare,
   ArrowLeft,
   Share2,
@@ -154,14 +153,6 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Users className="w-3.5 h-3.5 text-[#028090] shrink-0" />
                 <span>Palestrantes</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleNavClick('#eixos')}
-                className="px-2.5 xl:px-3 py-1.5 rounded-xl font-bold text-xs xl:text-sm text-stone-600 hover:text-[#0a3641] hover:bg-white hover:shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-              >
-                <Layers className="w-3.5 h-3.5 text-[#028090] shrink-0" />
-                <span>Eixos</span>
               </button>
               <button
                 type="button"
@@ -426,20 +417,6 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="min-w-0 flex-1">
                     <div className="text-stone-900 group-hover:text-[#028090] leading-snug break-words">Palestrantes e Mediadores</div>
                     <div className="text-[11px] text-stone-500 font-normal leading-snug break-words">Mini-bios, redes sociais e PDF completo</div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleNavClick('#eixos')}
-                  className="w-full text-left p-2.5 sm:p-3 rounded-xl bg-stone-50 hover:bg-[#028090]/10 text-stone-800 text-xs sm:text-sm font-bold flex items-center gap-3 transition-colors cursor-pointer border border-stone-200/80 hover:border-[#028090]/30 group"
-                >
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg bg-[#028090]/15 text-[#028090] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                    <Layers className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-stone-900 group-hover:text-[#028090] leading-snug break-words">Eixos Temáticos Estratégicos</div>
-                    <div className="text-[11px] text-stone-500 font-normal leading-snug break-words">RAPS, Hospital Geral e Desafios</div>
                   </div>
                 </button>
 

@@ -509,18 +509,6 @@ export const INITIAL_REGISTRATIONS: Registration[] = [
 
 export const INITIAL_MATERIALS: DownloadMaterial[] = [
   {
-    id: 'mat-0',
-    title: 'Caderno Oficial da Programação Completa e Grade Horária do Simpósio',
-    category: 'Apostila',
-    author: 'Comissão Organizadora · SMS Carangola & RAPS',
-    format: 'PDF',
-    size: '1.2 MB',
-    description: 'Documento técnico e diagramado oficial em padrão A4 contendo horários detalhados, eixos temáticos, mesas redondas e nominata de palestrantes do 1º Simpósio de Saúde Mental do SUS em Carangola.',
-    pages: 4,
-    downloadsCount: 248,
-    fileUrl: '#'
-  },
-  {
     id: 'mat-1',
     title: 'Guia Estratégico para o Cuidado de Pessoas com Necessidades Relacionadas ao Consumo de Álcool e Outras Drogas: Guia AD',
     category: 'Cartilha',

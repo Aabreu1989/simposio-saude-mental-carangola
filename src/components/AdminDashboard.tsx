@@ -114,7 +114,9 @@ interface AdminDashboardProps {
   onBatchImportRegistrations?: (imported: Registration[]) => void;
   notifications: PushNotificationItem[];
   onSendNotification: (notif: PushNotificationItem) => void;
+  onDeleteNotification?: (id: string) => void;
   subscribers: NewsletterSubscriber[];
+  onDeleteSubscriber?: (id: string) => void;
   materials: DownloadMaterial[];
   onAddMaterial?: (
     mat: DownloadMaterial,
@@ -146,7 +148,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onBatchImportRegistrations,
   notifications,
   onSendNotification,
+  onDeleteNotification,
   subscribers,
+  onDeleteSubscriber,
   materials,
   onAddMaterial,
   onDeleteMaterial,
@@ -682,8 +686,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleDeleteMaterialItem = (material: DownloadMaterial) => {
-    setMaterialToDelete(material);
+  const handleDeleteMaterialItem = async (material: DownloadMaterial) => {
+    try {
+      await onDeleteMaterial?.(material.id);
+      setMaterialNotice({
+        type: 'success',
+        text: `Documento "${material.title}" excluído imediatamente com sucesso!`
+      });
+      setTimeout(() => setMaterialNotice(null), 4000);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDeleteAttendeeImmediate = (reg: Registration) => {
+    onDeleteRegistration?.(reg.id);
+    setAttendeeDeleteNotice(`Inscrição de "${reg.fullName}" (${reg.code}) excluída imediatamente! 1 vaga liberada no auditório.`);
+    setTimeout(() => setAttendeeDeleteNotice(null), 4500);
+  };
+
+  const handleDeletePostImmediate = (post: SocialPost) => {
+    onDeletePost?.(post.id);
+    setPostDeleteNotice(`Postagem de "${post.authorName}" excluída imediatamente com sucesso!`);
+    setTimeout(() => setPostDeleteNotice(null), 4000);
   };
 
   const handleTestDownloadMaterial = async (material: DownloadMaterial) => {
@@ -3165,9 +3190,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => setAttendeeToDelete(reg)}
+                          onClick={() => handleDeleteAttendeeImmediate(reg)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-xs font-bold text-rose-700 cursor-pointer transition-colors"
-                          title="Deletar Participante (mesmo que tenha se inscrito pelo portal)"
+                          title="Deletar Participante imediatamente (libera vaga)"
                         >
                           <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                           <span>Deletar</span>
@@ -3416,9 +3441,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setAttendeeToDelete(reg)}
+                                onClick={() => handleDeleteAttendeeImmediate(reg)}
                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200"
-                                title="Deletar Participante (mesmo que tenha se inscrito pelo portal)"
+                                title="Deletar Participante imediatamente (libera vaga)"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                                 <span>Deletar</span>
@@ -3781,9 +3806,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => setPostToDelete(post)}
+                        onClick={() => handleDeletePostImmediate(post)}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer transition-colors"
-                        title="Remover esta publicação do mural comunitário público"
+                        title="Remover esta publicação imediatamente do mural público"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Excluir Post</span>
@@ -3943,6 +3968,128 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               );
             })()}
+
+            {/* CRIAR NOVO ALERTA / LEMBRETE PARA O TOPO DO PORTAL */}
+            <div className={`rounded-2xl border p-6 space-y-4 ${theme.card}`}>
+              <div className="flex items-center gap-3 border-b pb-4">
+                <div className="w-9 h-9 rounded-xl bg-[#ea7a38]/10 flex items-center justify-center shrink-0">
+                  <Bell className="w-5 h-5 text-[#ea7a38]" />
+                </div>
+                <div>
+                  <h3 className={`text-base font-bold ${theme.textHeading}`}>Criar Novo Alerta / Lembrete para o Portal</h3>
+                  <p className={`text-xs mt-0.5 ${theme.textMuted}`}>Escreva comunicados, avisos e lembretes que serão exibidos na barra superior do webapp para todos os visitantes.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleTriggerNotification} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="md:col-span-2 space-y-1">
+                    <label className={`text-xs font-bold ${theme.textHeading}`}>Título do Alerta / Aviso</label>
+                    <input
+                      type="text"
+                      value={notifTitle}
+                      onChange={(e) => setNotifTitle(e.target.value)}
+                      placeholder="Ex: Atenção ao Credenciamento, Caderno Disponível, etc."
+                      className={`w-full px-3.5 py-2.5 rounded-xl border text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#ea7a38] ${theme.subCard}`}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className={`text-xs font-bold ${theme.textHeading}`}>Categoria</label>
+                    <select
+                      value={notifCategory}
+                      onChange={(e) => setNotifCategory(e.target.value as any)}
+                      className={`w-full px-3 py-2.5 rounded-xl border text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-[#ea7a38] ${theme.subCard}`}
+                    >
+                      <option value="lembrete">Lembrete</option>
+                      <option value="aviso">Aviso Geral</option>
+                      <option value="material">Material de Apoio</option>
+                      <option value="certificado">Certificado</option>
+                      <option value="urgente">Urgente</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className={`text-xs font-bold ${theme.textHeading}`}>Mensagem do Alerta</label>
+                  <textarea
+                    value={notifBody}
+                    onChange={(e) => setNotifBody(e.target.value)}
+                    rows={2}
+                    placeholder="Digite a mensagem que os participantes e visitantes verão na barra de notificações..."
+                    className={`w-full px-3.5 py-2 rounded-xl border text-xs focus:outline-none focus:ring-2 focus:ring-[#ea7a38] ${theme.subCard}`}
+                    required
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <div className="text-xs text-stone-500">
+                    O alerta aparece imediatamente no topo do portal para todos os usuários.
+                  </div>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#ea7a38] hover:bg-[#d96522] text-white text-xs font-bold shadow-md cursor-pointer transition-all active:scale-95"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Publicar Alerta no Portal</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* LISTA DE ALERTAS ATIVOS NO PORTAL COM BOTÃO DE EXCLUIR IMEDIATAMENTE */}
+            <div className={`rounded-2xl border p-6 space-y-4 ${theme.card}`}>
+              <div className="flex items-center justify-between border-b pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-rose-500/10 flex items-center justify-center shrink-0">
+                    <Trash2 className="w-5 h-5 text-rose-600" />
+                  </div>
+                  <div>
+                    <h3 className={`text-base font-bold ${theme.textHeading}`}>Alertas Ativos no Portal ({notifications.length})</h3>
+                    <p className={`text-xs mt-0.5 ${theme.textMuted}`}>Qualquer alerta listado abaixo pode ser excluído imediatamente clicando no botão de lixeira.</p>
+                  </div>
+                </div>
+              </div>
+
+              {notifications.length === 0 ? (
+                <div className={`p-6 text-center rounded-xl border border-dashed ${isDarkMode ? 'border-stone-700 text-stone-400' : 'border-stone-300 text-stone-500'} text-xs`}>
+                  Nenhum alerta ativo no portal. Use o formulário acima para escrever novos alertas.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {notifications.map((notif) => (
+                    <div
+                      key={notif.id}
+                      className={`p-4 rounded-xl border flex items-start justify-between gap-4 transition-all ${
+                        isDarkMode ? 'bg-[#0a2530] border-[#133540]' : 'bg-stone-50 border-stone-200'
+                      }`}
+                    >
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200">
+                            {notif.category}
+                          </span>
+                          <span className="text-xs text-stone-400 font-mono">
+                            {notif.sentAt ? new Date(notif.sentAt).toLocaleString('pt-BR') : 'Agora'}
+                          </span>
+                        </div>
+                        <div className={`text-sm font-bold ${theme.textHeading}`}>{notif.title}</div>
+                        <div className={`text-xs ${theme.textMuted}`}>{notif.body}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteNotification?.(notif.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer transition-colors shrink-0"
+                        title="Excluir este alerta imediatamente da plataforma"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Deletar</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Fim da aba Notificações */}
           </div>
@@ -4154,17 +4301,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <span className="text-[10px] font-mono text-stone-400">
                             Cadastrado em: {s.subscribedAt}
                           </span>
-                          {cleanPhone && (
-                            <a
-                              href={`https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodeURIComponent(`Olá ${s.name || ''}! Entramos em contato da organização do 1º Simpósio de Saúde Mental da Microrregião de Carangola.`)}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors cursor-pointer"
+                          <div className="flex items-center gap-1.5">
+                            {cleanPhone && (
+                              <a
+                                href={`https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodeURIComponent(`Olá ${s.name || ''}! Entramos em contato da organização do 1º Simpósio de Saúde Mental da Microrregião de Carangola.`)}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 hover:bg-emerald-200 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                <span>Conversar</span>
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onDeleteSubscriber?.(s.id)}
+                              className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Excluir assinante imediatamente"
                             >
-                              <MessageCircle className="w-3.5 h-3.5" />
-                              <span>Conversar</span>
-                            </a>
-                          )}
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -4225,20 +4382,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </span>
                             </td>
                             <td className="py-3 px-4 text-right">
-                              {cleanPhone ? (
-                                <a
-                                  href={`https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodeURIComponent(`Olá ${s.name || ''}! Entramos em contato da organização do 1º Simpósio de Saúde Mental da Microrregião de Carangola.`)}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
-                                  title="Iniciar conversa no WhatsApp com o assinante"
+                              <div className="flex items-center justify-end gap-1.5">
+                                {cleanPhone ? (
+                                  <a
+                                    href={`https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodeURIComponent(`Olá ${s.name || ''}! Entramos em contato da organização do 1º Simpósio de Saúde Mental da Microrregião de Carangola.`)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                                    title="Iniciar conversa no WhatsApp com o assinante"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>WhatsApp</span>
+                                  </a>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteSubscriber?.(s.id)}
+                                  className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                  title="Excluir assinante imediatamente"
                                 >
-                                  <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>WhatsApp</span>
-                                </a>
-                              ) : (
-                                <span className="text-stone-400 text-[11px]">-</span>
-                              )}
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );

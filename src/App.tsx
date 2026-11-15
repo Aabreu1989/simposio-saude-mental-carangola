@@ -177,18 +177,18 @@ export default function App() {
 
     const unsubMaterials = subscribeDownloadMaterials((remoteMaterials) => {
       const deletedIds = getDeletedMaterialIds();
-      const validRemote = remoteMaterials.filter((m) => !deletedIds.has(m.id) && !m.deleted);
+      const validRemote = remoteMaterials.filter((m) => !deletedIds.has(m.id) && !m.deleted && m.id !== 'mat-0' && m.fileUrl !== '#');
 
       setMaterials((prev) => {
         const remoteIds = new Set(validRemote.map((m) => m.id));
-        const localOnly = prev.filter((m) => !remoteIds.has(m.id) && !deletedIds.has(m.id));
+        const localOnly = prev.filter((m) => !remoteIds.has(m.id) && !deletedIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
         const missingInitials = INITIAL_MATERIALS.filter(
-          (m) => !remoteIds.has(m.id) && !localOnly.some((l) => l.id === m.id) && !deletedIds.has(m.id)
+          (m) => !remoteIds.has(m.id) && !localOnly.some((l) => l.id === m.id) && !deletedIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#'
         );
 
         // Put remote materials (including PDFs uploaded via admin) and local admin uploads first
         const allList = [...validRemote, ...localOnly, ...missingInitials].filter(
-          (item) => !deletedIds.has(item.id)
+          (item) => !deletedIds.has(item.id) && item.id !== 'mat-0' && item.fileUrl !== '#'
         );
         const uniqueMap = new Map<string, DownloadMaterial>();
         allList.forEach((item) => {
@@ -878,10 +878,26 @@ export default function App() {
     saveToStorage(STORAGE_KEYS.NOTIFICATIONS, updated);
   };
 
+  const handleDeleteNotification = (id: string) => {
+    setNotifications((prev) => {
+      const updated = prev.filter((n) => n.id !== id);
+      saveToStorage(STORAGE_KEYS.NOTIFICATIONS, updated);
+      return updated;
+    });
+  };
+
   const handleSubscribeNewsletter = (subscriber: NewsletterSubscriber) => {
     const updated = [subscriber, ...subscribers];
     setSubscribers(updated);
     saveToStorage(STORAGE_KEYS.SUBSCRIBERS, updated);
+  };
+
+  const handleDeleteSubscriber = (id: string) => {
+    setSubscribers((prev) => {
+      const updated = prev.filter((s) => s.id !== id);
+      saveToStorage(STORAGE_KEYS.SUBSCRIBERS, updated);
+      return updated;
+    });
   };
 
   const handleAddMaterial = async (
@@ -1242,7 +1258,9 @@ export default function App() {
               onBatchImportRegistrations={handleBatchImportRegistrations}
               notifications={notifications}
               onSendNotification={handleSendNotification}
+              onDeleteNotification={handleDeleteNotification}
               subscribers={subscribers}
+              onDeleteSubscriber={handleDeleteSubscriber}
               materials={materials}
               onAddMaterial={handleAddMaterial}
               onDeleteMaterial={handleDeleteMaterial}
