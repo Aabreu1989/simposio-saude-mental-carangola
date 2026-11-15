@@ -91,7 +91,6 @@ import {
 import { BadgeModal } from './BadgeModal.tsx';
 import { AdminBadgeDesigner } from './AdminBadgeDesigner.tsx';
 import { GmailNotificationHub } from './GmailNotificationHub.tsx';
-import { EmailJsSettingsCard } from './EmailJsSettingsCard.tsx';
 import { GoogleFormsSyncModal } from './GoogleFormsSyncModal.tsx';
 import { RechartsVisualDashboard } from './RechartsVisualDashboard.tsx';
 import { AdminCertificateManager } from './AdminCertificateManager.tsx';
@@ -1342,7 +1341,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         const mailtoHref = `mailto:${encodeURIComponent(reg.email)}?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(payload.bodyText.slice(0, 1800))}`;
         setEmailResendToast({
           success: false,
-          message: `E-mail de ${reg.fullName} (${reg.code}) preparado, mas nenhum provedor automático (EmailJS / Gmail OAuth / SMTP / Resend) entregou na caixa de entrada. Configure na aba Disparos ou envie direto pelo seu app:`,
+          message: `E-mail de ${reg.fullName} (${reg.code}) preparado, mas o Gmail SMTP não está conectado no servidor (.env). Configure SMTP_USER e SMTP_PASS ou envie direto pelo seu cliente de e-mail:`,
           mailtoHref
         });
       }
@@ -3814,21 +3813,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
-              <div className={`rounded-xl border p-4 space-y-2 text-sm ${isDarkMode ? 'bg-amber-950/30 border-amber-700/40' : 'bg-amber-50 border-amber-200'}`}>
-                <p className={`font-bold flex items-center gap-2 ${isDarkMode ? 'text-amber-300' : 'text-amber-800'}`}>
-                  <span>⚙️</span> Como configurar o envio de e-mails:
+              <div className={`rounded-xl border p-4 space-y-2 text-sm ${isDarkMode ? 'bg-emerald-950/30 border-emerald-700/40' : 'bg-emerald-50 border-emerald-200'}`}>
+                <p className={`font-bold flex items-center gap-2 ${isDarkMode ? 'text-emerald-300' : 'text-emerald-800'}`}>
+                  <span>📧</span> Configuração Oficial: Gmail SMTP (Conta farmaciademinas.marketing@gmail.com)
                 </p>
-                <ol className={`list-decimal list-inside space-y-1.5 text-xs leading-relaxed ${isDarkMode ? 'text-amber-200/80' : 'text-amber-900/80'}`}>
-                  <li>Acesse <strong>resend.com</strong> → crie uma conta gratuita</li>
-                  <li>Vá em <strong>API Keys</strong> → clique <strong>"Create API Key"</strong> → copie a chave <code className="font-mono bg-amber-100 px-1 rounded">re_xxxx...</code></li>
-                  <li>Abra o arquivo <code className="font-mono bg-amber-100 px-1 rounded">.env</code> na raiz do projeto</li>
-                  <li>Adicione a linha: <code className="font-mono bg-amber-100 px-1 rounded">RESEND_API_KEY=re_suachave</code></li>
-                  <li>Reinicie o servidor: feche e abra novamente o terminal com <code className="font-mono bg-amber-100 px-1 rounded">npm run dev</code></li>
-                  <li>Pronto — cada nova inscrição disparará o e-mail automaticamente.</li>
+                <ol className={`list-decimal list-inside space-y-1.5 text-xs leading-relaxed ${isDarkMode ? 'text-emerald-200/90' : 'text-emerald-900/90'}`}>
+                  <li>Acesse sua Conta Google em <strong>myaccount.google.com/security</strong> e confirme que a <strong>Verificação em 2 etapas</strong> está ativa.</li>
+                  <li>Acesse o link direto: <strong>myaccount.google.com/apppasswords</strong></li>
+                  <li>Em "Nome do app", digite <strong>Simpósio SUS</strong> e clique em <strong>Criar</strong>.</li>
+                  <li>Copie a <strong>Senha de App</strong> de 16 caracteres gerada pelo Google (ex: <code className="font-mono bg-white/70 px-1 rounded">abcd efgh ijkl mnop</code>).</li>
+                  <li>No arquivo <code className="font-mono bg-white/70 px-1 rounded">.env</code> (e nas Variáveis de Ambiente da Vercel para produção), configure:
+                    <div className="mt-1 p-2 rounded bg-white/90 border border-emerald-300 font-mono text-[11px] text-stone-800 space-y-0.5">
+                      <div>SMTP_HOST=smtp.gmail.com</div>
+                      <div>SMTP_PORT=465</div>
+                      <div>SMTP_USER=farmaciademinas.marketing@gmail.com</div>
+                      <div>SMTP_PASS=sua_senha_de_app_16_caracteres</div>
+                    </div>
+                  </li>
+                  <li>Pronto! O servidor enviará os e-mails oficiais de confirmação diretamente pelo seu endereço Gmail, sem necessitar de domínio próprio.</li>
                 </ol>
-                <p className={`text-xs pt-1 ${isDarkMode ? 'text-amber-300/70' : 'text-amber-700'}`}>
-                  <strong>Alternativa Gmail (SMTP):</strong> ative a Verificação em 2 Etapas em myaccount.google.com → Senhas de App → crie senha para "Simpósio SUS" → adicione ao .env: <code className="font-mono bg-amber-100 px-1 rounded">SMTP_USER=farmaciademinas.marketing@gmail.com</code> e <code className="font-mono bg-amber-100 px-1 rounded">SMTP_PASS=suasenha16chars</code>
-                </p>
               </div>
 
               {/* Conteúdo do email */}

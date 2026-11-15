@@ -526,11 +526,9 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     ? 'EmailJS REST'
                     : confirmationEmailResult?.deliveryMethod === 'gmail_api'
                     ? 'Gmail API'
-                    : confirmationEmailResult?.deliveryMethod === 'resend'
-                    ? 'Resend API'
                     : confirmationEmailResult?.deliveryMethod === 'smtp'
-                    ? 'Servidor SMTP'
-                    : 'Aguardando Provedor Externo';
+                    ? 'Gmail SMTP'
+                    : 'Aguardando Configuração Gmail SMTP';
 
                 return (
                   <div className={`p-4 sm:p-5 rounded-2xl bg-gradient-to-r ${cardClasses} border-2 shadow-sm space-y-3`}>

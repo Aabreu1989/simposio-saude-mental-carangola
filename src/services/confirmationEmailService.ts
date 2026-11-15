@@ -25,7 +25,6 @@ export interface ConfirmationEmailResult {
     | 'emailjs'
     | 'emailjs_rest'
     | 'gmail_api'
-    | 'resend'
     | 'smtp'
     | 'pending_provider';
   emailjsStatus?: string;
@@ -36,10 +35,10 @@ export interface ConfirmationEmailResult {
 }
 
 export interface ServerEmailStatus {
-  resendConfigured: boolean;
   smtpConfigured: boolean;
-  activeProvider: 'resend' | 'smtp' | 'none';
+  activeProvider: 'smtp' | 'none';
   hasRealServerDelivery: boolean;
+  senderEmail?: string;
 }
 
 export async function getServerEmailStatus(): Promise<ServerEmailStatus> {
@@ -52,7 +51,6 @@ export async function getServerEmailStatus(): Promise<ServerEmailStatus> {
     // ignore
   }
   return {
-    resendConfigured: false,
     smtpConfigured: false,
     activeProvider: 'none',
     hasRealServerDelivery: false
@@ -552,7 +550,7 @@ export async function sendRegistrationConfirmationEmail(
     }
   }
 
-  // 4. Dispatch to backend proxy `/api/email/confirm-registration` for Resend/SMTP delivery & audit logging
+  // Dispatch to backend proxy `/api/email/confirm-registration` for Gmail SMTP delivery & audit logging
   try {
     const serverResponse = await fetch('/api/email/confirm-registration', {
       method: 'POST',
@@ -576,13 +574,8 @@ export async function sendRegistrationConfirmationEmail(
       serverReceiptId = serverData?.receipt?.id;
       if (serverData?.actuallySent) {
         actuallyDelivered = true;
-        if (serverData?.deliveryProvider === 'resend') {
-          deliveryMethod = 'resend';
-          deliveryDetail = 'Enviado para a caixa de entrada via Resend API.';
-        } else if (serverData?.deliveryProvider === 'smtp') {
-          deliveryMethod = 'smtp';
-          deliveryDetail = 'Enviado para a caixa de entrada via Servidor SMTP.';
-        }
+        deliveryMethod = 'smtp';
+        deliveryDetail = 'Enviado para a caixa de entrada via Gmail SMTP.';
       } else if (!actuallyDelivered) {
         deliveryMethod = 'pending_provider';
         deliveryDetail = serverData?.deliveryError || serverData?.message;
