@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, Lock, User, KeyRound, Eye, EyeOff, ArrowLeft, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
 
 interface AdminLoginProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (rememberMe: boolean) => void;
   onBackToPublic: () => void;
   editionTitle?: string;
 }
@@ -14,6 +14,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -23,51 +24,51 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
     e.preventDefault();
     setErrorMessage(null);
 
-    const cleanUsername = username
-      .trim()
+    const rawInput = username.trim();
+    const cleanUsername = rawInput
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toUpperCase();
 
-    const expectedUser = 'SIMPOSIO CARANGOLA';
-    const expectedPass = 'SUS2026%';
+    const isMatchUser =
+      cleanUsername === 'SIMPOSIO CARANGOLA' ||
+      cleanUsername === 'SIMPOSIOCARANGOLA' ||
+      rawInput.toLowerCase() === 'farmaciademinas.marketing@gmail.com';
 
-    if (!username.trim() || !password) {
-      setErrorMessage('Por favor, preencha o usuário e a senha.');
+    const isMatchPass = password === 'SUS2026%';
+
+    if (!rawInput || !password) {
+      setErrorMessage('Por favor, informe o usuário e a senha de gestor.');
       return;
     }
 
     setIsLoading(true);
 
     setTimeout(() => {
-      if (cleanUsername === expectedUser && password === expectedPass) {
+      if (isMatchUser && isMatchPass) {
         setIsSuccess(true);
         setIsLoading(false);
         try {
-          localStorage.removeItem('simposio_admin_logged_out');
-          localStorage.setItem('simposio_admin_auth', 'true');
           sessionStorage.setItem('simposio_admin_auth', 'true');
+          if (rememberMe) {
+            localStorage.setItem('simposio_admin_remember', 'true');
+            localStorage.setItem('simposio_admin_auth', 'true');
+          } else {
+            localStorage.removeItem('simposio_admin_remember');
+            localStorage.removeItem('simposio_admin_auth');
+          }
+          localStorage.removeItem('simposio_admin_logged_out');
         } catch {
           // ignore storage errors
         }
         setTimeout(() => {
-          onLoginSuccess();
-        }, 400);
+          onLoginSuccess(rememberMe);
+        }, 350);
       } else {
         setIsLoading(false);
-        if (cleanUsername !== expectedUser) {
-          setErrorMessage('Acesso restrito: Apenas o Gestor Titular do Simpósio ("SIMPOSIO CARANGOLA") possui credenciamento para este painel.');
-        } else {
-          setErrorMessage('Senha incorreta para o Gestor Titular ("SUS2026%").');
-        }
+        setErrorMessage('Credenciais incorretas. Verifique seu usuário e senha de gestor autorizado.');
       }
     }, 350);
-  };
-
-  const handleFillCredentials = () => {
-    setUsername('SIMPOSIO CARANGOLA');
-    setPassword('SUS2026%');
-    setErrorMessage(null);
   };
 
   return (
@@ -104,7 +105,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                   Carangola · Zona da Mata MG
                 </span>
                 <h1 className="text-sm font-extrabold text-white leading-tight">
-                  Painel de Gestão Microrregional
+                  Painel de Gestão do Simpósio
                 </h1>
               </div>
             </div>
@@ -115,10 +116,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               </div>
               <div>
                 <h2 className="text-base font-black text-white leading-snug">
-                  Autenticação Administrativa
+                  Acesso Restrito ao Gestor
                 </h2>
                 <p className="text-xs text-stone-300">
-                  Insira as credenciais oficiais para gerenciar o Simpósio
+                  Informe suas credenciais para gerenciar a plataforma
                 </p>
               </div>
             </div>
@@ -128,8 +129,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
           <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-5">
             {/* Error Banner */}
             {errorMessage && (
-              <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
-                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                 <div className="font-semibold">{errorMessage}</div>
               </div>
             )}
@@ -148,7 +149,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                 htmlFor="admin-username"
                 className="block text-xs font-black uppercase tracking-wider text-[#0a3641] mb-1.5"
               >
-                Usuário
+                Usuário ou E-mail
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-stone-400">
@@ -162,7 +163,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                   autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="SIMPOSIO CARANGOLA"
+                  placeholder="Usuário ou e-mail cadastrado"
                   className="w-full pl-10 pr-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-sm font-semibold text-stone-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0a3641] focus:border-transparent transition-all placeholder:text-stone-400"
                 />
               </div>
@@ -203,8 +204,29 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
                 </button>
               </div>
               <p className="mt-1 text-[11px] text-stone-500">
-                Senha institucional de segurança
+                Senha institucional de segurança do gestor
               </p>
+            </div>
+
+            {/* Option: Manter Conectado Neste Navegador */}
+            <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl">
+              <label htmlFor="remember-me" className="flex items-start gap-2.5 cursor-pointer select-none">
+                <input
+                  id="remember-me"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-[#0a3641] border-stone-300 focus:ring-[#0a3641] cursor-pointer"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-stone-900 block">
+                    Manter conectado neste navegador
+                  </span>
+                  <span className="text-[11px] text-stone-500 block leading-tight mt-0.5">
+                    Selecione esta opção para não precisar digitar o usuário e senha novamente neste navegador.
+                  </span>
+                </div>
+              </label>
             </div>
 
             {/* Submit Button */}
@@ -231,33 +253,13 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               )}
             </button>
 
-            {/* Quick Fill for Authorized Manager */}
-            <div className="p-3 bg-stone-50 border border-stone-200/90 rounded-xl space-y-1.5">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-bold text-[#0a3641] flex items-center gap-1">
-                  <Shield className="w-3.5 h-3.5 text-[#ea7a38]" />
-                  Gestor Titular Único Autorizado:
-                </span>
-                <button
-                  type="button"
-                  onClick={handleFillCredentials}
-                  className="font-bold text-xs text-[#d96522] hover:text-[#0a3641] underline cursor-pointer"
-                >
-                  Preencher Credenciais
-                </button>
-              </div>
-              <div className="text-[10px] text-stone-500">
-                Apenas a conta de coordenação (<span className="font-mono font-bold text-stone-700">SIMPOSIO CARANGOLA</span>) possui permissão de gestão no sistema.
-              </div>
-            </div>
-
             {/* Institutional Security Notice */}
             <div className="pt-4 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-500">
               <span className="flex items-center gap-1.5 font-medium">
                 <Sparkles className="w-3.5 h-3.5 text-[#ea7a38]" />
                 SUS · RAPS Microrregional
               </span>
-              <span className="font-mono text-stone-400">Credenciamento Ativo</span>
+              <span className="font-mono text-stone-400">Acesso Restrito</span>
             </div>
           </form>
         </div>

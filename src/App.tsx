@@ -309,29 +309,39 @@ export default function App() {
     }
   };
 
-  // Admin authentication state: By default, keep logged in as authorized single manager during development,
-  // but if the manager explicitly clicks "Encerrar Sessão / Sair", prompt the login screen.
+  // Admin authentication state:
+  // Strict security: ONLY grant automatic access if THIS SPECIFIC BROWSER
+  // has previously authenticated AND selected the option "Manter conectado neste navegador".
+  // Otherwise, username and password are required.
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const explicitLogout = localStorage.getItem('simposio_admin_logged_out');
-        if (explicitLogout === 'true') {
-          return false;
-        }
-        return true;
-      } catch {
+    if (typeof window === 'undefined') return false;
+    try {
+      const explicitLogout = localStorage.getItem('simposio_admin_logged_out');
+      if (explicitLogout === 'true') {
+        return false;
+      }
+      const isRemembered = localStorage.getItem('simposio_admin_remember') === 'true';
+      const hasLocalAuth = localStorage.getItem('simposio_admin_auth') === 'true';
+      if (isRemembered && hasLocalAuth) {
         return true;
       }
+      const hasSessionAuth = sessionStorage.getItem('simposio_admin_auth') === 'true';
+      if (hasSessionAuth) {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
     }
-    return true;
   });
 
   const handleAdminLogout = () => {
     setIsAdminAuthenticated(false);
     try {
       localStorage.setItem('simposio_admin_logged_out', 'true');
-      sessionStorage.removeItem('simposio_admin_auth');
+      localStorage.removeItem('simposio_admin_remember');
       localStorage.removeItem('simposio_admin_auth');
+      sessionStorage.removeItem('simposio_admin_auth');
     } catch {
       // ignore
     }
@@ -1230,8 +1240,16 @@ export default function App() {
         <main className="flex-1">
           {!isAdminAuthenticated ? (
             <AdminLogin
-              onLoginSuccess={() => {
+              onLoginSuccess={(rememberMe) => {
                 try {
+                  sessionStorage.setItem('simposio_admin_auth', 'true');
+                  if (rememberMe) {
+                    localStorage.setItem('simposio_admin_remember', 'true');
+                    localStorage.setItem('simposio_admin_auth', 'true');
+                  } else {
+                    localStorage.removeItem('simposio_admin_remember');
+                    localStorage.removeItem('simposio_admin_auth');
+                  }
                   localStorage.removeItem('simposio_admin_logged_out');
                 } catch {
                   // ignore
