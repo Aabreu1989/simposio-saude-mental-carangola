@@ -1,9 +1,4 @@
 import { EventConfig, CertificateDesignConfig, BadgeDesignConfig, ThematicAxis, ScheduleSession, Registration, DownloadMaterial, SocialPost, PushNotificationItem, NewsletterSubscriber, EvaluationFeedback, SpeakerProfile } from '../types.ts';
-import speakerMarianaImg from '../assets/images/speaker_mariana_castro_1794585849885.jpg';
-import speakerLucasImg from '../assets/images/speaker_lucas_pimentel_1794585850211.jpg';
-import speakerFlavioImg from '../assets/images/speaker_flavio_alvim_1794585851217.jpg';
-import speakerJulianaImg from '../assets/images/speaker_juliana_fontes_1794585851875.jpg';
-import speakerCamilaImg from '../assets/images/speaker_camila_silveira_1794585853043.jpg';
 
 export const DEFAULT_EVENT_HASHTAGS =
   '#SaudeMentalCarangola #CuidadoEmLiberdade #SUSMicrorregiao #RAPSCarangola #CarangolaMG';
@@ -190,11 +185,6 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
       role: 'Mediadora · Superintendente da Saúde Mental',
       institution: 'Superintendência de Saúde Mental'
     },
-    speakers: [
-      { name: 'Dra. Mariana Castro', role: 'Médica Sanitarista', institution: 'Coordenação Estadual de Saúde Mental / SES-MG' },
-      { name: 'Enf. Roberto Guimarães', role: 'Especialista em Saúde da Família', institution: 'Atenção Primária / Microrregião Carangola' },
-      { name: 'Dra. Camila Silveira', role: 'Médica Psiquiatra / Coord. CAPS II', institution: 'Rede de Atenção Psicossocial' }
-    ],
     description: 'Tema: Fluxograma da RAPS. Articulação entre Atenção Primária, CAPS e dispositivos do território para construção de fluxos integrados e Projetos Terapêuticos Singulares.'
   },
   {
@@ -215,16 +205,10 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     axisId: 'eixo-2',
     location: 'Auditório UEMG Carangola',
     mediator: {
-      name: 'Raquel Pinheiro',
+      name: 'Raquel Martins Pinheiro',
       role: 'Mediadora · Supervisora Clínico Institucional',
       institution: 'Ministério da Saúde / Fiocruz no CAPS ad de Carangola'
     },
-    speakers: [
-      { name: 'Dr. Lucas Pimentel', role: 'Médico Clínico Hospitalar', institution: 'Hospital Casa de Caridade de Carangola' },
-      { name: 'Dr. Flávio Alvim', role: 'Médico Psiquiatra', institution: 'Hospital Casa de Caridade de Carangola' },
-      { name: 'Dr.ª Juliana Fontes', role: 'Médica Reguladora', institution: 'SAMU Regional 192' },
-      { name: 'Assistente Social Marcos Prado', role: 'Serviço Social Hospitalar', institution: 'Comissão de Humanização' }
-    ],
     description: 'Tema: O hospital geral, leitos de retaguarda e pronto socorro. Acolhimento às crises, manejo humanizado e integração clínica na urgência e emergência.'
   },
   {
@@ -245,15 +229,10 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     axisId: 'eixo-3',
     location: 'Auditório UEMG Carangola',
     mediator: {
-      name: 'Christine Vianna',
+      name: 'Christine Vianna Algarves Magalhães',
       role: 'Mediadora · Supervisora Clínico Institucional',
       institution: 'Ministério da Saúde e Fiocruz · CAPS I e CAPS Infanto Juvenil'
     },
-    speakers: [
-      { name: 'Dra. Beatriz Menezes', role: 'Defensora Pública', institution: 'Defensoria Pública do Estado de Minas Gerais' },
-      { name: 'Promotor de Justiça Titular', role: 'Curadoria de Saúde', institution: 'Ministério Público de Minas Gerais / Comarca Carangola' },
-      { name: 'Psic. Carlos Eduardo Rocha', role: 'Conselheiro Regional', institution: 'Conselho Regional de Psicologia (CRP-MG)' }
-    ],
     description: 'Tema: A judicialização da saúde mental e o cuidado em liberdade. Diálogo intersetorial pela garantia de direitos e fortalecimento da Lei 10.216/2001.'
   },
   {
@@ -711,166 +690,13 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
 
 export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   {
-    id: 'spk-mariana-castro',
-    name: 'Dra. Mariana Castro',
-    role: 'Médica Sanitarista',
-    institution: 'Coordenação Estadual de Saúde Mental · SES-MG',
-    sessionGroup: 'mesa-1',
-    sessionLabel: 'Mesa 1 · Fluxograma da RAPS',
-    sessionTime: '09:30 – 11:30',
-    photoUrl: speakerMarianaImg,
-    bio: 'Médica sanitarista com atuação em políticas públicas de Saúde Mental pela SES-MG. Dedica-se à organização de redes regionais de atenção psicossocial, matriciamento e educação permanente no SUS.',
-    socials: {
-      instagram: '@dramariana.sus',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Mariana Castro · SES-MG',
-      linkedinUrl: 'https://www.linkedin.com/',
-      lattesUrl: 'https://lattes.cnpq.br/'
-    }
-  },
-  {
-    id: 'spk-camila-silveira',
-    name: 'Dra. Camila Silveira',
-    role: 'Médica Psiquiatra · Coord. CAPS II',
-    institution: 'Rede de Atenção Psicossocial (RAPS)',
-    sessionGroup: 'mesa-1',
-    sessionLabel: 'Mesa 1 · Fluxograma da RAPS',
-    sessionTime: '09:30 – 11:30',
-    photoUrl: speakerCamilaImg,
-    bio: 'Psiquiatra clínica e coordenadora de CAPS II com foco em cuidado territorial, clínica ampliada, redução de danos e construção compartilhada de Projetos Terapêuticos Singulares.',
-    socials: {
-      instagram: '@dracamila.raps',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Camila Silveira · Psiquiatria SUS',
-      linkedinUrl: 'https://www.linkedin.com/',
-      lattesUrl: 'https://lattes.cnpq.br/'
-    }
-  },
-  {
-    id: 'spk-roberto-guimaraes',
-    name: 'Enf. Roberto Guimarães',
-    role: 'Especialista em Saúde da Família',
-    institution: 'Atenção Primária · Microrregião Carangola',
-    sessionGroup: 'mesa-1',
-    sessionLabel: 'Mesa 1 · Fluxograma da RAPS',
-    sessionTime: '09:30 – 11:30',
-    bio: 'Enfermeiro especialista em Saúde da Família e Comunidade, atuando na integração entre Unidades Básicas de Saúde, equipes eMulti e CAPS no cuidado longitudinal em Saúde Mental.',
-    socials: {
-      instagram: '@roberto.aps.carangola',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Roberto Guimarães · APS',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
-  },
-  {
-    id: 'spk-lucas-pimentel',
-    name: 'Dr. Lucas Pimentel',
-    role: 'Médico Clínico Hospitalar',
-    institution: 'Hospital Casa de Caridade de Carangola',
-    sessionGroup: 'mesa-2',
-    sessionLabel: 'Mesa 2 · Hospital Geral & Urgência',
-    sessionTime: '13:00 – 14:30',
-    photoUrl: speakerLucasImg,
-    bio: 'Médico clínico com atuação no pronto atendimento e enfermarias gerais do Hospital Casa de Caridade de Carangola, articulando o manejo clínico seguro e a continuidade do cuidado na RAPS.',
-    socials: {
-      instagram: '@drlucas.clinicamedica',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Lucas Pimentel · Clínica Médica',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
-  },
-  {
-    id: 'spk-flavio-alvim',
-    name: 'Dr. Flávio Alvim',
-    role: 'Médico Psiquiatra',
-    institution: 'Hospital Casa de Caridade de Carangola',
-    sessionGroup: 'mesa-2',
-    sessionLabel: 'Mesa 2 · Hospital Geral & Urgência',
-    sessionTime: '13:00 – 14:30',
-    photoUrl: speakerFlavioImg,
-    bio: 'Psiquiatra referência na microrregião para interconsulta hospitalar e acompanhamento de leitos de retaguarda em Saúde Mental em hospital geral, defendendo a desinstitucionalização responsável.',
-    socials: {
-      instagram: '@drflavioalvim.psiq',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Flávio Alvim · Psiquiatria',
-      linkedinUrl: 'https://www.linkedin.com/',
-      lattesUrl: 'https://lattes.cnpq.br/'
-    }
-  },
-  {
-    id: 'spk-juliana-fontes',
-    name: 'Dr.ª Juliana Fontes',
-    role: 'Médica Reguladora',
-    institution: 'SAMU Regional 192',
-    sessionGroup: 'mesa-2',
-    sessionLabel: 'Mesa 2 · Hospital Geral & Urgência',
-    sessionTime: '13:00 – 14:30',
-    photoUrl: speakerJulianaImg,
-    bio: 'Médica reguladora e intervencionista do SAMU Regional 192, especialista em protocolos de acolhimento humanizado às crises em Saúde Mental e regulação ágil de urgências na Zona da Mata.',
-    socials: {
-      instagram: '@drajulianafontes.192',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Juliana Fontes · Regulação SAMU',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
-  },
-  {
-    id: 'spk-marcos-prado',
-    name: 'Marcos Prado',
-    role: 'Assistente Social Hospitalar',
-    institution: 'Comissão de Humanização · Casa de Caridade',
-    sessionGroup: 'mesa-2',
-    sessionLabel: 'Mesa 2 · Hospital Geral & Urgência',
-    sessionTime: '13:00 – 14:30',
-    bio: 'Assistente social integrante da Comissão de Humanização Hospitalar, com experiência no acolhimento familiar, garantia de direitos sociais durante a internação breve e transição para os serviços territoriais.',
-    socials: {
-      instagram: '@marcosprado.servicosocial',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Marcos Prado · Humanização SUS',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
-  },
-  {
-    id: 'spk-beatriz-menezes',
-    name: 'Dra. Beatriz Menezes',
-    role: 'Defensora Pública',
-    institution: 'Defensoria Pública do Estado de Minas Gerais',
-    sessionGroup: 'mesa-3',
-    sessionLabel: 'Mesa 3 · Judicialização & Direitos',
-    sessionTime: '14:45 – 16:00',
-    bio: 'Defensora Pública atuante na defesa dos direitos humanos e acesso à saúde pelo SUS, promovendo o diálogo resolutivo entre Sistema de Justiça, RAPS e garantia do cuidado em liberdade.',
-    socials: {
-      instagram: '@defensoriamg',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Beatriz Menezes · DPMG',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
-  },
-  {
-    id: 'spk-carlos-rocha',
-    name: 'Psic. Carlos Eduardo Rocha',
-    role: 'Conselheiro Regional',
-    institution: 'Conselho Regional de Psicologia (CRP-MG)',
-    sessionGroup: 'mesa-3',
-    sessionLabel: 'Mesa 3 · Judicialização & Direitos',
-    sessionTime: '14:45 – 16:00',
-    bio: 'Psicólogo e conselheiro do CRP-MG com trajetória dedicada à Reforma Psiquiátrica Antimanicomial, defesa da Lei nº 10.216/2001 e fortalecimento ético-político dos trabalhadores da RAPS.',
-    socials: {
-      instagram: '@crpmg',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Carlos Eduardo Rocha · CRP-MG',
-      linkedinUrl: 'https://www.linkedin.com/',
-      lattesUrl: 'https://lattes.cnpq.br/'
-    }
-  },
-  {
     id: 'spk-raquel-pinheiro',
     name: 'Raquel Martins Pinheiro',
     role: 'Supervisora Clínico-Institucional',
     institution: 'Ministério da Saúde / Fiocruz · CAPS AD Carangola',
-    sessionGroup: 'abertura',
-    sessionLabel: 'Abertura & Mediação · Mesa 2',
-    sessionTime: '08:30 – 09:15 · 13:00',
+    sessionGroup: 'mesa-2',
+    sessionLabel: 'Abertura Solene & Mediação Mesa 2',
+    sessionTime: '08:30 – 09:15 · 13:00 – 14:30',
     bio: 'Supervisora clínico-institucional vinculada ao projeto Ministério da Saúde/Fiocruz no CAPS AD de Carangola, apoiando equipes no cuidado territorial, redução de danos e articulação em rede.',
     socials: {
       instagram: '@capsad.carangola',
@@ -885,9 +711,9 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     name: 'Christine Vianna Algarves Magalhães',
     role: 'Supervisora Clínico-Institucional',
     institution: 'Ministério da Saúde / Fiocruz · CAPS I e CAPS IJ',
-    sessionGroup: 'abertura',
-    sessionLabel: 'Abertura & Mediação · Mesa 3',
-    sessionTime: '08:30 – 09:15 · 14:45',
+    sessionGroup: 'mesa-3',
+    sessionLabel: 'Abertura Solene & Mediação Mesa 3',
+    sessionTime: '08:30 – 09:15 · 14:45 – 16:00',
     bio: 'Supervisora clínico-institucional do Ministério da Saúde e Fiocruz junto ao CAPS I e CAPS Infantojuvenil, fortalecendo práticas intersetoriais e proteção integral de crianças, jovens e famílias.',
     socials: {
       instagram: '@raps.carangola',
@@ -902,9 +728,9 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     name: 'Camila Lima',
     role: 'Superintendente de Saúde Mental',
     institution: 'Superintendência de Saúde Mental',
-    sessionGroup: 'abertura',
-    sessionLabel: 'Abertura & Mediação · Mesa 1',
-    sessionTime: '08:30 – 09:15 · 09:30',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Abertura Solene & Mediação Mesa 1',
+    sessionTime: '08:30 – 09:15 · 09:30 – 11:30',
     bio: 'Gestora pública à frente da Superintendência de Saúde Mental, articulando políticas microrregionais, educação permanente das equipes e implantação integrada da Rede de Atenção Psicossocial.',
     socials: {
       instagram: '@saudemental.carangola',

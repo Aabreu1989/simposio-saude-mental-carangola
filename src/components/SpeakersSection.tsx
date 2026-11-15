@@ -58,7 +58,10 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
   const filteredSpeakers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return speakers.filter((spk) => {
-      const matchesGroup = selectedGroup === 'todos' || spk.sessionGroup === selectedGroup;
+      const matchesGroup =
+        selectedGroup === 'todos' ||
+        spk.sessionGroup === selectedGroup ||
+        (selectedGroup === 'abertura' && spk.sessionLabel.toLowerCase().includes('abertura'));
       if (!matchesGroup) return false;
       if (!q) return true;
       return (
