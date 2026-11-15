@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   Users,
   CheckCircle2,
@@ -3796,521 +3796,152 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        {/* TAB 4: DISPARO DE PUSH & LEMBRETES */}
+        {/* TAB: CONFIRMAÇÃO DE INSCRIÇÃO & CONSENTIMENTOS */}
         {activeTab === 'notifications' && (
-          <div className="space-y-8">
-            
-            {/* EmailJS API Settings & Live Tester */}
-            <EmailJsSettingsCard
-              isDarkMode={isDarkMode}
-              eventConfig={config}
-              onUpdateConfig={onUpdateConfig}
-            />
+          <div className="space-y-6">
 
-            {/* Programmatic Gmail Automation Hub */}
-            <GmailNotificationHub
-              registrations={registrations}
-              config={config}
-              isDarkMode={isDarkMode}
-            />
-
-            {/* Composer Card */}
-            <div className={`rounded-2xl border p-6 space-y-6 transition-colors ${theme.card}`}>
-              <div className={`flex items-center justify-between border-b pb-4 ${isDarkMode ? 'border-[#133540]' : 'border-stone-200'}`}>
-                <div>
-                  <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.textHeading}`}>
-                    <Send className="w-5 h-5 text-[#d96522]" />
-                    <span>Central de Envio de Notificações Push & Lembretes</span>
-                  </h3>
-                  <p className={`text-xs mt-1 ${theme.textMuted}`}>
-                    Envie alertas customizados em tempo real aos participantes e acompanhe o engajamento e taxa de abertura.
-                  </p>
+            {/* STATUS DO EMAIL DE CONFIRMAÇÃO */}
+            <div className={`rounded-2xl border p-6 space-y-4 ${theme.card}`}>
+              <div className={`flex items-center gap-3 border-b pb-4 ${isDarkMode ? 'border-[#133540]' : 'border-stone-200'}`}>
+                <div className="w-9 h-9 rounded-xl bg-[#0a3641]/10 flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5 text-[#0a3641]" />
                 </div>
-
-                {notifSentNotice && (
-                  <div className="bg-emerald-100 text-emerald-800 text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 animate-bounce">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Notificação Disparada com Sucesso!</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Fast Templates */}
-              <div>
-                <span className={`text-xs font-bold uppercase tracking-wider block mb-2 font-mono ${theme.textMuted}`}>
-                  Modelos Rápidos Pré-configurados:
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      applyTemplate(
-                        'Lembrete: Simpósio Acontece Amanhã!',
-                        'Tudo pronto para o 1º Simpósio de Saúde Mental da Microrregião de Carangola. Credenciamento inicia às 08h30. Não se esqueça do seu documento com foto!',
-                        'lembrete'
-                      )
-                    }
-                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-                      isDarkMode
-                        ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border border-[#1a414e]'
-                        : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
-                    }`}
-                  >
-                    Lembrete de Véspera
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      applyTemplate(
-                        'Credenciamento Aberto com Café Regional',
-                        'A equipe do SUS está recebendo os profissionais no hall de entrada. Retire seu crachá e sua pasta de materiais.',
-                        'aviso'
-                      )
-                    }
-                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-                      isDarkMode
-                        ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border border-[#1a414e]'
-                        : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
-                    }`}
-                  >
-                    Abertura da Portaria
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      applyTemplate(
-                        'Certificados Oficiais Liberados no Portal!',
-                        'Seu certificado de 8 horas do Simpósio já pode ser emitido na Área de Downloads informando seu CPF ou código de inscrição.',
-                        'certificado'
-                      )
-                    }
-                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-                      isDarkMode
-                        ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border border-[#1a414e]'
-                        : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
-                    }`}
-                  >
-                    Liberação de Certificados
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      applyTemplate(
-                        'Plenária Final: Participe da Carta de Carangola',
-                        'Estamos iniciando a redação coletiva da Carta de Carangola em Defesa da RAPS. Sua contribuição é fundamental.',
-                        'urgente'
-                      )
-                    }
-                    className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors cursor-pointer ${
-                      isDarkMode
-                        ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border border-[#1a414e]'
-                        : 'bg-stone-100 hover:bg-stone-200 text-stone-700'
-                    }`}
-                  >
-                    Chamada para Plenária
-                  </button>
+                <div>
+                  <h3 className={`text-base font-bold ${theme.textHeading}`}>E-mail de Confirmação de Inscrição</h3>
+                  <p className={`text-xs mt-0.5 ${theme.textMuted}`}>Enviado automaticamente ao participante no momento da inscrição, com número de inscrito e informações do evento.</p>
                 </div>
               </div>
 
-              {/* Composer Form */}
-              <form onSubmit={handleTriggerNotification} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>
-                      Título da Notificação *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Ex: Lembrete Importante: Credenciamento às 8h30"
-                      value={notifTitle}
-                      onChange={(e) => setNotifTitle(e.target.value)}
-                      className={`w-full px-3.5 py-2 text-sm rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                    />
-                  </div>
+              <div className={`rounded-xl border p-4 space-y-2 text-sm ${isDarkMode ? 'bg-amber-950/30 border-amber-700/40' : 'bg-amber-50 border-amber-200'}`}>
+                <p className={`font-bold flex items-center gap-2 ${isDarkMode ? 'text-amber-300' : 'text-amber-800'}`}>
+                  <span>⚙️</span> Como configurar o envio de e-mails:
+                </p>
+                <ol className={`list-decimal list-inside space-y-1.5 text-xs leading-relaxed ${isDarkMode ? 'text-amber-200/80' : 'text-amber-900/80'}`}>
+                  <li>Acesse <strong>resend.com</strong> → crie uma conta gratuita</li>
+                  <li>Vá em <strong>API Keys</strong> → clique <strong>"Create API Key"</strong> → copie a chave <code className="font-mono bg-amber-100 px-1 rounded">re_xxxx...</code></li>
+                  <li>Abra o arquivo <code className="font-mono bg-amber-100 px-1 rounded">.env</code> na raiz do projeto</li>
+                  <li>Adicione a linha: <code className="font-mono bg-amber-100 px-1 rounded">RESEND_API_KEY=re_suachave</code></li>
+                  <li>Reinicie o servidor: feche e abra novamente o terminal com <code className="font-mono bg-amber-100 px-1 rounded">npm run dev</code></li>
+                  <li>Pronto — cada nova inscrição disparará o e-mail automaticamente.</li>
+                </ol>
+                <p className={`text-xs pt-1 ${isDarkMode ? 'text-amber-300/70' : 'text-amber-700'}`}>
+                  <strong>Alternativa Gmail (SMTP):</strong> ative a Verificação em 2 Etapas em myaccount.google.com → Senhas de App → crie senha para "Simpósio SUS" → adicione ao .env: <code className="font-mono bg-amber-100 px-1 rounded">SMTP_USER=farmaciademinas.marketing@gmail.com</code> e <code className="font-mono bg-amber-100 px-1 rounded">SMTP_PASS=suasenha16chars</code>
+                </p>
+              </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>
-                        Público-Alvo
-                      </label>
-                      <select
-                        value={notifAudience}
-                        onChange={(e) => setNotifAudience(e.target.value as any)}
-                        className={`w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                      >
-                        <option value="todos" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Todos os Usuários & Inscritos</option>
-                        <option value="inscritos" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Apenas Inscritos Confirmados</option>
-                        <option value="presentes" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Apenas Presentes no Local</option>
-                        <option value="profissionais" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Profissionais de Saúde</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>
-                        Categoria
-                      </label>
-                      <select
-                        value={notifCategory}
-                        onChange={(e) => setNotifCategory(e.target.value as any)}
-                        className={`w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                      >
-                        <option value="lembrete" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Lembrete</option>
-                        <option value="aviso" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Aviso Geral</option>
-                        <option value="material" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Material Disponível</option>
-                        <option value="certificado" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Certificado</option>
-                        <option value="urgente" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Urgente</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isDarkMode ? 'text-stone-300' : 'text-stone-700'}`}>
-                    Mensagem da Notificação / Lembrete *
-                  </label>
-                  <textarea
-                    rows={3}
-                    required
-                    placeholder="Escreva a mensagem que aparecerá no celular/navegador dos participantes..."
-                    value={notifBody}
-                    onChange={(e) => setNotifBody(e.target.value)}
-                    className={`w-full px-3.5 py-2 text-sm rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                  />
-                </div>
-
-                {/* Multi-Channel Selection */}
-                <div className={`p-4 rounded-xl border space-y-2.5 ${isDarkMode ? 'bg-[#06151c]/60 border-[#1a414e]' : 'bg-stone-50 border-stone-200'}`}>
-                  <span className={`text-xs font-bold uppercase tracking-wider block font-mono ${theme.textMuted}`}>
-                    Canais de Disparo Ativos:
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    {/* Canal 1: Alerta no Portal & Push Web */}
-                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                      notifChannelPortal
-                        ? (isDarkMode ? 'bg-[#102a33] border-sky-500/50 text-white' : 'bg-sky-50 border-sky-300 text-[#0a3641]')
-                        : (isDarkMode ? 'bg-transparent border-white/10 text-stone-400' : 'bg-white border-stone-200 text-stone-500')
-                    }`}>
-                      <input
-                        type="checkbox"
-                        checked={notifChannelPortal}
-                        onChange={(e) => setNotifChannelPortal(e.target.checked)}
-                        className="rounded text-[#0a3641]"
-                      />
-                      <div className="text-xs">
-                        <div className="font-bold flex items-center gap-1">
-                          <Bell className="w-3.5 h-3.5 text-sky-500" />
-                          <span>Portal & Push Web</span>
-                        </div>
-                        <div className="text-[10px] opacity-80">Banner ao vivo & sino</div>
-                      </div>
-                    </label>
-
-                    {/* Canal 2: WhatsApp */}
-                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                      notifChannelWhatsapp
-                        ? (isDarkMode ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200' : 'bg-emerald-50 border-emerald-300 text-emerald-950')
-                        : (isDarkMode ? 'bg-transparent border-white/10 text-stone-400' : 'bg-white border-stone-200 text-stone-500')
-                    }`}>
-                      <input
-                        type="checkbox"
-                        checked={notifChannelWhatsapp}
-                        onChange={(e) => setNotifChannelWhatsapp(e.target.checked)}
-                        className="rounded text-emerald-600"
-                      />
-                      <div className="text-xs">
-                        <div className="font-bold flex items-center gap-1">
-                          <Smartphone className="w-3.5 h-3.5 text-emerald-500" />
-                          <span>WhatsApp</span>
-                        </div>
-                        <div className="text-[10px] opacity-80">Transmissão & Contatos</div>
-                      </div>
-                    </label>
-
-                    {/* Canal 3: E-mail Broadcast */}
-                    <label className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                      notifChannelEmail
-                        ? (isDarkMode ? 'bg-amber-950/40 border-amber-500/50 text-amber-200' : 'bg-amber-50 border-amber-300 text-amber-950')
-                        : (isDarkMode ? 'bg-transparent border-white/10 text-stone-400' : 'bg-white border-stone-200 text-stone-500')
-                    }`}>
-                      <input
-                        type="checkbox"
-                        checked={notifChannelEmail}
-                        onChange={(e) => setNotifChannelEmail(e.target.checked)}
-                        className="rounded text-[#ea7a38]"
-                      />
-                      <div className="text-xs">
-                        <div className="font-bold flex items-center gap-1">
-                          <Mail className="w-3.5 h-3.5 text-[#ea7a38]" />
-                          <span>E-mail Broadcast</span>
-                        </div>
-                        <div className="text-[10px] opacity-80">Disparo para inscritos</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                {/* Email broadcast status feedback */}
-                {emailBroadcastNotice && (
-                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-[#ea7a38]" />
-                    <span>{emailBroadcastNotice}</span>
-                  </div>
-                )}
-
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-                  <div className={`text-xs ${theme.textMuted}`}>
-                    O disparo sincronizará os canais selecionados com a infraestrutura oficial do SUS Carangola.
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={isBroadcastingEmail}
-                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-[#d96522] hover:bg-[#c25516] rounded-xl shadow-sm transition-colors cursor-pointer shrink-0 disabled:opacity-50"
-                  >
-                    <Send className={`w-3.5 h-3.5 ${isBroadcastingEmail ? 'animate-spin' : ''}`} />
-                    <span>{isBroadcastingEmail ? 'Disparando E-mails...' : 'Disparar Notificação Agora'}</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-
-            {/* Notification History & Engagement Metrics */}
-            <div className={`rounded-2xl border p-6 space-y-4 transition-colors ${theme.card}`}>
-              <h4 className={`text-base font-bold ${theme.textHeading}`}>
-                Histórico de Disparos & Métricas de Desempenho
-              </h4>
-
-              <div className={`divide-y transition-colors ${isDarkMode ? 'divide-[#0e2730]' : 'divide-stone-100'}`}>
-                {notifications.map((n) => {
-                  const openRate = Math.min(100, Math.round((n.readCount / n.totalSent) * 100));
-
-                  return (
-                    <div key={n.id} className="py-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded ${
-                            isDarkMode ? 'bg-[#102a33] text-teal-300 border border-[#1a414e]' : 'bg-stone-100 text-stone-700'
-                          }`}>
-                            {n.category}
-                          </span>
-                          <span className={`text-xs font-mono ${theme.textMuted}`}>
-                            {new Date(n.sentAt).toLocaleDateString('pt-BR')} às{' '}
-                            {new Date(n.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          <span className={`text-xs ${theme.textMuted}`}>· Destino: {n.targetAudience}</span>
-                        </div>
-                        <h5 className={`text-sm font-bold ${isDarkMode ? 'text-stone-100' : 'text-stone-900'}`}>{n.title}</h5>
-                        <p className={`text-xs max-w-2xl ${isDarkMode ? 'text-stone-300' : 'text-stone-600'}`}>{n.body}</p>
-
-                        {/* Quick Action buttons for history */}
-                        <div className="flex items-center gap-2 pt-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setWhatsappDispatchModal(n)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-bold text-emerald-800 transition-colors cursor-pointer"
-                          >
-                            <Smartphone className="w-3 h-3 text-emerald-600" />
-                            <span>Transmitir no WhatsApp</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className={`flex items-center gap-4 text-xs shrink-0 p-2.5 rounded-xl border transition-colors ${theme.subCard}`}>
-                        <div>
-                          <div className={`text-[10px] uppercase ${theme.textMuted}`}>Enviados</div>
-                          <div className={`font-mono font-bold ${isDarkMode ? 'text-stone-100' : 'text-stone-900'}`}>{n.totalSent}</div>
-                        </div>
-                        <div>
-                          <div className={`text-[10px] uppercase ${theme.textMuted}`}>Aberturas</div>
-                          <div className="font-mono font-bold text-emerald-500">{n.readCount}</div>
-                        </div>
-                        <div>
-                          <div className={`text-[10px] uppercase ${theme.textMuted}`}>Engajamento</div>
-                          <div className="font-mono font-bold text-[#ea7a38]">{openRate}%</div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              {/* Conteúdo do email */}
+              <div className={`rounded-xl border p-4 space-y-1.5 text-xs ${isDarkMode ? 'bg-[#071a21] border-[#133540]' : 'bg-stone-50 border-stone-200'}`}>
+                <p className={`font-bold uppercase tracking-wide font-mono ${theme.textMuted}`}>O e-mail de confirmação inclui:</p>
+                <ul className={`space-y-1 ${theme.textMuted}`}>
+                  <li>✅ Nome completo do participante</li>
+                  <li>✅ Número de inscrito (usado também para retirar o certificado)</li>
+                  <li>✅ CPF (pode ser usado como alternativa para retirar o certificado)</li>
+                  <li>✅ Data, horário e local do evento</li>
+                  <li>✅ Programação completa</li>
+                  <li>✅ Instruções para retirada do certificado</li>
+                </ul>
               </div>
             </div>
 
-            {/* WHATSAPP DISPATCH MODAL */}
-            {whatsappDispatchModal && (() => {
-              const notif = whatsappDispatchModal;
-              const formattedMessage = formatNotificationWhatsAppMessage(notif, config);
-
-              // Filter participants based on notification audience
-              const eligibleAttendees = registrations.filter((r) => {
-                if (!r.phone) return false;
-                if (notif.targetAudience === 'presentes') return r.status === 'presente';
-                if (notif.targetAudience === 'profissionais') return r.professionalRole !== 'Estudante' && r.professionalRole !== 'Outro';
-                return true;
-              });
-
-              const filteredAttendees = eligibleAttendees.filter((r) => {
-                if (!whatsappSearchFilter.trim()) return true;
-                const q = whatsappSearchFilter.toLowerCase();
-                return (
-                  r.fullName.toLowerCase().includes(q) ||
-                  r.phone.includes(q) ||
-                  r.city.toLowerCase().includes(q)
-                );
-              });
-
-              const handleCopyMessage = () => {
-                navigator.clipboard.writeText(formattedMessage);
-                alert('Mensagem formatada para o WhatsApp copiada para a área de transferência!');
-              };
-
-              const handleCopyPhones = () => {
-                const phones = eligibleAttendees.map((r) => r.phone).filter(Boolean).join('; ');
-                navigator.clipboard.writeText(phones);
-                alert(`${eligibleAttendees.length} telefones copiados para criar Lista de Transmissão no WhatsApp!`);
-              };
-
+            {/* LISTA: QUEM QUER RECEBER EMAIL */}
+            {(() => {
+              const wantEmail = registrations.filter((r) => r.acceptEmailNews);
+              const wantWhatsapp = registrations.filter((r) => r.acceptWhatsappNews && r.phone);
               return (
-                <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-                  <div className={`w-full max-w-2xl rounded-2xl shadow-2xl border overflow-hidden my-6 ${isDarkMode ? 'bg-[#0a232c] border-[#163f4c]' : 'bg-white border-stone-200'}`}>
-                    {/* Header */}
-                    <div className="p-4 bg-emerald-600 text-white flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
-                          <Smartphone className="w-4 h-4 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-sm sm:text-base leading-tight">
-                            Central de Disparo Oficial via WhatsApp
-                          </h3>
-                          <p className="text-[11px] text-white/80">
-                            {eligibleAttendees.length} participantes elegíveis com telefone cadastrado
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setWhatsappDispatchModal(null)}
-                        className="p-1.5 rounded-lg hover:bg-white/20 text-white cursor-pointer"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Email opt-in */}
+                  <div className={`rounded-2xl border p-5 space-y-4 ${theme.card}`}>
+                    <div className="flex items-center justify-between">
+                      <h4 className={`font-bold flex items-center gap-2 ${theme.textHeading}`}>
+                        <Mail className="w-4 h-4 text-[#ea7a38]" />
+                        Aceite de E-mail
+                      </h4>
+                      <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${isDarkMode ? 'bg-[#102a33] text-teal-300' : 'bg-stone-100 text-stone-700'}`}>
+                        {wantEmail.length} inscritos
+                      </span>
                     </div>
-
-                    <div className="p-4 sm:p-6 space-y-5 max-h-[80vh] overflow-y-auto">
-                      {/* Message Preview */}
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-xs font-bold uppercase tracking-wider font-mono text-emerald-600">
-                            Mensagem Formatada (Visualização WhatsApp):
+                    <div className={`divide-y text-xs max-h-72 overflow-y-auto rounded-xl border ${isDarkMode ? 'divide-[#0e2730] border-[#133540]' : 'divide-stone-100 border-stone-200'}`}>
+                      {wantEmail.length === 0 ? (
+                        <div className={`p-4 text-center ${theme.textMuted}`}>Nenhum inscrito optou por e-mail ainda.</div>
+                      ) : wantEmail.map((r) => (
+                        <div key={r.id} className={`px-3 py-2 flex items-center justify-between gap-2 ${isDarkMode ? 'hover:bg-[#0e2730]' : 'hover:bg-stone-50'}`}>
+                          <div className="min-w-0">
+                            <div className={`font-semibold truncate ${theme.textHeading}`}>{r.fullName}</div>
+                            <div className={`font-mono truncate ${theme.textMuted}`}>{r.email}</div>
+                          </div>
+                          <span className={`shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-teal-900/50 text-teal-300' : 'bg-teal-50 text-teal-700 border border-teal-200'}`}>
+                            {r.code}
                           </span>
-                          <button
-                            type="button"
-                            onClick={handleCopyMessage}
-                            className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-800 cursor-pointer"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copiar Texto</span>
-                          </button>
                         </div>
-                        <div className={`p-3.5 rounded-xl border font-mono text-xs whitespace-pre-wrap leading-relaxed ${isDarkMode ? 'bg-[#06151c] border-[#133540] text-stone-200' : 'bg-stone-50 border-stone-200 text-stone-800'}`}>
-                          {formattedMessage}
-                        </div>
-                      </div>
-
-                      {/* Broadcast Trigger Actions */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <a
-                          href={createWhatsAppBroadcastUrl(formattedMessage)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-center gap-2 px-4 py-3 bg-[#25D366] hover:bg-[#20ba59] text-white font-bold text-xs rounded-xl shadow-sm transition-all cursor-pointer text-center"
-                        >
-                          <Send className="w-4 h-4" />
-                          <span>Abrir no WhatsApp Web / Celular</span>
-                        </a>
-
-                        <button
-                          type="button"
-                          onClick={handleCopyPhones}
-                          className="flex items-center justify-center gap-2 px-4 py-3 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs rounded-xl border border-stone-300 transition-colors cursor-pointer text-center"
-                        >
-                          <Copy className="w-4 h-4" />
-                          <span>Copiar Lista para Transmissão ({eligibleAttendees.length})</span>
-                        </button>
-                      </div>
-
-                      {/* Individual Participant Fast Transmission List */}
-                      <div className="space-y-3 pt-2 border-t border-stone-200">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-stone-700">
-                            Disparo Individual em 1 Clique aos Participantes:
-                          </h4>
-                          <input
-                            type="text"
-                            placeholder="Filtrar por nome ou cidade..."
-                            value={whatsappSearchFilter}
-                            onChange={(e) => setWhatsappSearchFilter(e.target.value)}
-                            className="text-xs px-3 py-1.5 rounded-lg border border-stone-300 focus:outline-none w-full sm:w-56"
-                          />
-                        </div>
-
-                        <div className="divide-y divide-stone-100 max-h-56 overflow-y-auto border border-stone-200 rounded-xl">
-                          {filteredAttendees.length === 0 ? (
-                            <div className="p-4 text-center text-xs text-stone-500">
-                              Nenhum participante com telefone encontrado para este filtro.
-                            </div>
-                          ) : (
-                            filteredAttendees.map((att) => (
-                              <div key={att.id} className="p-2.5 flex items-center justify-between gap-3 hover:bg-stone-50 transition-colors">
-                                <div className="min-w-0">
-                                  <div className="text-xs font-bold text-stone-900 truncate">
-                                    {att.fullName}
-                                  </div>
-                                  <div className="text-[11px] text-stone-500 font-mono">
-                                    {att.phone} · {att.city} ({att.professionalRole})
-                                  </div>
-                                </div>
-
-                                <a
-                                  href={createWhatsAppChatUrl(att.phone, formattedMessage)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-semibold rounded-lg shrink-0 cursor-pointer transition-colors"
-                                  title={`Enviar comunicado para ${att.fullName}`}
-                                >
-                                  <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>Enviar</span>
-                                </a>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
+                      ))}
                     </div>
-
-                    <div className="p-3 bg-stone-50 border-t border-stone-200 flex justify-end">
+                    {wantEmail.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => setWhatsappDispatchModal(null)}
-                        className="px-4 py-2 text-xs font-bold text-stone-600 hover:text-stone-800 bg-stone-200 hover:bg-stone-300 rounded-xl cursor-pointer"
+                        onClick={() => {
+                          const lines = wantEmail.map((r) => `${r.fullName} <${r.email}>`).join('\n');
+                          navigator.clipboard.writeText(lines);
+                          alert(`${wantEmail.length} e-mails copiados!`);
+                        }}
+                        className={`w-full text-xs font-bold py-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${isDarkMode ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border-[#1a414e]' : 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'}`}
                       >
-                        Fechar Janela
+                        <Copy className="w-3.5 h-3.5" /> Copiar todos os e-mails
                       </button>
-                    </div>
+                    )}
+                  </div>
 
+                  {/* WhatsApp opt-in */}
+                  <div className={`rounded-2xl border p-5 space-y-4 ${theme.card}`}>
+                    <div className="flex items-center justify-between">
+                      <h4 className={`font-bold flex items-center gap-2 ${theme.textHeading}`}>
+                        <Smartphone className="w-4 h-4 text-emerald-500" />
+                        Aceite de WhatsApp
+                      </h4>
+                      <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${isDarkMode ? 'bg-[#102a33] text-teal-300' : 'bg-stone-100 text-stone-700'}`}>
+                        {wantWhatsapp.length} inscritos
+                      </span>
+                    </div>
+                    <div className={`divide-y text-xs max-h-72 overflow-y-auto rounded-xl border ${isDarkMode ? 'divide-[#0e2730] border-[#133540]' : 'divide-stone-100 border-stone-200'}`}>
+                      {wantWhatsapp.length === 0 ? (
+                        <div className={`p-4 text-center ${theme.textMuted}`}>Nenhum inscrito optou por WhatsApp ainda.</div>
+                      ) : wantWhatsapp.map((r) => (
+                        <div key={r.id} className={`px-3 py-2 flex items-center justify-between gap-2 ${isDarkMode ? 'hover:bg-[#0e2730]' : 'hover:bg-stone-50'}`}>
+                          <div className="min-w-0">
+                            <div className={`font-semibold truncate ${theme.textHeading}`}>{r.fullName}</div>
+                            <div className={`font-mono truncate ${theme.textMuted}`}>{r.phone}</div>
+                          </div>
+                          <a
+                            href={`https://wa.me/${r.phone?.replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold rounded-lg transition-colors"
+                          >
+                            <Smartphone className="w-3 h-3" /> Abrir
+                          </a>
+                        </div>
+                      ))}
+                    </div>
+                    {wantWhatsapp.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const phones = wantWhatsapp.map((r) => r.phone).filter(Boolean).join('\n');
+                          navigator.clipboard.writeText(phones);
+                          alert(`${wantWhatsapp.length} números copiados para criar Lista de Transmissão!`);
+                        }}
+                        className={`w-full text-xs font-bold py-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${isDarkMode ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border-[#1a414e]' : 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'}`}
+                      >
+                        <Copy className="w-3.5 h-3.5" /> Copiar todos os números
+                      </button>
+                    )}
                   </div>
                 </div>
               );
             })()}
 
+            {/* Fim da aba Notificações */}
           </div>
         )}
-
         {/* TAB 4: ASSINANTES DA NEWSLETTER & WHATSAPP (Alimentado pelo Formulário de Inscrição) */}
         {activeTab === 'subscribers' && (() => {
           const whatsappSubscribers = subscribers.filter((s) => s.receiveWhatsapp && !!s.phone);

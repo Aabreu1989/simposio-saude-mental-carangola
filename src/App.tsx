@@ -1097,15 +1097,15 @@ export default function App() {
             config={config}
           />
 
-          {/* Eixos Temáticos e Contextualização do Território */}
-          <ThematicAxesSection
+          {/* Eixos Temáticos e Contextualização do Território — OCULTO (descomente para reativar) */}
+          {/* <ThematicAxesSection
             axes={THEMATIC_AXES}
             onSelectAxis={(axisId) => {
               setSelectedAxisFilter(axisId);
               const el = document.getElementById('programacao');
               el?.scrollIntoView({ behavior: 'smooth' });
             }}
-          />
+          /> */}
 
           {/* Downloads & Certificados */}
           <DownloadsSection
