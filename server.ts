@@ -89,8 +89,10 @@ app.post('/api/email/confirm-registration', async (req, res) => {
           }
         });
 
-        const fromAddress =
-          process.env.SMTP_FROM || `"1º Simpósio de Saúde Mental - SUS Carangola" <${smtpUser}>`;
+        const fromAddress = {
+          name: '1º Simpósio de Saúde Mental - SUS Carangola',
+          address: smtpUser
+        };
 
         const info = await transporter.sendMail({
           from: fromAddress,
@@ -98,7 +100,8 @@ app.post('/api/email/confirm-registration', async (req, res) => {
           replyTo: replyTo || smtpUser,
           subject: emailSubject,
           text: bodyText,
-          html: bodyHtml
+          html: bodyHtml,
+          encoding: 'utf-8'
         });
 
         deliveryProvider = 'smtp';
