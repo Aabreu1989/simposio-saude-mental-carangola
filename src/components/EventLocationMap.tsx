@@ -75,18 +75,18 @@ export const EventLocationMap: React.FC = () => {
   }, [apiKey]);
 
   return (
-    <section id="mapa-territorial" className="py-12 bg-white border-t border-stone-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <section id="mapa-territorial" className="py-6 sm:py-8 bg-white border-t border-stone-200">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[#0a3641] text-[#ea7a38] flex items-center justify-center shrink-0">
-              <MapPin className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-lg bg-[#0a3641] text-[#ea7a38] flex items-center justify-center shrink-0">
+              <MapPin className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-lg sm:text-xl font-extrabold text-[#0a3641] tracking-tight">
+              <h2 className="text-base sm:text-lg font-extrabold text-[#0a3641] tracking-tight">
                 Local do Evento · UEMG Carangola
               </h2>
-              <p className="text-xs text-stone-500">
+              <p className="text-[11px] sm:text-xs text-stone-500">
                 {EVENT_LOCATION.address}
               </p>
             </div>
@@ -96,15 +96,15 @@ export const EventLocationMap: React.FC = () => {
             href="https://www.google.com/maps/dir/?api=1&destination=UEMG+Carangola+MG"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#0a3641] hover:bg-[#0f4b59] text-white text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap self-start sm:self-auto"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#0a3641] hover:bg-[#0f4b59] text-white text-xs font-bold shadow-xs transition-all cursor-pointer whitespace-nowrap self-start sm:self-auto"
           >
-            <Navigation className="w-4 h-4 text-[#ea7a38]" />
+            <Navigation className="w-3.5 h-3.5 text-[#ea7a38]" />
             <span>Como Chegar</span>
           </a>
         </div>
 
-        {/* Clean Interactive Map Only */}
-        <div className="rounded-2xl overflow-hidden border border-stone-300 shadow-sm bg-stone-100 h-[400px] sm:h-[460px] w-full relative">
+        {/* Clean Compact Interactive Map */}
+        <div className="rounded-xl overflow-hidden border border-stone-300 shadow-xs bg-stone-100 h-[220px] sm:h-[260px] w-full relative">
           <MapErrorBoundary>
             {apiKey ? (
               <APIProvider apiKey={apiKey} language="pt-BR" region="BR">

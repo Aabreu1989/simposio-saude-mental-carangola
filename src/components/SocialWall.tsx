@@ -14,7 +14,8 @@ import {
   LayoutGrid,
   X,
   Loader2,
-  Send
+  Send,
+  Clock
 } from 'lucide-react';
 import { EventConfig, SocialPost } from '../types.ts';
 import { DEFAULT_EVENT_HASHTAGS, INITIAL_EVENT_CONFIG } from '../data/initialData.ts';
@@ -46,7 +47,22 @@ interface SocialWallProps {
   config?: EventConfig;
 }
 
-const POSTS_PER_PAGE = 4;
+const POSTS_PER_PAGE = 8;
+
+export const formatPostDateTime = (post: SocialPost): string => {
+  let date: Date | null = null;
+  if (post.timestamp && !isNaN(Number(post.timestamp))) {
+    date = new Date(Number(post.timestamp));
+  } else if (post.createdAt && !isNaN(Date.parse(post.createdAt))) {
+    date = new Date(post.createdAt);
+  }
+  if (date && !isNaN(date.getTime())) {
+    const dateStr = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `${dateStr} às ${timeStr}`;
+  }
+  return post.createdAt || '';
+};
 
 const mergeRequiredHashtags = (input: string): string => {
   const requiredTags = DEFAULT_EVENT_HASHTAGS.split(/\s+/).filter(Boolean);
@@ -188,6 +204,10 @@ export const SocialWall: React.FC<SocialWallProps> = ({
 
     const finalHashtags = mergeRequiredHashtags(hashtagsField);
 
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
     const newPost: SocialPost = {
       id: `post-${Date.now()}`,
       authorName: authorName.trim(),
@@ -198,7 +218,7 @@ export const SocialWall: React.FC<SocialWallProps> = ({
       imageUrl: imagePreview || undefined,
       likes: 1,
       hasLiked: true,
-      createdAt: 'Agora mesmo',
+      createdAt: `${dateStr} às ${timeStr}`,
       timestamp: Date.now()
     };
 
@@ -731,9 +751,12 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                   </p>
                 </div>
 
-                {/* Footer: Timestamp, Subdued Share Actions, Like */}
+                {/* Footer: Timestamp (Data e Hora), Subdued Share Actions, Like */}
                 <div className="pt-3 border-t border-stone-200/80 flex items-center justify-between text-xs text-stone-500">
-                  <span className="text-[11px]">{post.createdAt}</span>
+                  <span className="text-[11px] font-medium text-stone-500 inline-flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-[#ea7a38] shrink-0" />
+                    <span>{formatPostDateTime(post)}</span>
+                  </span>
 
                   <div className="flex items-center gap-0.5">
                     <button

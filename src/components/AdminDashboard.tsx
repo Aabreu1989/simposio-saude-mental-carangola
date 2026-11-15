@@ -3744,7 +3744,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
 
                         <span className={`text-[10px] font-mono shrink-0 ${theme.textMuted}`}>
-                          {post.createdAt}
+                          {post.timestamp
+                            ? `${new Date(post.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })} às ${new Date(post.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                            : post.createdAt}
                         </span>
                       </div>
 
