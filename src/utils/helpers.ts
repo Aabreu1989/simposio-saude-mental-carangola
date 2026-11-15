@@ -272,7 +272,17 @@ export const loadStoredData = () => {
     registrations: normalizedRegistrations,
     materials: syncedMaterials,
     posts: mergedPosts,
-    notifications: getItem<PushNotificationItem[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS),
+    notifications: (() => {
+      const stored = getItem<PushNotificationItem[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
+      // Remove alertas de exemplo hard-coded (notif-1, notif-2, notif-3) que foram desativados
+      const LEGACY_IDS = new Set(['notif-1', 'notif-2', 'notif-3']);
+      const cleaned = stored.filter((n) => !LEGACY_IDS.has(n.id));
+      if (cleaned.length !== stored.length) {
+        // Persiste a versão limpa para não repetir em reloads
+        try { localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(cleaned)); } catch { /* noop */ }
+      }
+      return cleaned;
+    })(),
     subscribers: getItem<NewsletterSubscriber[]>(STORAGE_KEYS.SUBSCRIBERS, INITIAL_SUBSCRIBERS),
     evaluations: getItem<EvaluationFeedback[]>(STORAGE_KEYS.EVALUATIONS, INITIAL_EVALUATIONS),
     offlineQueue: getItem<Registration[]>(STORAGE_KEYS.OFFLINE_QUEUE, []),

@@ -931,41 +931,8 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   }
 ];
 
-export const INITIAL_NOTIFICATIONS: PushNotificationItem[] = [
-  {
-    id: 'notif-1',
-    title: 'Inscrições Oficiais Abertas!',
-    body: 'Garanta sua vaga no 1º Simpósio de Saúde Mental da Microrregião de Carangola. Vagas limitadas a 200 participantes com emissão de certificado oficial SUS (8 horas).',
-    category: 'aviso',
-    targetAudience: 'todos',
-    sentAt: '2026-11-01T08:00:00Z',
-    readCount: 184,
-    totalSent: 200,
-    clickedUrl: '#inscricao'
-  },
-  {
-    id: 'notif-2',
-    title: 'Lembrete: Caderno da RAPS Disponível',
-    body: 'O material preparatório do Eixo 1 (Fluxograma da RAPS) já está disponível na Área de Downloads para leitura prévia dos inscritos.',
-    category: 'material',
-    targetAudience: 'inscritos',
-    sentAt: '2026-11-04T10:30:00Z',
-    readCount: 142,
-    totalSent: 160,
-    clickedUrl: '#downloads'
-  },
-  {
-    id: 'notif-3',
-    title: 'Atenção ao Credenciamento!',
-    body: 'O credenciamento terá início pontualmente às 08h30 com café regional. Tenha em mãos seu comprovante de inscrição com QR Code ou CPF.',
-    category: 'lembrete',
-    targetAudience: 'inscritos',
-    sentAt: '2026-11-05T14:00:00Z',
-    readCount: 110,
-    totalSent: 150,
-    clickedUrl: '#programacao'
-  }
-];
+// Alertas vazios por padrão — o gestor cria os alertas no Painel do Gestor
+export const INITIAL_NOTIFICATIONS: PushNotificationItem[] = [];
 
 export const INITIAL_SUBSCRIBERS: NewsletterSubscriber[] = [
   {
