@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import {
   EventConfig,
   Registration,
@@ -72,8 +72,9 @@ import { SocialWall } from './components/SocialWall.tsx';
 import { Footer } from './components/Footer.tsx';
 import { RegistrationModal } from './components/RegistrationModal.tsx';
 import { CertificateModal } from './components/CertificateModal.tsx';
-import { AdminDashboard } from './components/AdminDashboard.tsx';
-import { AdminLogin } from './components/AdminLogin.tsx';
+// Lazy load heavy admin components (268KB+ AdminDashboard) — only loaded when admin view is active
+const AdminDashboard = lazy(() => import('./components/AdminDashboard.tsx').then(m => ({ default: m.AdminDashboard })));
+const AdminLogin = lazy(() => import('./components/AdminLogin.tsx').then(m => ({ default: m.AdminLogin })));
 import { AddToCalendarModal } from './components/AddToCalendarModal.tsx';
 import { ShareModal } from './components/ShareModal.tsx';
 import { EventLocationMap } from './components/EventLocationMap.tsx';
@@ -181,13 +182,11 @@ export default function App() {
 
       setMaterials((prev) => {
         const remoteIds = new Set(validRemote.map((m) => m.id));
+        // Manter apenas materiais locais que NÃO estão no remote E NÃO foram deletados
         const localOnly = prev.filter((m) => !remoteIds.has(m.id) && !deletedIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
-        const missingInitials = INITIAL_MATERIALS.filter(
-          (m) => !remoteIds.has(m.id) && !localOnly.some((l) => l.id === m.id) && !deletedIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#'
-        );
 
-        // Put remote materials (including PDFs uploaded via admin) and local admin uploads first
-        const allList = [...validRemote, ...localOnly, ...missingInitials].filter(
+        // NUNCA re-adicionar INITIAL_MATERIALS — se foram deletados, ficam deletados para sempre
+        const allList = [...validRemote, ...localOnly].filter(
           (item) => !deletedIds.has(item.id) && item.id !== 'mat-0' && item.fileUrl !== '#'
         );
         const uniqueMap = new Map<string, DownloadMaterial>();
@@ -1238,6 +1237,7 @@ export default function App() {
       ) : (
         /* Admin Manager Portal or Login */
         <main className="flex-1">
+          <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div></div>}>
           {!isAdminAuthenticated ? (
             <AdminLogin
               onLoginSuccess={(rememberMe) => {
@@ -1306,6 +1306,7 @@ export default function App() {
               onDisconnectFirebaseAdmin={handleDisconnectFirebaseAdmin}
             />
           )}
+          </Suspense>
         </main>
       )}
 

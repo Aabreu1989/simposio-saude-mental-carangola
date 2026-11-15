@@ -518,7 +518,7 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     fileName: 'Guia-Estrategico-Cuidado-Alcool-e-Outras-Drogas-Guia-AD.pdf',
     description: 'Guia oficial do Ministério da Saúde com diretrizes estratégicas e operacionais para a Rede de Atenção Psicossocial (RAPS): acolhimento de baixa exigência, elaboração de Projetos Terapêuticos Singulares (PTS), redução de danos, prevenção e articulação com o sistema de justiça.',
     pages: 100,
-    downloadsCount: 215,
+    downloadsCount: 0,
     fileUrl: '/assets/guia-estrategico-cuidado-alcool-outras-drogas.pdf'
   },
   {
@@ -531,7 +531,7 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     fileName: 'atencao_psicossocial_criancas_adolescentes_sus.pdf',
     description: 'Publicação conjunta MS/CNMP sobre a proteção integral infantojuvenil no SUS: marcos legais (ECA, Sinase, Lei nº 10.216/2001), diretrizes para o CAPSij, atenção a crises, medidas socioeducativas e articulação intersetorial entre Saúde Mental e Justiça da Infância e Juventude.',
     pages: 60,
-    downloadsCount: 184,
+    downloadsCount: 0,
     fileUrl: '/assets/atencao-psicossocial-criancas-adolescentes-sus.pdf'
   },
   {
@@ -544,7 +544,7 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     fileName: 'Livro-Tecendo-redes-Enfrentando-as-violencias-contra-as-mulheres.pdf',
     description: 'Livro da Série Interlocuções Práticas, Experiências e Pesquisas em Saúde (Rede UNIDA/UEL/CAPES). Analisa o trabalho em rede de atenção psicossocial e intersetorial, marcos legais (Lei Maria da Penha, Feminicídio e Notificação Compulsória) e estratégias de acolhimento e proteção às mulheres em situação de violência.',
     pages: 92,
-    downloadsCount: 196,
+    downloadsCount: 0,
     fileUrl: '/assets/livro-tecendo-redes-violencias-mulheres.pdf'
   },
   {
@@ -557,7 +557,7 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     fileName: 'Livro-Mais-substancias-para-o-trabalho-em-saude-com-usuarios-de-drogas.pdf',
     description: 'Obra de referência da Série Micropolítica do Trabalho e o Cuidado em Saúde (Rede UNIDA). Reúne 14 ensaios e pesquisas sobre Reforma Psiquiátrica, Redução de Danos, clínica ampliada no território, supervisão clínico-institucional em CAPS e o papel do vínculo no cuidado em saúde mental.',
     pages: 252,
-    downloadsCount: 172,
+    downloadsCount: 0,
     fileUrl: '/assets/livro-mais-substancias-trabalho-saude-drogas.pdf'
   },
   {
@@ -570,7 +570,7 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     fileName: 'Termo-de-Responsabilidade-Cessao-de-Uso-UEMG-Carangola.pdf',
     description: 'Termo oficial de cessão e responsabilidade de uso do Auditório da Universidade do Estado de Minas Gerais (UEMG - Unidade Carangola) para a realização do 1º Simpósio de Saúde Mental do SUS, formalizado em 08/12/2026.',
     pages: 3,
-    downloadsCount: 145,
+    downloadsCount: 0,
     fileUrl: '/assets/termo-responsabilidade-cessao-espaco-uemg.pdf'
   }
 ];
@@ -584,7 +584,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     content: 'Tudo pronto no auditório da UEMG Carangola para receber profissionais, gestores e lideranças dos municípios da nossa microrregião! A saúde mental é construída em rede e com afeto.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
     imageUrl: '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_260a5969.jpeg',
-    likes: 48,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 10 minutos',
     timestamp: 1796727600000
@@ -596,7 +596,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     city: 'Carangola',
     content: 'Momento histórico para nossa microrregião. Discutir o cuidado em liberdade e o fortalecimento do SUS nunca foi tão urgente e necessário!',
     hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 31,
+    likes: 0,
     hasLiked: true,
     createdAt: 'Há 35 minutos',
     timestamp: 1796726100000
@@ -608,7 +608,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     city: 'Espera Feliz',
     content: 'Presença confirmada da delegação de Espera Feliz! Viemos em peso para alinhar o fluxograma da RAPS e aproximar o CAPS do nosso posto de saúde.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 24,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 1 hora',
     timestamp: 1796724000000
@@ -620,7 +620,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     city: 'Tombos',
     content: 'Intersetorialidade na prática: Saúde Mental, CRAS e Justiça dialogando no mesmo auditório. Parabéns aos organizadores pelo tema certeiro.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 19,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 2 horas',
     timestamp: 1796720400000
@@ -633,7 +633,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     content: 'Compartilhando nossos projetos terapêuticos singulares construídos no território. Cada história acolhida fortalece a clínica ampliada do SUS.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
     imageUrl: '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_96fea5bf.jpeg',
-    likes: 27,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 3 horas',
     timestamp: 1796716800000
@@ -645,7 +645,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     city: 'Fervedouro',
     content: 'Expectativa alta para os debates sobre leitos de retaguarda no hospital geral e o fluxo ágil com o SAMU 192 na nossa microrregião.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 16,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 4 horas',
     timestamp: 1796713200000
@@ -657,7 +657,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     city: 'Divino',
     content: 'Delegação de Divino já organizada para o Simpósio! Vamos construir juntos protocolos integrados entre Educação, Saúde e Assistência Social.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 22,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 5 horas',
     timestamp: 1796709600000
@@ -669,7 +669,7 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     city: 'Pedra Dourada',
     content: 'Os materiais de apoio na Área de Downloads já estão servindo de base para nossas rodas de conversa pré-simpósio com os Agentes Comunitários.',
     hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 18,
+    likes: 0,
     hasLiked: false,
     createdAt: 'Há 6 horas',
     timestamp: 1796706000000

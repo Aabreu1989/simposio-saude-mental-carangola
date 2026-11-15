@@ -155,45 +155,15 @@ export const loadStoredData = () => {
     deletedMatIds.add('mat-0');
   }
 
-  const loadedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS)
+  // Carregar materiais do localStorage (ou INITIAL_MATERIALS se primeira vez)
+  const storedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
+  
+  // REGRA ABSOLUTA: qualquer ID no deletedMatIds é PERMANENTEMENTE removido e NUNCA volta
+  const syncedMaterials = storedMaterials
     .filter((m) => !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
-  const officialIds = new Set(INITIAL_MATERIALS.map((m) => m.id));
-  const countsById = new Map(loadedMaterials.map((m) => [m.id, m.downloadsCount || 0]));
 
-  // Keep any custom documents uploaded via the Admin Panel (unless explicitly deleted)
-  const adminMaterials = loadedMaterials.filter(
-    (m) =>
-      !officialIds.has(m.id) &&
-      !deletedMatIds.has(m.id) &&
-      m.id !== 'mat-6' &&
-      m.id !== 'mat-0' &&
-      m.fileUrl !== '#' &&
-      (Boolean(m.createdAt) ||
-        m.fileUrl?.startsWith('firestore-chunked://') ||
-        Boolean(m.chunkCount && m.chunkCount > 0) ||
-        m.id.length > 8)
-  );
-
-  const syncedMaterials: DownloadMaterial[] = [
-    ...INITIAL_MATERIALS
-      .filter((initMat) => !deletedMatIds.has(initMat.id) && initMat.id !== 'mat-0' && initMat.fileUrl !== '#')
-      .map((initMat) => ({
-        ...initMat,
-        downloadsCount: Math.max(initMat.downloadsCount, countsById.get(initMat.id) || 0)
-      })),
-    ...adminMaterials
-  ].filter((m) => !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
-
-  const hasDiff =
-    loadedMaterials.length !== syncedMaterials.length ||
-    loadedMaterials.some((m, idx) => {
-      const target = syncedMaterials[idx];
-      return !target || target.id !== m.id || target.fileUrl !== m.fileUrl || target.title !== m.title;
-    });
-
-  if (hasDiff) {
-    saveToStorage(STORAGE_KEYS.MATERIALS, syncedMaterials);
-  }
+  // Salvar a lista limpa permanentemente
+  saveToStorage(STORAGE_KEYS.MATERIALS, syncedMaterials);
 
   // IDs de posts de exemplo (fictícios) — removidos automaticamente da plataforma real
   const EXAMPLE_POST_IDS = new Set([
