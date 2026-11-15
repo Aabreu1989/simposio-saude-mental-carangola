@@ -195,69 +195,42 @@ export const loadStoredData = () => {
     saveToStorage(STORAGE_KEYS.MATERIALS, syncedMaterials);
   }
 
+  // IDs de posts de exemplo (fictícios) — removidos automaticamente da plataforma real
+  const EXAMPLE_POST_IDS = new Set([
+    'post-1','post-2','post-3','post-4','post-5','post-6','post-7','post-8'
+  ]);
   const deletedPostIds = getDeletedPostIds();
-  const rawPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, INITIAL_SOCIAL_POSTS)
-    .filter((p) => !deletedPostIds.has(p.id));
-  const existingIds = new Set(rawPosts.map((p) => p.id));
-  const legacyOnly =
-    rawPosts.length <= 4 &&
-    rawPosts.every((p) => ['post-1', 'post-2', 'post-3', 'post-4'].includes(p.id)) &&
-    rawPosts.some((p) => p.pinned);
-
+  const rawPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, [])
+    .filter((p) => !deletedPostIds.has(p.id) && !EXAMPLE_POST_IDS.has(p.id));
   let postsChanged = false;
-  let mergedPosts: SocialPost[];
-
-  if (legacyOnly) {
-    // Upgrade legacy 4-post cache cleanly to the 8 newest-first paginated posts, keeping likes count/state when matched
-    const legacyByContent = new Map(rawPosts.map((p) => [p.authorName, p]));
-    mergedPosts = INITIAL_SOCIAL_POSTS
-      .filter((freshPost) => !deletedPostIds.has(freshPost.id))
-      .map((freshPost) => {
-        const prev = legacyByContent.get(freshPost.authorName);
-        if (prev) {
-          return {
-            ...freshPost,
-            likes: Math.max(freshPost.likes, prev.likes),
-            hasLiked: Boolean(prev.hasLiked)
-          };
-        }
-        return freshPost;
-      });
-    postsChanged = true;
-  } else {
-    mergedPosts = rawPosts.map((post, index) => {
-      const needsHashtags = !post.hashtags || !post.hashtags.trim();
-      const needsTimestamp = typeof post.timestamp !== 'number';
-      if (needsHashtags || needsTimestamp) {
-        postsChanged = true;
-      }
-      return {
-        ...post,
-        hashtags: needsHashtags ? DEFAULT_EVENT_HASHTAGS : post.hashtags,
-        timestamp: needsTimestamp ? Date.now() - (index + 1) * 600000 : post.timestamp
-      };
-    });
-
-    // If user didn't add extra initial posts yet and has < 5 posts, append missing seeded posts with older timestamps
-    if (existingIds.size < INITIAL_SOCIAL_POSTS.length) {
-      const missingSeeds = INITIAL_SOCIAL_POSTS.filter((sp) => !existingIds.has(sp.id) && !deletedPostIds.has(sp.id));
-      if (missingSeeds.length > 0 && rawPosts.length <= 5) {
-        mergedPosts = [...mergedPosts, ...missingSeeds];
-        postsChanged = true;
-      }
+  let mergedPosts: SocialPost[] = rawPosts.map((post, index) => {
+    const needsHashtags = !post.hashtags || !post.hashtags.trim();
+    const needsTimestamp = typeof post.timestamp !== 'number';
+    if (needsHashtags || needsTimestamp) {
+      postsChanged = true;
     }
-  }
+    return {
+      ...post,
+      hashtags: needsHashtags ? DEFAULT_EVENT_HASHTAGS : post.hashtags,
+      timestamp: needsTimestamp ? Date.now() - (index + 1) * 600000 : post.timestamp
+    };
+  });
 
-  mergedPosts = mergedPosts.filter((p) => !deletedPostIds.has(p.id));
+  mergedPosts = mergedPosts.filter((p) => !deletedPostIds.has(p.id) && !EXAMPLE_POST_IDS.has(p.id));
   mergedPosts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
   if (postsChanged) {
     saveToStorage(STORAGE_KEYS.POSTS, mergedPosts);
   }
 
+  // IDs de inscrições de exemplo (fictícios) — nunca devem aparecer na plataforma real
+  const EXAMPLE_REG_IDS = new Set([
+    'reg-001','reg-002','reg-003','reg-004','reg-005',
+    'reg-006','reg-007','reg-008','reg-009','reg-010','reg-011'
+  ]);
   const deletedRegIds = getDeletedRegistrationIds();
-  const rawRegistrations = getItem<Registration[]>(STORAGE_KEYS.REGISTRATIONS, INITIAL_REGISTRATIONS)
-    .filter((r) => !deletedRegIds.has(r.id));
+  const rawRegistrations = getItem<Registration[]>(STORAGE_KEYS.REGISTRATIONS, [])
+    .filter((r) => !deletedRegIds.has(r.id) && !EXAMPLE_REG_IDS.has(r.id));
   let registrationsNormalized = false;
   const normalizedRegistrations = rawRegistrations.map((reg) => {
     // Regra estrita: somente participantes credenciados ('presente') podem ter certificado liberado
