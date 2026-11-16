@@ -172,10 +172,6 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredSpeakers.map((speaker) => {
-              const cropClass = speaker.id === 'spk-mariana-castro'
-                ? 'object-cover object-top scale-[1.32] origin-top'
-                : 'object-cover object-top scale-120 origin-top';
-
               return (
                 <article
                   key={speaker.id}
@@ -192,7 +188,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                             referrerPolicy="no-referrer"
                             loading="lazy"
                             onError={() => setImgErrors((prev) => ({ ...prev, [speaker.id]: true }))}
-                            className={`w-full h-full ${cropClass}`}
+                            className="w-full h-full object-cover object-center"
                           />
                         ) : (
                           <div
