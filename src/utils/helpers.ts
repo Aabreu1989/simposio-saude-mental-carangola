@@ -208,6 +208,21 @@ export const loadStoredData = () => {
     INITIAL_NOTIFICATIONS
   ).filter((n) => n && !LEGACY_NOTIF_IDS.has(n.id));
 
+  const rawStoredSpeakers = getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES);
+  const syncedSpeakers = (rawStoredSpeakers || []).map((spk) => {
+    const initialMatch = SPEAKERS_PROFILES.find((p) => p.id === spk.id);
+    if (!initialMatch) return spk;
+    if (
+      (spk.id === 'spk-raquel-pinheiro' &&
+        spk.bio?.startsWith('Supervisora clínico-institucional vinculada ao projeto')) ||
+      (spk.id === 'spk-christine-vianna' &&
+        spk.bio?.startsWith('Supervisora clínico-institucional do Ministério da Saúde'))
+    ) {
+      return { ...spk, bio: initialMatch.bio };
+    }
+    return spk;
+  });
+
   return {
     config: loadedConfig,
     registrations: normalizedRegistrations,
@@ -219,7 +234,7 @@ export const loadStoredData = () => {
     offlineQueue: getItem<Registration[]>(STORAGE_KEYS.OFFLINE_QUEUE, []),
     lastRegistered: getItem<Registration | null>(STORAGE_KEYS.LAST_REGISTERED, null),
     certificateDownloads: getItem<CertificateDownloadRecord[]>(STORAGE_KEYS.CERT_DOWNLOADS, []),
-    speakers: getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES)
+    speakers: syncedSpeakers
   };
 };
 

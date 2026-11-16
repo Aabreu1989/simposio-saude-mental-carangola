@@ -737,7 +737,7 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     sessionGroup: 'mesa-2',
     sessionLabel: 'Abertura Solene & Mediação Mesa 2',
     sessionTime: '08:30 – 09:15 · 13:00 – 14:30',
-    bio: 'Supervisora clínico-institucional vinculada ao projeto Ministério da Saúde/Fiocruz no CAPS AD de Carangola, apoiando equipes no cuidado territorial, redução de danos e articulação em rede.',
+    bio: 'Terapeuta Ocupacional. Especialista em Saúde Mental. Experto em dependências (UCM - Espanha). MBA Executivo em Saúde. Especialista em Gestão de Redes de Atenção à Saúde. Ex-diretora e Terapeuta do Centro Mineiro de Toxicomania/ FHEMIG. Supervisora Clínico Institucional - Montes Claros (2012) / Itabira (2015) / Betim (2019) / Ubá (2021/2022) / Poços de Caldas (2022/2023) / Ibirité (2022/2023). Membro e fundadora da ONG/ Terceira Margem Prevenção e Pesquisa em Toxicomania.',
     socials: {
       instagram: '@capsad.carangola',
       instagramUrl: 'https://www.instagram.com/',
@@ -754,7 +754,7 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     sessionGroup: 'mesa-3',
     sessionLabel: 'Abertura Solene & Mediação Mesa 3',
     sessionTime: '08:30 – 09:15 · 14:45 – 16:00',
-    bio: 'Supervisora clínico-institucional do Ministério da Saúde e Fiocruz junto ao CAPS I e CAPS Infantojuvenil, fortalecendo práticas intersetoriais e proteção integral de crianças, jovens e famílias.',
+    bio: 'Supervisora clínico institucional da Rede de Atenção Psicossocial de Carangola, RAPS.\n\nProfissional com graduação em Artes Plásticas pela Universidade do Estado de Minas Gerais (UEMG) e ampla formação acadêmica, com especializações em Análise Institucional, Esquizoanálise e Esquizodrama; Assistência aos Usuários de Álcool e Outras Drogas; Políticas de Saúde Mental e Atenção Psicossocial; Arteterapia; e Pesquisa e Ensino no Campo das Artes Plásticas. Possui sólida trajetória profissional nas áreas de Saúde Mental, Atenção Psicossocial, Educação Inclusiva e políticas públicas, com experiência no SUS desde 2000.',
     socials: {
       instagram: '@raps.carangola',
       instagramUrl: 'https://www.instagram.com/',
