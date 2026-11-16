@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FileDown, GraduationCap, Search, Users, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { FileDown, GraduationCap, Search, Users, ExternalLink, CheckCircle2, Clock } from 'lucide-react';
 import { EventConfig, SpeakerProfile } from '../types.ts';
 import { exportSpeakersPdf } from '../utils/speakersPdfGenerator.ts';
 import { normalizeGoogleDriveImageUrl } from '../utils/helpers.ts';
@@ -47,6 +47,19 @@ const getMonogramTone = (group: SpeakerProfile['sessionGroup']): string => {
       return 'from-indigo-700 to-[#0a3641]';
     default:
       return 'from-[#0a3641] to-[#134e5e]';
+  }
+};
+
+const getGroupBadge = (group: SpeakerProfile['sessionGroup']) => {
+  switch (group) {
+    case 'mesa-1':
+      return { label: 'Mesa 1 · RAPS', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+    case 'mesa-2':
+      return { label: 'Mesa 2 · Urgência & Hospital', bg: 'bg-amber-50 text-amber-800 border-amber-200' };
+    case 'mesa-3':
+      return { label: 'Mesa 3 · Justiça & Direitos', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
+    default:
+      return { label: 'Abertura & Mediação', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
   }
 };
 
@@ -172,14 +185,16 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredSpeakers.map((speaker) => {
+              const badge = getGroupBadge(speaker.sessionGroup);
+
               return (
                 <article
                   key={speaker.id}
-                  className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col justify-between shadow-2xs hover:shadow-md hover:border-stone-300 transition-all"
+                  className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col justify-between shadow-2xs hover:shadow-md hover:border-stone-300 transition-all group"
                 >
                   <div>
                     {/* Headshot + Identity */}
-                    <div className="flex items-start gap-4 mb-4">
+                    <div className="flex items-start gap-4 mb-3.5">
                       <div className="w-20 h-20 rounded-2xl overflow-hidden shrink-0 border border-stone-200 bg-stone-100 shadow-2xs">
                         {speaker.photoUrl && !imgErrors[speaker.id] ? (
                           <img
@@ -207,10 +222,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-mono font-bold text-[#028090] tracking-tight mb-0.5">
-                          {speaker.sessionLabel} · {speaker.sessionTime}
-                        </div>
-                        <h3 className="text-base font-extrabold text-[#0a3641] leading-snug">
+                        <h3 className="text-base sm:text-lg font-black text-[#0a3641] leading-snug">
                           {speaker.name}
                         </h3>
                         <p className="text-xs font-semibold text-[#d96522] mt-0.5 leading-snug">
@@ -220,6 +232,23 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                           {speaker.institution}
                         </p>
                       </div>
+                    </div>
+
+                    {/* Session Info Badges (Exatamente como no Painel do Gestor) */}
+                    <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 text-[11px] font-bold rounded-lg border ${badge.bg}`}>
+                        {badge.label}
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-lg bg-stone-100 text-stone-700 border border-stone-200">
+                        <Clock className="w-3 h-3 text-stone-500" />
+                        <span>{speaker.sessionTime || 'Horário oficial'}</span>
+                      </span>
+                    </div>
+
+                    {/* Session Title / Faixa de Atividade na Grade */}
+                    <div className="text-xs font-bold text-[#0a3641] mb-3 bg-stone-50 border border-stone-200/90 px-3 py-1.5 rounded-xl flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#028090] shrink-0" />
+                      <span className="line-clamp-1">{speaker.sessionLabel}</span>
                     </div>
 
                     {/* Short Bio */}

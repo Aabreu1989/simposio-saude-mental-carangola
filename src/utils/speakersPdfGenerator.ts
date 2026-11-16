@@ -33,6 +33,19 @@ const getSessionAccent = (group: SpeakerProfile['sessionGroup']): string => {
   }
 };
 
+const getSessionGroupLabel = (group: SpeakerProfile['sessionGroup']): string => {
+  switch (group) {
+    case 'mesa-1':
+      return 'Mesa 1 · RAPS';
+    case 'mesa-2':
+      return 'Mesa 2 · Urgência & Hospital';
+    case 'mesa-3':
+      return 'Mesa 3 · Justiça & Direitos';
+    default:
+      return 'Abertura & Mediação';
+  }
+};
+
 export const exportSpeakersPdf = async (
   speakers: SpeakerProfile[],
   config: EventConfig = INITIAL_EVENT_CONFIG
@@ -223,8 +236,8 @@ export const exportSpeakersPdf = async (
                 <div class="spk-body">
                   <div class="spk-top">
                     <h2 class="spk-name">${escapeHtml(spk.name)}</h2>
-                    <span class="spk-session" style="color: ${accent};">
-                      ${escapeHtml(spk.sessionLabel)} · ${escapeHtml(spk.sessionTime)}
+                    <span class="spk-session" style="color: ${accent}; font-weight: 700;">
+                      ${escapeHtml(getSessionGroupLabel(spk.sessionGroup))} · ${escapeHtml(spk.sessionTime)} · ${escapeHtml(spk.sessionLabel)}
                     </span>
                   </div>
                   <div class="spk-role">
