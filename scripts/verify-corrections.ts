@@ -740,6 +740,51 @@ async function runTests() {
     suite6
   );
 
+  // 7. Repositório Técnico & Documentos Oficiais para Download
+  const suite7 = 'Repositório Técnico & Documentos para Download';
+  const initialMaterials = loadStoredData().materials;
+
+  const expectedNewIds = [
+    'mat-eap-desinst-2026',
+    'mat-guia-raps-mg-2022',
+    'mat-guia-crise-raps-2026'
+  ];
+
+  const hasAllNewDocs = expectedNewIds.every((docId) =>
+    initialMaterials.some((m) => m.id === docId && m.format === 'PDF' && m.fileUrl?.startsWith('/materiais/'))
+  );
+  assert(
+    hasAllNewDocs,
+    'INITIAL_MATERIALS inclui os 3 novos documentos técnicos do MS e ESP-MG com rotas estáticas',
+    suite7
+  );
+
+  const materialsDir = path.resolve(process.cwd(), 'public', 'materiais');
+  const filesExistOnDisk = expectedNewIds.every((docId) => {
+    const mat = initialMaterials.find((m) => m.id === docId);
+    if (!mat?.fileName) return false;
+    return fs.existsSync(path.join(materialsDir, mat.fileName));
+  });
+  assert(
+    filesExistOnDisk,
+    'Arquivos PDF dos 3 novos documentos existem fisicamente na pasta public/materiais',
+    suite7
+  );
+
+  // Simula utilizador com cache anterior de materiais em localStorage
+  mockStorageMap.set('simposio_materials', JSON.stringify([
+    { id: 'mat-1', title: 'Guia Antigo', category: 'Cartilha', format: 'PDF', fileUrl: '/assets/antigo.pdf' }
+  ]));
+  const reloadedWithCache = loadStoredData();
+  const preservedNewDocs = expectedNewIds.every((docId) =>
+    reloadedWithCache.materials.some((m) => m.id === docId)
+  );
+  assert(
+    preservedNewDocs,
+    'loadStoredData mescla novos documentos oficiais mesmo para usuários com cache prévio em localStorage',
+    suite7
+  );
+
   console.log('\n======================================================');
   const passedCount = results.filter((r) => r.passed).length;
   const totalCount = results.length;

@@ -137,9 +137,14 @@ export const loadStoredData = () => {
   deletedMatIds.add('mat-0');
 
   const storedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
+  const existingStoredMatIds = new Set((storedMaterials || []).map((m) => m?.id));
+  const missingInitialMaterials = INITIAL_MATERIALS.filter(
+    (m) => m && !existingStoredMatIds.has(m.id) && !deletedMatIds.has(m.id)
+  );
+  const combinedMaterials = [...missingInitialMaterials, ...(storedMaterials || [])];
   let hadHugeInlineBlobInStorage = false;
 
-  const syncedMaterials = storedMaterials
+  const syncedMaterials = combinedMaterials
     .filter((m) => m && !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#')
     .map((m) => {
       if (m.fileUrl?.startsWith('data:') && m.fileUrl.length > 100000) {

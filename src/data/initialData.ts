@@ -509,6 +509,45 @@ export const INITIAL_REGISTRATIONS: Registration[] = [
 
 export const INITIAL_MATERIALS: DownloadMaterial[] = [
   {
+    id: 'mat-eap-desinst-2026',
+    title: 'Cuidado, Território e Direitos: Orientações à Equipe de Avaliação e Acompanhamento de Medidas Terapêuticas (EAP-Desinst)',
+    category: 'Legislação',
+    author: 'Ministério da Saúde · Secretaria de Atenção Especializada à Saúde (SAES / Desmad)',
+    format: 'PDF',
+    size: '2.3 MB',
+    fileName: 'cuidado_territorio_direitos_orientacoes_eap_desinst_ms_2026.pdf',
+    description: 'Documento orientador oficial do Ministério da Saúde para o processo de desinstitucionalização de pessoas com transtorno mental em conflito com a lei, no âmbito da Política Antimanicomial do Poder Judiciário. Inclui modelos de Avaliação Biopsicossocial Multiprofissional (Anexo A), Ficha de Encaminhamento (Anexo B) e Plano Terapêutico de Acompanhamento (Anexo C).',
+    pages: 98,
+    downloadsCount: 0,
+    fileUrl: '/materiais/cuidado_territorio_direitos_orientacoes_eap_desinst_ms_2026.pdf'
+  },
+  {
+    id: 'mat-guia-raps-mg-2022',
+    title: 'Guia para o Trabalho nas Redes de Atenção Psicossocial em Minas Gerais: Diretrizes e Orientações',
+    category: 'Apostila',
+    author: 'Escola de Saúde Pública de Minas Gerais (ESP-MG) · Secretaria de Estado de Saúde de Minas Gerais (SES-MG / DSMAD)',
+    format: 'PDF',
+    size: '2.0 MB',
+    fileName: 'guia_trabalho_redes_atencao_psicossocial_mg_espmg_sesmg.pdf',
+    description: 'Publicação oficial da ESP-MG e SES-MG orientando o trabalho nas RAPS mineiras: políticas estaduais (PESMAD), financiamento estadual (Resoluções CIB-SUS/MG), pontos de atenção (CAPS, SRT, Leitos em Hospital Geral), conceitos-ferramenta de clínica ampliada, acolhimento, PTS, matriciamento e redução de danos.',
+    pages: 91,
+    downloadsCount: 0,
+    fileUrl: '/materiais/guia_trabalho_redes_atencao_psicossocial_mg_espmg_sesmg.pdf'
+  },
+  {
+    id: 'mat-guia-crise-raps-2026',
+    title: 'Guia de Acolhimento à Crise em Saúde Mental na Rede de Atenção Psicossocial (Raps)',
+    category: 'Fluxograma',
+    author: 'Ministério da Saúde · Secretaria de Atenção Especializada à Saúde (SAES / Desmad)',
+    format: 'PDF',
+    size: '3.0 MB',
+    fileName: 'guia_acolhimento_crise_saude_mental_raps_ms_2026.pdf',
+    description: 'Diretrizes clínicas e operacionais revisadas de 2026 do Ministério da Saúde para o acolhimento humanizado em situações de crise: planos de crise antecipados, técnicas de desescalonamento, contenção física como último recurso, avaliação de risco de suicídio, manejo de intoxicação/abstinência por álcool e drogas, acolhimento infantojuvenil e fluxogramas práticos de cuidados.',
+    pages: 88,
+    downloadsCount: 0,
+    fileUrl: '/materiais/guia_acolhimento_crise_saude_mental_raps_ms_2026.pdf'
+  },
+  {
     id: 'mat-1',
     title: 'Guia Estratégico para o Cuidado de Pessoas com Necessidades Relacionadas ao Consumo de Álcool e Outras Drogas: Guia AD',
     category: 'Cartilha',
