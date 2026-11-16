@@ -416,7 +416,7 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Dra. Mariana Vasconcelos"
+                    placeholder="Ex: Dra. Raquel Martins Pinheiro"
                     value={authorName}
                     onChange={(e) => setAuthorName(e.target.value)}
                     className="w-full px-3 py-2 text-sm bg-stone-50 border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"

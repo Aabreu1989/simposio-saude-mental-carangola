@@ -192,7 +192,7 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Digite o nome do médico ou médica palestrante (ex: Mariana, Lucas, Flávio, Juliana, Camila)..."
+              placeholder="Buscar por palestrante, mediadora ou tema (ex: Raquel, Christine, Camila, Gisella)..."
               className="w-full pl-11 pr-10 py-3.5 text-sm sm:text-base bg-white border-2 border-stone-200 rounded-2xl focus:outline-none focus:border-[#0a3641] focus:ring-4 focus:ring-[#0a3641]/10 text-stone-800 placeholder-stone-400 shadow-2xs transition-all"
             />
             {searchTerm && (
@@ -206,18 +206,17 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
             )}
           </div>
 
-          {/* Quick-filter Suggestion Chips: Exclusively Médicos e Médicas Palestrantes */}
+          {/* Quick-filter Suggestion Chips: Palestrantes e Mediadoras Oficiais */}
           <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
             <span className="text-stone-500 font-semibold text-[11px] uppercase tracking-wider font-mono">
               Sugestões Rápidas:
             </span>
 
             {[
-              { label: 'Dra. Mariana Castro (RAPS)', query: 'Mariana' },
-              { label: 'Dr. Lucas Pimentel (Hospital)', query: 'Lucas' },
-              { label: 'Dr. Flávio Alvim (Psiquiatria)', query: 'Flávio' },
-              { label: 'Dr.ª Juliana Fontes (SAMU)', query: 'Juliana' },
-              { label: 'Dra. Camila Silveira (CAPS)', query: 'Camila' }
+              { label: 'Raquel Martins Pinheiro (Mesa 2 · Supervisora)', query: 'Raquel' },
+              { label: 'Christine Vianna (Mesa 3 · Supervisora)', query: 'Christine' },
+              { label: 'Camila Lima (Mesa 1 · Superintendente)', query: 'Camila' },
+              { label: 'Gisella Loiola Consensa (Abertura · Sec. Saúde)', query: 'Gisella' }
             ].map((chip) => {
               const isSelected = searchTerm.toLowerCase().includes(chip.query.toLowerCase());
               return (
@@ -324,7 +323,7 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
                 Nenhuma atividade encontrada para "{searchTerm}"
               </div>
               <p className="text-xs text-stone-500 max-w-md mx-auto">
-                Tente buscar pelo nome dos médicos(as) palestrantes como "Mariana", "Lucas", "Flávio", "Juliana" ou "Camila", ou limpe os filtros para ver a grade completa.
+                Tente buscar pelo nome das palestrantes e mediadoras como "Raquel", "Christine", "Camila" ou "Gisella", ou limpe os filtros para ver a grade completa.
               </p>
               <button
                 type="button"
