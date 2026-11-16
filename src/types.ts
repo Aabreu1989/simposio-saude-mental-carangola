@@ -167,6 +167,7 @@ export interface SpeakerProfile {
   sessionLabel: string;
   sessionTime: string;
   photoUrl?: string;
+  photoPosition?: string;
   bio: string;
   socials: {
     instagram?: string;

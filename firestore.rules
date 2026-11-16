@@ -491,5 +491,14 @@ service cloud.firestore {
       // Exclusão estritamente administrativa
       allow delete: if isValidId(subscriberId) && isAdmin();
     }
+
+    match /speakers/{speakerId} {
+      // Vitrine pública dos palestrantes do simpósio
+      allow get: if isValidId(speakerId);
+      allow list: if true;
+
+      // Gestão de perfis e fotos restrita ao gestor autenticado
+      allow create, update, delete: if isValidId(speakerId) && isAdmin();
+    }
   }
 }

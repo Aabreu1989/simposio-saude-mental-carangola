@@ -235,6 +235,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     sessionLabel: '',
     sessionTime: '',
     photoUrl: '',
+    photoPosition: 'center 18%',
     bio: '',
     instagramUrl: '',
     linkedinUrl: '',
@@ -252,6 +253,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       sessionLabel: 'Sessão Solene de Abertura & Conferência Magna',
       sessionTime: '08h30 às 09h30',
       photoUrl: '',
+      photoPosition: 'center 18%',
       bio: '',
       instagramUrl: '',
       linkedinUrl: '',
@@ -271,6 +273,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       sessionLabel: spk.sessionLabel,
       sessionTime: spk.sessionTime,
       photoUrl: spk.photoUrl || '',
+      photoPosition: spk.photoPosition || 'center 18%',
       bio: spk.bio,
       instagramUrl: spk.socials?.instagramUrl || '',
       linkedinUrl: spk.socials?.linkedinUrl || '',
@@ -296,6 +299,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       sessionLabel: speakerFormData.sessionLabel.trim() || 'Apresentação Técnica',
       sessionTime: speakerFormData.sessionTime.trim() || '09h00 às 10h00',
       photoUrl: speakerFormData.photoUrl.trim() || undefined,
+      photoPosition: speakerFormData.photoPosition || 'center 18%',
       bio: speakerFormData.bio.trim(),
       socials: {
         instagramUrl: speakerFormData.instagramUrl.trim() || undefined,
@@ -3851,6 +3855,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <img
                                   src={normalizeGoogleDriveImageUrl(spk.photoUrl).url}
                                   alt={spk.name}
+                                  style={{ objectPosition: spk.photoPosition || 'center 18%' }}
                                   className="w-12 h-12 rounded-xl object-cover border border-stone-200 shadow-2xs shrink-0"
                                   onError={(e) => {
                                     e.currentTarget.style.display = 'none';
@@ -4170,17 +4175,174 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
                         )}
 
-                        {/* Confirmação quando link de arquivo do Google Drive foi convertido */}
+                        {/* Confirmação e instrução quando link de arquivo do Google Drive foi convertido */}
                         {speakerFormData.photoUrl.includes('googleusercontent.com/d/') && (
-                          <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-[11px] flex items-center gap-1.5 mt-2">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>Link do Google Drive convertido automaticamente em imagem direta.</span>
+                          <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs space-y-1 mt-2">
+                            <div className="flex items-center gap-1.5 font-semibold text-emerald-800">
+                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Link do Google Drive convertido automaticamente para imagem direta.</span>
+                            </div>
+                            <div className="text-[11px] text-emerald-700">
+                              <strong>Atenção:</strong> No Google Drive, o arquivo precisa estar com o Acesso Geral definido como <u>&quot;Qualquer pessoa com o link&quot;</u> (e não &quot;Restrito&quot;) para que os visitantes consigam visualizar a foto.
+                            </div>
                           </div>
                         )}
 
                         <p className="text-[11px] text-stone-500 mt-1">
                           Cole o link direto da imagem (PNG, JPG) ou envie o arquivo do seu computador.
                         </p>
+
+                        {/* Estúdio de Diagramação & Enquadramento da Moldura */}
+                        {speakerFormData.photoUrl && (
+                          <div className="mt-3 p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-[#0a3641] flex items-center gap-1.5">
+                                <span>Diagramação &amp; Enquadramento na Moldura</span>
+                              </span>
+                              <span className="text-[10px] text-stone-500 font-mono">
+                                Posição: {speakerFormData.photoPosition || 'center 18%'}
+                              </span>
+                            </div>
+
+                            {/* Dual Live Preview */}
+                            <div className="flex items-center gap-4 bg-white p-3 rounded-xl border border-stone-200">
+                              <div className="flex flex-col items-center gap-1">
+                                <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-[#028090] shadow-sm bg-stone-100 shrink-0">
+                                  <img
+                                    src={normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).url}
+                                    alt="Pré-visualização Vitrine Pública"
+                                    referrerPolicy="no-referrer"
+                                    style={{ objectPosition: speakerFormData.photoPosition || 'center 18%' }}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-[10px] text-stone-500 font-medium">Vitrine Pública (80px)</span>
+                              </div>
+
+                              <div className="flex flex-col items-center gap-1">
+                                <div className="w-12 h-12 rounded-xl overflow-hidden border border-stone-300 shadow-2xs bg-stone-100 shrink-0">
+                                  <img
+                                    src={normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).url}
+                                    alt="Pré-visualização Tabela Gestor"
+                                    referrerPolicy="no-referrer"
+                                    style={{ objectPosition: speakerFormData.photoPosition || 'center 18%' }}
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => {
+                                      (e.currentTarget as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
+                                </div>
+                                <span className="text-[10px] text-stone-500 font-medium">Miniatura (48px)</span>
+                              </div>
+
+                              <div className="flex-1 text-xs text-stone-600 space-y-1">
+                                <p className="font-semibold text-[#0a3641] text-[11px]">
+                                  Controle de Enquadramento &amp; Rosto
+                                </p>
+                                <p className="text-[11px] leading-relaxed text-stone-500">
+                                  Garante que o rosto, queixo e cabelo fiquem sempre bem diagramados dentro da moldura, sem cortes indesejados.
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Predefinições Rápidas */}
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-600 mb-1.5">
+                                Predefinições Rápidas:
+                              </label>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSpeakerFormData((prev) => ({ ...prev, photoPosition: 'center 18%' }))}
+                                  className={`px-2.5 py-1.5 text-xs rounded-lg font-medium border transition-all ${
+                                    (speakerFormData.photoPosition === 'center 18%' || !speakerFormData.photoPosition)
+                                      ? 'bg-[#0a3641] text-white border-[#0a3641] shadow-2xs'
+                                      : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                                  }`}
+                                >
+                                  👤 Rosto (Recomendado)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSpeakerFormData((prev) => ({ ...prev, photoPosition: 'center top' }))}
+                                  className={`px-2.5 py-1.5 text-xs rounded-lg font-medium border transition-all ${
+                                    speakerFormData.photoPosition === 'center top'
+                                      ? 'bg-[#0a3641] text-white border-[#0a3641] shadow-2xs'
+                                      : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                                  }`}
+                                >
+                                  🔝 Topo
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSpeakerFormData((prev) => ({ ...prev, photoPosition: 'center center' }))}
+                                  className={`px-2.5 py-1.5 text-xs rounded-lg font-medium border transition-all ${
+                                    speakerFormData.photoPosition === 'center center'
+                                      ? 'bg-[#0a3641] text-white border-[#0a3641] shadow-2xs'
+                                      : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                                  }`}
+                                >
+                                  ⚖️ Centro
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSpeakerFormData((prev) => ({ ...prev, photoPosition: 'center 35%' }))}
+                                  className={`px-2.5 py-1.5 text-xs rounded-lg font-medium border transition-all ${
+                                    speakerFormData.photoPosition === 'center 35%'
+                                      ? 'bg-[#0a3641] text-white border-[#0a3641] shadow-2xs'
+                                      : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+                                  }`}
+                                >
+                                  📐 Meio-Superior
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Slider de Ajuste Fino */}
+                            <div>
+                              <div className="flex items-center justify-between text-[11px] text-stone-600 mb-1">
+                                <span className="font-semibold">Ajuste Fino Vertical do Enquadramento:</span>
+                                <span className="font-mono text-stone-500">
+                                  {speakerFormData.photoPosition?.includes('%')
+                                    ? speakerFormData.photoPosition.replace('center ', '')
+                                    : speakerFormData.photoPosition === 'center top'
+                                    ? '0% (Topo)'
+                                    : speakerFormData.photoPosition === 'center center'
+                                    ? '50% (Centro)'
+                                    : '18%'}
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={
+                                  speakerFormData.photoPosition?.includes('%')
+                                    ? parseInt(speakerFormData.photoPosition.replace(/[^0-9]/g, ''), 10) || 18
+                                    : speakerFormData.photoPosition === 'center top'
+                                    ? 0
+                                    : speakerFormData.photoPosition === 'center center'
+                                    ? 50
+                                    : 18
+                                }
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setSpeakerFormData((prev) => ({ ...prev, photoPosition: `center ${val}%` }));
+                                }}
+                                className="w-full accent-[#028090] cursor-pointer"
+                              />
+                              <div className="flex justify-between text-[10px] text-stone-400 mt-0.5">
+                                <span>0% (Mais alto)</span>
+                                <span className="text-emerald-700 font-semibold">18% (Ideal para retrato)</span>
+                                <span>50% (Centro)</span>
+                                <span>100% (Mais baixo)</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Biografia / Currículo */}

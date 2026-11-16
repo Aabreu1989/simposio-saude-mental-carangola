@@ -1257,7 +1257,8 @@ export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> =>
     sessionGroup: speaker.sessionGroup || 'abertura',
     sessionLabel: (speaker.sessionLabel || '').trim().slice(0, 200),
     sessionTime: (speaker.sessionTime || '').trim().slice(0, 80),
-    photoUrl: speaker.photoUrl ? speaker.photoUrl.trim().slice(0, 500) : '',
+    photoUrl: speaker.photoUrl ? speaker.photoUrl.trim().slice(0, 500000) : '',
+    photoPosition: (speaker.photoPosition || 'center 18%').trim().slice(0, 50),
     bio: (speaker.bio || '').trim().slice(0, 3000),
     socials: {
       instagram: speaker.socials?.instagram ? speaker.socials.instagram.trim().slice(0, 100) : '',
@@ -1316,6 +1317,7 @@ export const subscribeSpeakers = (onUpdate: (speakers: SpeakerProfile[]) => void
           sessionLabel: data.sessionLabel || '',
           sessionTime: data.sessionTime || '',
           photoUrl: data.photoUrl || '',
+          photoPosition: data.photoPosition || 'center 18%',
           bio: data.bio || '',
           socials: data.socials || {}
         };

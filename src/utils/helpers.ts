@@ -212,15 +212,23 @@ export const loadStoredData = () => {
   const syncedSpeakers = (rawStoredSpeakers || []).map((spk) => {
     const initialMatch = SPEAKERS_PROFILES.find((p) => p.id === spk.id);
     if (!initialMatch) return spk;
+    let updated = { ...spk };
     if (
       (spk.id === 'spk-raquel-pinheiro' &&
         spk.bio?.startsWith('Supervisora clínico-institucional vinculada ao projeto')) ||
       (spk.id === 'spk-christine-vianna' &&
         spk.bio?.startsWith('Supervisora clínico-institucional do Ministério da Saúde'))
     ) {
-      return { ...spk, bio: initialMatch.bio };
+      updated.bio = initialMatch.bio;
     }
-    return spk;
+    // Sincroniza fotos padrão e enquadramento caso o usuário local ainda não tenha definido foto customizada
+    if (initialMatch.photoUrl && (!updated.photoUrl || updated.photoUrl.trim() === '')) {
+      updated.photoUrl = initialMatch.photoUrl;
+    }
+    if (initialMatch.photoPosition && (!updated.photoPosition || updated.photoPosition.trim() === '')) {
+      updated.photoPosition = initialMatch.photoPosition;
+    }
+    return updated;
   });
 
   return {

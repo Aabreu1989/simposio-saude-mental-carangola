@@ -752,6 +752,26 @@ async function runTests() {
     suite6
   );
 
+  // 6.3 Verificação de fotos oficiais e diagramação anti-corte de rosto
+  mockStorageMap.clear();
+  const initialSpeakers = loadStoredData().speakers;
+  const raquelSpk = initialSpeakers.find((s) => s.id === 'spk-raquel-pinheiro');
+  const camilaSpk = initialSpeakers.find((s) => s.id === 'spk-camila-lima');
+  const gisellaSpk = initialSpeakers.find((s) => s.id === 'spk-gisella-consensa');
+  const christineSpk = initialSpeakers.find((s) => s.id === 'spk-christine-vianna');
+
+  assert(
+    Boolean(
+      raquelSpk?.photoUrl?.includes('164x1fTpuX5ccozFhrOyIII3Dda-EutZo') &&
+      raquelSpk?.photoPosition === 'center 18%' &&
+      camilaSpk?.photoUrl?.includes('1qPmMioljImchVKsJXMxcdD2DtBR-F5ea') &&
+      gisellaSpk?.photoUrl?.includes('1bfOsNTplIqDFlTgNeulg_0Bnx4fzZI7Z') &&
+      christineSpk?.photoUrl?.includes('1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY')
+    ),
+    'Palestrantes oficiais possuem links de fotos normalizados e posicionamento anti-corte (center 18%) configurado',
+    suite6
+  );
+
   // 7. Repositório Técnico & Documentos Oficiais para Download
   const suite7 = 'Repositório Técnico & Documentos para Download';
   const initialMaterials = loadStoredData().materials;

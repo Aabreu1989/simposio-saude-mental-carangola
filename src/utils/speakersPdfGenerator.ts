@@ -1,5 +1,6 @@
 import { EventConfig, SpeakerProfile } from '../types.ts';
 import { INITIAL_EVENT_CONFIG } from '../data/initialData.ts';
+import { normalizeGoogleDriveImageUrl } from './helpers.ts';
 
 const escapeHtml = (value: string): string =>
   String(value || '')
@@ -215,7 +216,7 @@ export const exportSpeakersPdf = async (
                 <div class="spk-avatar" style="background: ${accent};">
                   ${
                     spk.photoUrl
-                      ? `<img src="${escapeHtml(spk.photoUrl)}" alt="${escapeHtml(spk.name)}" />`
+                      ? `<img src="${escapeHtml(normalizeGoogleDriveImageUrl(spk.photoUrl).url)}" alt="${escapeHtml(spk.name)}" style="object-position: ${escapeHtml(spk.photoPosition || 'center 18%')};" />`
                       : `<span>${escapeHtml(getInitials(spk.name))}</span>`
                   }
                 </div>

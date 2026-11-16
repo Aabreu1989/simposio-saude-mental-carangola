@@ -31,5 +31,11 @@ service firebase.storage {
       // Atualização e exclusão de fotos restrita a administradores autenticados
       allow update, delete: if isAdmin();
     }
+
+    // Fotografias oficiais dos palestrantes
+    match /speakers/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }

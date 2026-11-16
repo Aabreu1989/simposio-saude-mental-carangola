@@ -188,7 +188,8 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                             referrerPolicy="no-referrer"
                             loading="lazy"
                             onError={() => setImgErrors((prev) => ({ ...prev, [speaker.id]: true }))}
-                            className="w-full h-full object-cover object-center"
+                            style={{ objectPosition: speaker.photoPosition || 'center 18%' }}
+                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                           />
                         ) : (
                           <div

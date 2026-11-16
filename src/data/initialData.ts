@@ -737,6 +737,8 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     sessionGroup: 'mesa-2',
     sessionLabel: 'Abertura Solene & Mediação Mesa 2',
     sessionTime: '08:30 – 09:15 · 13:00 – 14:30',
+    photoUrl: 'https://lh3.googleusercontent.com/d/164x1fTpuX5ccozFhrOyIII3Dda-EutZo',
+    photoPosition: 'center 18%',
     bio: 'Terapeuta Ocupacional. Especialista em Saúde Mental. Experto em dependências (UCM - Espanha). MBA Executivo em Saúde. Especialista em Gestão de Redes de Atenção à Saúde. Ex-diretora e Terapeuta do Centro Mineiro de Toxicomania/ FHEMIG. Supervisora Clínico Institucional - Montes Claros (2012) / Itabira (2015) / Betim (2019) / Ubá (2021/2022) / Poços de Caldas (2022/2023) / Ibirité (2022/2023). Membro e fundadora da ONG/ Terceira Margem Prevenção e Pesquisa em Toxicomania.',
     socials: {
       instagram: '@capsad.carangola',
@@ -754,6 +756,8 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     sessionGroup: 'mesa-3',
     sessionLabel: 'Abertura Solene & Mediação Mesa 3',
     sessionTime: '08:30 – 09:15 · 14:45 – 16:00',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY',
+    photoPosition: 'center 18%',
     bio: 'Supervisora clínico institucional da Rede de Atenção Psicossocial de Carangola, RAPS.\n\nProfissional com graduação em Artes Plásticas pela Universidade do Estado de Minas Gerais (UEMG) e ampla formação acadêmica, com especializações em Análise Institucional, Esquizoanálise e Esquizodrama; Assistência aos Usuários de Álcool e Outras Drogas; Políticas de Saúde Mental e Atenção Psicossocial; Arteterapia; e Pesquisa e Ensino no Campo das Artes Plásticas. Possui sólida trajetória profissional nas áreas de Saúde Mental, Atenção Psicossocial, Educação Inclusiva e políticas públicas, com experiência no SUS desde 2000.',
     socials: {
       instagram: '@raps.carangola',
@@ -771,6 +775,8 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     sessionGroup: 'mesa-1',
     sessionLabel: 'Abertura Solene & Mediação Mesa 1',
     sessionTime: '08:30 – 09:15 · 09:30 – 11:30',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1qPmMioljImchVKsJXMxcdD2DtBR-F5ea',
+    photoPosition: 'center 18%',
     bio: 'Gestora pública à frente da Superintendência de Saúde Mental, articulando políticas microrregionais, educação permanente das equipes e implantação integrada da Rede de Atenção Psicossocial.',
     socials: {
       instagram: '@saudemental.carangola',
@@ -787,6 +793,8 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     sessionGroup: 'abertura',
     sessionLabel: 'Abertura Solene Oficial',
     sessionTime: '08:30 – 09:15',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1bfOsNTplIqDFlTgNeulg_0Bnx4fzZI7Z',
+    photoPosition: 'center 18%',
     bio: 'Secretária Municipal de Saúde de Carangola, liderando a cooperação interfederativa entre os municípios da microrregião para consolidação dos serviços de saúde pública e da RAPS no SUS.',
     socials: {
       instagram: '@saude.carangola',
