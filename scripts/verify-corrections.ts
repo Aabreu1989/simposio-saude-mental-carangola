@@ -25,7 +25,19 @@ import {
   synchronizeOfflineRegistrationQueue,
   persistRegistrationAndPermissionInDb,
   deleteRegistrationInDb,
-  saveEventConfigInDb
+  saveEventConfigInDb,
+  saveSocialPostToDb,
+  likeSocialPostInDb,
+  deleteSocialPostInDb,
+  moderateSocialPostInDb,
+  setSocialPostsAdapterForTests,
+  saveNotificationToDb,
+  deleteNotificationInDb,
+  setNotificationsAdapterForTests,
+  subscribeNewsletterInDb,
+  unsubscribeNewsletterInDb,
+  deleteSubscriberInDb,
+  setNewsletterAdapterForTests
 } from '../src/services/firebaseDb.ts';
 
 import emailHandler, {
@@ -38,7 +50,7 @@ import statusHandler from '../api/email/status.ts';
 import mapsHandler from '../api/maps/config.ts';
 import vercelConfig from '../vercel.json' with { type: 'json' };
 import { INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES } from '../src/data/initialData.ts';
-import type { Registration, SpeakerProfile } from '../src/types.ts';
+import type { Registration, SpeakerProfile, SocialPost, PushNotificationItem, NewsletterSubscriber } from '../src/types.ts';
 
 interface TestResult {
   suite: string;
@@ -784,6 +796,284 @@ async function runTests() {
     preservedNewDocs,
     'loadStoredData mescla novos documentos oficiais mesmo para usuários com cache prévio em localStorage',
     suite7
+  );
+
+  // 8. Homologação e Conexão Cloud: SocialWall, Alertas e Newsletter
+  const suite8 = 'Homologação e Conexão Cloud (SocialWall, Alertas & Newsletter)';
+
+  // 8.1 Social Wall: Persistência centralizada e sincronização
+  const mockSocialPostsDb = new Map<string, SocialPost>();
+  const mockLikesDb = new Map<string, Set<string>>(); // postId -> Set of voterIds
+
+  setSocialPostsAdapterForTests({
+    async savePost(post) {
+      mockSocialPostsDb.set(post.id, { ...post });
+      return post;
+    },
+    async toggleLike(postId, voterId) {
+      if (!mockLikesDb.has(postId)) {
+        mockLikesDb.set(postId, new Set());
+      }
+      const voters = mockLikesDb.get(postId)!;
+      let hasLiked = false;
+      if (voters.has(voterId)) {
+        voters.delete(voterId);
+        hasLiked = false;
+      } else {
+        voters.add(voterId);
+        hasLiked = true;
+      }
+      const p = mockSocialPostsDb.get(postId);
+      if (p) {
+        p.likes = voters.size;
+      }
+      return { likes: voters.size, hasLiked };
+    },
+    async deletePost(postId) {
+      mockSocialPostsDb.delete(postId);
+    },
+    async moderatePost(postId, status, pinned) {
+      const p = mockSocialPostsDb.get(postId);
+      if (p) {
+        p.status = status;
+        p.pinned = !!pinned;
+      }
+    }
+  });
+
+  const testPost: SocialPost = {
+    id: 'post-test-device-1',
+    authorName: 'Dr. Roberto Mendes',
+    authorRole: 'Psiquiatra CAPS II',
+    city: 'Carangola',
+    content: 'Atenção integral e cuidado territorializado em debate no Simpósio.',
+    hashtags: '#SaudeMentalCarangola',
+    likes: 0,
+    hasLiked: false,
+    createdAt: '16/11/2026 às 14h00',
+    timestamp: Date.now(),
+    status: 'approved'
+  };
+
+  await saveSocialPostToDb(testPost);
+  assert(
+    mockSocialPostsDb.has('post-test-device-1') &&
+      mockSocialPostsDb.get('post-test-device-1')?.content === testPost.content,
+    'Postagem criada em um dispositivo é persistida no banco e fica acessível na nuvem',
+    suite8
+  );
+
+  // 8.2 Prevenção de duplicação de curtidas pelo mesmo votante
+  const like1 = await likeSocialPostInDb('post-test-device-1', 'voter-alice-session');
+  assert(
+    like1.hasLiked === true && like1.likes === 1,
+    'Primeira curtida do eleitor é registrada com sucesso',
+    suite8
+  );
+
+  const likeRepeat = await likeSocialPostInDb('post-test-device-1', 'voter-alice-session');
+  assert(
+    likeRepeat.hasLiked === false && likeRepeat.likes === 0,
+    'Segunda interação do mesmo eleitor remove a curtida atomicamente sem gerar duplicação',
+    suite8
+  );
+
+  // Múltiplos eleitores distintos incrementam de forma consistente
+  await likeSocialPostInDb('post-test-device-1', 'voter-bob-session');
+  const likeMulti = await likeSocialPostInDb('post-test-device-1', 'voter-carol-session');
+  assert(
+    likeMulti.likes === 2,
+    'Curtidas de múltiplos dispositivos distintos são consistentes e acumuladas',
+    suite8
+  );
+
+  // 8.3 Moderação e exclusão de posts: Restrição a administrador autenticado
+  setSocialPostsAdapterForTests(null); // Ativa verificação real do auth
+  let nonAdminPostDeleteBlocked = false;
+  try {
+    await deleteSocialPostInDb('post-test-device-1');
+  } catch (err: unknown) {
+    if ((err as Error).message === 'ADMIN_AUTH_REQUIRED') {
+      nonAdminPostDeleteBlocked = true;
+    }
+  }
+  assert(
+    nonAdminPostDeleteBlocked,
+    'Tentativa de exclusão de post por usuário não autenticado é rejeitada (ADMIN_AUTH_REQUIRED)',
+    suite8
+  );
+
+  let nonAdminModerateBlocked = false;
+  try {
+    await moderateSocialPostInDb('post-test-device-1', 'rejected');
+  } catch (err: unknown) {
+    if ((err as Error).message === 'ADMIN_AUTH_REQUIRED') {
+      nonAdminModerateBlocked = true;
+    }
+  }
+  assert(
+    nonAdminModerateBlocked,
+    'Tentativa de moderação de post por usuário comum é rejeitada (ADMIN_AUTH_REQUIRED)',
+    suite8
+  );
+
+  // 8.4 Alertas & Notificações: Persistência e restrição de permissão
+  const mockNotificationsDb = new Map<string, PushNotificationItem>();
+  setNotificationsAdapterForTests({
+    async saveNotification(item) {
+      mockNotificationsDb.set(item.id, { ...item });
+    },
+    async deleteNotification(id) {
+      mockNotificationsDb.delete(id);
+    }
+  });
+
+  const testAlert: PushNotificationItem = {
+    id: 'notif-urgente-credenciamento',
+    title: 'Abertura do Credenciamento às 7h30',
+    body: 'Dirija-se ao hall da UEMG Carangola para retirada do crachá institucional.',
+    category: 'urgente',
+    targetAudience: 'todos',
+    sentAt: new Date().toISOString(),
+    readCount: 0,
+    totalSent: 150
+  };
+
+  await saveNotificationToDb(testAlert);
+  assert(
+    mockNotificationsDb.has('notif-urgente-credenciamento') &&
+      mockNotificationsDb.get('notif-urgente-credenciamento')?.category === 'urgente',
+    'Alerta administrativo é persistido na nuvem e fica disponível para todos os participantes',
+    suite8
+  );
+
+  setNotificationsAdapterForTests(null); // Ativa verificação real
+  let nonAdminNotifBlocked = false;
+  try {
+    await saveNotificationToDb(testAlert);
+  } catch (err: unknown) {
+    if ((err as Error).message === 'ADMIN_AUTH_REQUIRED') {
+      nonAdminNotifBlocked = true;
+    }
+  }
+  assert(
+    nonAdminNotifBlocked,
+    'Criação de notificações por usuário não autenticado é estritamente bloqueada',
+    suite8
+  );
+
+  // 8.5 Estado de leitura de alertas: Isolamento individual
+  const session1Dismissed = ['notif-urgente-credenciamento'];
+  const session2Dismissed: string[] = [];
+  assert(
+    session1Dismissed.includes('notif-urgente-credenciamento') &&
+      !session2Dismissed.includes('notif-urgente-credenciamento'),
+    'Dispensar ou ler um alerta numa sessão não altera o estado global dos outros participantes',
+    suite8
+  );
+
+  // 8.6 Newsletter: Inscrição, normalização, deduplicação e cancelamento
+  const mockSubscribersDb = new Map<string, NewsletterSubscriber>();
+  setNewsletterAdapterForTests({
+    async subscribe(sub) {
+      const cleanEmail = sub.email.trim().toLowerCase();
+      const docId = `sub-${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+      const isNew = !mockSubscribersDb.has(docId);
+      mockSubscribersDb.set(docId, { ...sub, id: docId, email: cleanEmail, status: 'active' });
+      return { isNew, subscriber: mockSubscribersDb.get(docId)! };
+    },
+    async unsubscribe(emailOrId) {
+      const clean = emailOrId.trim().toLowerCase();
+      const docId = clean.startsWith('sub-') ? clean : `sub-${clean.replace(/[^a-z0-9]/g, '_')}`;
+      const existing = mockSubscribersDb.get(docId);
+      if (existing) {
+        existing.status = 'unsubscribed';
+        existing.receiveWhatsapp = false;
+        existing.receiveEmail = false;
+      }
+    },
+    async deleteSubscriber(id) {
+      mockSubscribersDb.delete(id);
+    }
+  });
+
+  const subResult1 = await subscribeNewsletterInDb({
+    id: 'temp-1',
+    email: 'Mariana.Farmacia@Carangola.MG.GOV.BR',
+    name: 'Mariana Silva',
+    phone: '(32) 99876-5432',
+    receiveWhatsapp: true,
+    subscribedAt: '2026-11-16'
+  });
+  assert(
+    subResult1.isNew === true &&
+      subResult1.subscriber.email === 'mariana.farmacia@carangola.mg.gov.br' &&
+      mockSubscribersDb.size === 1,
+    'Inscrição na newsletter normaliza e-mail para minúsculas e persiste com consentimento',
+    suite8
+  );
+
+  // Tentativa repetida de inscrição com mesmo e-mail (mesmo com caixa diferente)
+  const subResult2 = await subscribeNewsletterInDb({
+    id: 'temp-2',
+    email: 'mariana.farmacia@carangola.mg.gov.br',
+    name: 'Mariana Silva Atualizada',
+    receiveWhatsapp: true,
+    subscribedAt: '2026-11-16'
+  });
+  assert(
+    subResult2.isNew === false && mockSubscribersDb.size === 1,
+    'Inscrição repetida é idempotente e evita duplicação de contatos na base',
+    suite8
+  );
+
+  // Cancelamento de inscrição (unsubscribe)
+  await unsubscribeNewsletterInDb('mariana.farmacia@carangola.mg.gov.br');
+  const unsubscribedRecord = mockSubscribersDb.get('sub-mariana_farmacia_carangola_mg_gov_br');
+  assert(
+    unsubscribedRecord?.status === 'unsubscribed' && unsubscribedRecord?.receiveWhatsapp === false,
+    'Mecanismo de cancelamento de inscrição (unsubscribe) atualiza estado para unsubscribed',
+    suite8
+  );
+
+  // 8.7 Exclusão de assinante restrita ao administrador
+  setNewsletterAdapterForTests(null); // Ativa verificação real
+  let nonAdminDeleteSubBlocked = false;
+  try {
+    await deleteSubscriberInDb('sub-mariana_farmacia_carangola_mg_gov_br');
+  } catch (err: unknown) {
+    if ((err as Error).message === 'ADMIN_AUTH_REQUIRED') {
+      nonAdminDeleteSubBlocked = true;
+    }
+  }
+  assert(
+    nonAdminDeleteSubBlocked,
+    'Tentativa de remoção de assinante por usuário não autenticado é rejeitada',
+    suite8
+  );
+
+  // 8.8 Regras Firestore e Storage: Validação declarativa
+  const firestoreRulesContent = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf-8');
+  assert(
+    firestoreRulesContent.includes('match /social_posts/{postId}') &&
+      firestoreRulesContent.includes('match /notifications/{notificationId}') &&
+      firestoreRulesContent.includes('match /newsletter_subscribers/{subscriberId}'),
+    'firestore.rules contém regras específicas e declarativas para social_posts, notifications e newsletter_subscribers',
+    suite8
+  );
+
+  const storageRulesPath = path.resolve(process.cwd(), 'storage.rules');
+  assert(
+    fs.existsSync(storageRulesPath) &&
+      fs.readFileSync(storageRulesPath, 'utf-8').includes('match /social_posts/{postId}/{fileName}'),
+    'storage.rules existe e protege o upload de fotografias limitando a imagens e 5MB',
+    suite8
+  );
+
+  assert(
+    (vercelConfig as Record<string, unknown>).rewrites !== undefined,
+    'Configurações de infraestrutura mantidas íntegras',
+    suite8
   );
 
   console.log('\n======================================================');

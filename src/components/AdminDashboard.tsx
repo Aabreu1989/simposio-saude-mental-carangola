@@ -3893,7 +3893,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </div>
 
                           {/* Bio Excerpt */}
-                          <p className="text-xs text-stone-600 line-clamp-3 leading-relaxed mb-3">
+                          <p className="text-xs text-stone-600 line-clamp-10 whitespace-pre-line leading-relaxed mb-3">
                             {spk.bio}
                           </p>
 
@@ -4123,12 +4123,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </label>
                         <textarea
                           required
-                          rows={4}
-                          placeholder="Descreva a trajetória técnica, formação acadêmica e contribuições na saúde mental..."
+                          rows={10}
+                          maxLength={1500}
+                          placeholder="Descreva a trajetória técnica, formação acadêmica e contribuições na saúde mental (até 10 linhas)..."
                           value={speakerFormData.bio}
-                          onChange={(e) => setSpeakerFormData({ ...speakerFormData, bio: e.target.value })}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          onChange={(e) => {
+                            const limited = e.target.value.split('\n').slice(0, 10).join('\n');
+                            setSpeakerFormData({ ...speakerFormData, bio: limited });
+                          }}
+                          className="w-full px-3 py-2 text-xs leading-relaxed rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641] resize-y"
                         />
+                        <p className="mt-1 text-[10px] text-stone-500 text-right font-mono">
+                          {speakerFormData.bio.split('\n').length}/10 linhas · {speakerFormData.bio.length}/1500 caracteres
+                        </p>
                       </div>
 
                       {/* Redes Sociais e Links Oficiais */}

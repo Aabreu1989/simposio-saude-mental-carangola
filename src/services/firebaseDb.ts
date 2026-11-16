@@ -28,13 +28,23 @@ import {
   limit,
   getDocs
 } from 'firebase/firestore';
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 import {
   Registration,
   EventConfig,
   CertificateDownloadRecord,
   DownloadMaterial,
-  SpeakerProfile
+  SpeakerProfile,
+  SocialPost,
+  PushNotificationItem,
+  NewsletterSubscriber
 } from '../types.ts';
 import {
   generateRegistrationCode,
@@ -47,6 +57,7 @@ export const ACTIVE_FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 export const ACTIVE_FIRESTORE_DATABASE_ID =
   (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId || '(default)';
 export const db = getFirestore(app, ACTIVE_FIRESTORE_DATABASE_ID);
+export const storage = getStorage(app);
 
 export const getActiveFirebaseConfigSummary = () => ({
   projectId: ACTIVE_FIREBASE_PROJECT_ID,
@@ -1313,6 +1324,514 @@ export const subscribeSpeakers = (onUpdate: (speakers: SpeakerProfile[]) => void
     },
     (error) => {
       console.warn('Aviso ao sincronizar palestrantes do Firestore:', error);
+    }
+  );
+};
+
+// ============================================================================
+// TEST ADAPTERS FOR SOCIAL WALL, NOTIFICATIONS & NEWSLETTER
+// ============================================================================
+
+export interface SocialPostsStorageAdapter {
+  savePost: (post: SocialPost, imageBlob?: Blob) => Promise<SocialPost>;
+  toggleLike: (postId: string, voterId: string) => Promise<{ likes: number; hasLiked: boolean }>;
+  deletePost: (postId: string) => Promise<void>;
+  moderatePost: (postId: string, status: 'approved' | 'rejected', pinned?: boolean) => Promise<void>;
+}
+
+export interface NotificationsStorageAdapter {
+  saveNotification: (item: PushNotificationItem) => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+}
+
+export interface NewsletterStorageAdapter {
+  subscribe: (sub: NewsletterSubscriber) => Promise<{ isNew: boolean; subscriber: NewsletterSubscriber }>;
+  unsubscribe: (emailOrId: string) => Promise<void>;
+  deleteSubscriber: (id: string) => Promise<void>;
+}
+
+let customSocialPostsAdapter: SocialPostsStorageAdapter | null = null;
+let customNotificationsAdapter: NotificationsStorageAdapter | null = null;
+let customNewsletterAdapter: NewsletterStorageAdapter | null = null;
+
+export const setSocialPostsAdapterForTests = (adapter: SocialPostsStorageAdapter | null) => {
+  customSocialPostsAdapter = adapter;
+};
+
+export const setNotificationsAdapterForTests = (adapter: NotificationsStorageAdapter | null) => {
+  customNotificationsAdapter = adapter;
+};
+
+export const setNewsletterAdapterForTests = (adapter: NewsletterStorageAdapter | null) => {
+  customNewsletterAdapter = adapter;
+};
+
+// ============================================================================
+// 1. SOCIAL WALL: FIRESTORE & FIREBASE STORAGE INTEGRATION
+// ============================================================================
+
+const dataUrlToBlob = (dataUrl: string): Blob | null => {
+  try {
+    const parts = dataUrl.split(',');
+    if (parts.length < 2) return null;
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const binary = atob(parts[1]);
+    const array = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      array[i] = binary.charCodeAt(i);
+    }
+    return new Blob([array], { type: mimeType });
+  } catch {
+    return null;
+  }
+};
+
+export const saveSocialPostToDb = async (
+  post: SocialPost,
+  rawImageFile?: File | Blob
+): Promise<SocialPost> => {
+  if (customSocialPostsAdapter) {
+    return customSocialPostsAdapter.savePost(post, rawImageFile);
+  }
+
+  const id = sanitizeId(post.id, 'post');
+  let finalImageUrl = post.imageUrl;
+  let storagePath: string | undefined = post.storagePath;
+
+  // Resolve upload to Firebase Storage if an image file or base64 is present
+  let blobToUpload: Blob | null = rawImageFile || null;
+  if (!blobToUpload && post.imageUrl?.startsWith('data:image/')) {
+    blobToUpload = dataUrlToBlob(post.imageUrl);
+  }
+
+  if (blobToUpload) {
+    if (blobToUpload.size > 5 * 1024 * 1024) {
+      throw new Error('A imagem selecionada excede o limite máximo permitido de 5MB.');
+    }
+    const mimeType = blobToUpload.type || 'image/jpeg';
+    if (!mimeType.startsWith('image/')) {
+      throw new Error('O arquivo selecionado não é uma imagem válida.');
+    }
+
+    try {
+      const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+      const cleanPath = `social_posts/${id}/${Date.now()}_img.${ext}`;
+      const fileRef = storageRef(storage, cleanPath);
+      const snapshot = await uploadBytes(fileRef, blobToUpload, {
+        contentType: mimeType,
+        customMetadata: { postId: id, author: post.authorName }
+      });
+      finalImageUrl = await getDownloadURL(snapshot.ref);
+      storagePath = cleanPath;
+    } catch (storageErr) {
+      console.warn('Aviso: Falha ao enviar foto para Firebase Storage, mantendo post em texto puro:', storageErr);
+      finalImageUrl = undefined;
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    id,
+    authorName: (post.authorName || 'Participante').trim().slice(0, 120),
+    authorRole: (post.authorRole || 'Participante do Simpósio').trim().slice(0, 120),
+    city: (post.city || 'Carangola').trim().slice(0, 100),
+    content: (post.content || '').trim().slice(0, 1000),
+    hashtags: (post.hashtags || '').trim().slice(0, 300),
+    likes: Math.max(0, Math.round(Number(post.likes) || 0)),
+    createdAt: post.createdAt || nowIso,
+    timestamp: Number(post.timestamp) || Date.now(),
+    status: post.status || 'approved',
+    pinned: Boolean(post.pinned),
+    updatedAt: nowIso
+  };
+
+  if (finalImageUrl) payload.imageUrl = finalImageUrl;
+  if (storagePath) payload.storagePath = storagePath;
+  if (post.imageFileName) payload.imageFileName = post.imageFileName.slice(0, 160);
+
+  try {
+    await setDoc(doc(db, 'social_posts', id), payload, { merge: true });
+    return {
+      ...post,
+      id,
+      imageUrl: finalImageUrl,
+      storagePath
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `social_posts/${id}`);
+    return post;
+  }
+};
+
+export const likeSocialPostInDb = async (
+  postId: string,
+  voterId: string
+): Promise<{ success: boolean; likes: number; hasLiked: boolean }> => {
+  if (customSocialPostsAdapter) {
+    const res = await customSocialPostsAdapter.toggleLike(postId, voterId);
+    return { success: true, ...res };
+  }
+
+  const cleanPostId = sanitizeId(postId, 'post');
+  const cleanVoterId = sanitizeId(voterId, 'voter');
+
+  try {
+    const likeDocRef = doc(db, 'social_posts', cleanPostId, 'likes', cleanVoterId);
+    const postDocRef = doc(db, 'social_posts', cleanPostId);
+
+    const [likeSnap, postSnap] = await Promise.all([
+      getDoc(likeDocRef),
+      getDoc(postDocRef)
+    ]);
+
+    const currentLikes = postSnap.exists()
+      ? Math.max(0, Number(postSnap.data()?.likes) || 0)
+      : 0;
+
+    if (likeSnap.exists()) {
+      // Toggle off
+      const nextLikes = Math.max(0, currentLikes - 1);
+      const batch = writeBatch(db);
+      batch.delete(likeDocRef);
+      batch.update(postDocRef, { likes: nextLikes, updatedAt: new Date().toISOString() });
+      await batch.commit();
+      return { success: true, likes: nextLikes, hasLiked: false };
+    } else {
+      // Toggle on
+      const nextLikes = currentLikes + 1;
+      const batch = writeBatch(db);
+      batch.set(likeDocRef, { votedAt: new Date().toISOString(), postId: cleanPostId });
+      batch.update(postDocRef, { likes: nextLikes, updatedAt: new Date().toISOString() });
+      await batch.commit();
+      return { success: true, likes: nextLikes, hasLiked: true };
+    }
+  } catch (error) {
+    console.warn('Aviso: Falha ao sincronizar curtida no Firestore (modo offline/fallback ativo):', error);
+    return { success: false, likes: 0, hasLiked: false };
+  }
+};
+
+export const deleteSocialPostInDb = async (postId: string): Promise<void> => {
+  if (customSocialPostsAdapter) {
+    return customSocialPostsAdapter.deletePost(postId);
+  }
+
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const cleanId = sanitizeId(postId, 'post');
+  try {
+    const postRef = doc(db, 'social_posts', cleanId);
+    const snap = await getDoc(postRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data?.storagePath) {
+        try {
+          await deleteObject(storageRef(storage, data.storagePath));
+        } catch {
+          // ignore storage delete errors
+        }
+      }
+    }
+    await deleteDoc(postRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `social_posts/${cleanId}`);
+  }
+};
+
+export const moderateSocialPostInDb = async (
+  postId: string,
+  status: 'approved' | 'rejected',
+  pinned = false
+): Promise<void> => {
+  if (customSocialPostsAdapter) {
+    return customSocialPostsAdapter.moderatePost(postId, status, pinned);
+  }
+
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const cleanId = sanitizeId(postId, 'post');
+  try {
+    await updateDoc(doc(db, 'social_posts', cleanId), {
+      status,
+      pinned,
+      moderatedAt: new Date().toISOString(),
+      moderatedBy: user?.email || 'admin',
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `social_posts/${cleanId}`);
+  }
+};
+
+export const subscribeSocialPosts = (onUpdate: (posts: SocialPost[]) => void) => {
+  const q = query(collection(db, 'social_posts'), orderBy('timestamp', 'desc'), limit(100));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) return;
+      const list: SocialPost[] = snapshot.docs.map((d) => {
+        const data = d.data() as SocialPost;
+        return {
+          id: data.id || d.id,
+          authorName: data.authorName || 'Participante',
+          authorRole: data.authorRole || 'Participante do Simpósio',
+          city: data.city || 'Carangola',
+          content: data.content || '',
+          hashtags: data.hashtags,
+          imageUrl: data.imageUrl,
+          storagePath: data.storagePath,
+          imageFileName: data.imageFileName,
+          likes: Math.max(0, Number(data.likes) || 0),
+          createdAt: data.createdAt || '',
+          timestamp: Number(data.timestamp) || Date.now(),
+          pinned: Boolean(data.pinned),
+          status: data.status || 'approved'
+        };
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.warn('Aviso ao sincronizar postagens do SocialWall do Firestore:', error);
+    }
+  );
+};
+
+// ============================================================================
+// 2. ALERTAS & NOTIFICAÇÕES: FIRESTORE INTEGRATION
+// ============================================================================
+
+export const saveNotificationToDb = async (notification: PushNotificationItem): Promise<void> => {
+  if (customNotificationsAdapter) {
+    return customNotificationsAdapter.saveNotification(notification);
+  }
+
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const cleanId = sanitizeId(notification.id, 'notif');
+  const payload: Record<string, unknown> = {
+    id: cleanId,
+    title: (notification.title || '').trim().slice(0, 160),
+    body: (notification.body || '').trim().slice(0, 1000),
+    category: ['lembrete', 'aviso', 'material', 'certificado', 'urgente'].includes(notification.category)
+      ? notification.category
+      : 'aviso',
+    targetAudience: ['todos', 'inscritos', 'presentes', 'profissionais'].includes(notification.targetAudience)
+      ? notification.targetAudience
+      : 'todos',
+    sentAt: notification.sentAt || new Date().toISOString(),
+    readCount: Math.max(0, Math.round(Number(notification.readCount) || 0)),
+    totalSent: Math.max(0, Math.round(Number(notification.totalSent) || 0)),
+    createdAt: new Date().toISOString(),
+    active: true
+  };
+
+  if (notification.clickedUrl) {
+    payload.clickedUrl = String(notification.clickedUrl).slice(0, 300);
+  }
+
+  try {
+    await setDoc(doc(db, 'notifications', cleanId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `notifications/${cleanId}`);
+  }
+};
+
+export const deleteNotificationInDb = async (notificationId: string): Promise<void> => {
+  if (customNotificationsAdapter) {
+    return customNotificationsAdapter.deleteNotification(notificationId);
+  }
+
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const cleanId = sanitizeId(notificationId, 'notif');
+  try {
+    await deleteDoc(doc(db, 'notifications', cleanId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `notifications/${cleanId}`);
+  }
+};
+
+export const subscribeNotifications = (onUpdate: (notifications: PushNotificationItem[]) => void) => {
+  const q = query(collection(db, 'notifications'), orderBy('sentAt', 'desc'), limit(50));
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) return;
+      const list: PushNotificationItem[] = snapshot.docs.map((d) => {
+        const data = d.data() as PushNotificationItem;
+        return {
+          id: data.id || d.id,
+          title: data.title || '',
+          body: data.body || '',
+          category: data.category || 'aviso',
+          targetAudience: data.targetAudience || 'todos',
+          sentAt: data.sentAt || new Date().toISOString(),
+          readCount: Number(data.readCount) || 0,
+          totalSent: Number(data.totalSent) || 0,
+          clickedUrl: data.clickedUrl
+        };
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.warn('Aviso ao sincronizar alertas do Firestore:', error);
+    }
+  );
+};
+
+// ============================================================================
+// 3. NEWSLETTER: FIRESTORE INTEGRATION & LGPD PRIVACY
+// ============================================================================
+
+export const subscribeNewsletterInDb = async (
+  sub: NewsletterSubscriber
+): Promise<{ isNew: boolean; subscriber: NewsletterSubscriber }> => {
+  if (customNewsletterAdapter) {
+    return customNewsletterAdapter.subscribe(sub);
+  }
+
+  const cleanEmail = (sub.email || '').trim().toLowerCase();
+  if (!cleanEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(cleanEmail)) {
+    throw new Error('Endereço de e-mail inválido para inscrição na newsletter.');
+  }
+
+  const docId = `sub-${cleanEmail.replace(/[^a-z0-9]/g, '_').slice(0, 80)}`;
+  const nowIso = new Date().toISOString();
+
+  const payload: Record<string, unknown> = {
+    id: docId,
+    email: cleanEmail,
+    subscribedAt: sub.subscribedAt || nowIso.split('T')[0],
+    receiveWhatsapp: Boolean(sub.receiveWhatsapp),
+    receiveEmail: sub.receiveEmail !== false,
+    status: 'active',
+    origin: sub.origin || 'newsletter_form',
+    consent: true,
+    updatedAt: nowIso
+  };
+
+  if (sub.name) payload.name = sub.name.trim().slice(0, 120);
+  if (sub.phone) payload.phone = sub.phone.trim().slice(0, 32);
+  if (sub.role) payload.role = sub.role.trim().slice(0, 120);
+  if (sub.city) payload.city = sub.city.trim().slice(0, 100);
+  if (sub.institution) payload.institution = sub.institution.trim().slice(0, 180);
+
+  try {
+    const docRef = doc(db, 'newsletter_subscribers', docId);
+    const existingSnap = await getDoc(docRef);
+    const isNew = !existingSnap.exists();
+
+    await setDoc(docRef, payload, { merge: true });
+
+    return {
+      isNew,
+      subscriber: {
+        ...sub,
+        id: docId,
+        email: cleanEmail,
+        status: 'active'
+      }
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${docId}`);
+    return { isNew: true, subscriber: { ...sub, id: docId, email: cleanEmail } };
+  }
+};
+
+export const unsubscribeNewsletterInDb = async (emailOrId: string): Promise<void> => {
+  if (customNewsletterAdapter) {
+    return customNewsletterAdapter.unsubscribe(emailOrId);
+  }
+
+  const clean = (emailOrId || '').trim().toLowerCase();
+  const docId = clean.startsWith('sub-')
+    ? clean
+    : `sub-${clean.replace(/[^a-z0-9]/g, '_').slice(0, 80)}`;
+
+  try {
+    await updateDoc(doc(db, 'newsletter_subscribers', docId), {
+      status: 'unsubscribed',
+      receiveWhatsapp: false,
+      receiveEmail: false,
+      unsubscribedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${docId}`);
+  }
+};
+
+export const deleteSubscriberInDb = async (subscriberId: string): Promise<void> => {
+  if (customNewsletterAdapter) {
+    return customNewsletterAdapter.deleteSubscriber(subscriberId);
+  }
+
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const cleanId = sanitizeId(subscriberId, 'sub');
+  try {
+    await deleteDoc(doc(db, 'newsletter_subscribers', cleanId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `newsletter_subscribers/${cleanId}`);
+  }
+};
+
+export const subscribeAdminSubscribers = (
+  onUpdate: (subscribers: NewsletterSubscriber[]) => void
+) => {
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    return () => {};
+  }
+
+  const q = query(
+    collection(db, 'newsletter_subscribers'),
+    orderBy('subscribedAt', 'desc'),
+    limit(500)
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) return;
+      const list: NewsletterSubscriber[] = snapshot.docs.map((d) => {
+        const data = d.data() as NewsletterSubscriber;
+        return {
+          id: data.id || d.id,
+          email: data.email || '',
+          name: data.name,
+          phone: data.phone,
+          role: data.role,
+          city: data.city,
+          institution: data.institution,
+          subscribedAt: data.subscribedAt || '',
+          receiveWhatsapp: Boolean(data.receiveWhatsapp),
+          receiveEmail: data.receiveEmail !== false,
+          origin: data.origin,
+          status: data.status || 'active',
+          unsubscribedAt: data.unsubscribedAt
+        };
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.warn('Aviso ao sincronizar assinantes de newsletter:', error);
     }
   );
 };

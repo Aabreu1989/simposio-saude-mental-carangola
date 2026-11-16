@@ -145,11 +145,17 @@ export interface SocialPost {
   content: string;
   hashtags?: string;
   imageUrl?: string;
+  storagePath?: string;
+  imageFileName?: string;
   likes: number;
   hasLiked?: boolean;
   createdAt: string;
   timestamp?: number;
   pinned?: boolean;
+  status?: 'approved' | 'pending' | 'rejected';
+  voterIds?: string[];
+  moderatedAt?: string;
+  moderatedBy?: string;
 }
 
 export interface SpeakerProfile {
@@ -181,6 +187,8 @@ export interface PushNotificationItem {
   readCount: number;
   totalSent: number;
   clickedUrl?: string;
+  createdAt?: string;
+  active?: boolean;
 }
 
 export interface NewsletterSubscriber {
@@ -195,6 +203,10 @@ export interface NewsletterSubscriber {
   phone?: string;
   institution?: string;
   origin?: 'inscricao' | 'newsletter_form';
+  status?: 'active' | 'unsubscribed';
+  unsubscribedAt?: string;
+  consent?: boolean;
+  updatedAt?: string;
 }
 
 export interface BadgeDesignConfig {

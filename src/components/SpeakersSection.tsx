@@ -223,7 +223,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                     </div>
 
                     {/* Short Bio */}
-                    <p className="text-xs sm:text-[13px] text-stone-700 leading-relaxed mb-4">
+                    <p className="text-xs sm:text-[13px] text-stone-700 leading-relaxed whitespace-pre-line mb-4">
                       {speaker.bio}
                     </p>
                   </div>

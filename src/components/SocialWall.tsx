@@ -42,7 +42,7 @@ const InstagramIcon = ({ className = 'w-3.5 h-3.5' }: { className?: string }) =>
 
 interface SocialWallProps {
   posts: SocialPost[];
-  onAddPost: (post: SocialPost) => void;
+  onAddPost: (post: SocialPost, rawImageFile?: File | Blob) => void;
   onLikePost: (postId: string) => void;
   config?: EventConfig;
 }
@@ -101,6 +101,8 @@ export const SocialWall: React.FC<SocialWallProps> = ({
   const [content, setContent] = useState('');
   const [hashtagsField, setHashtagsField] = useState(DEFAULT_EVENT_HASHTAGS);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
 
   // Share Studio Modal state
   const [shareStudioOpen, setShareStudioOpen] = useState(false);
@@ -188,8 +190,18 @@ export const SocialWall: React.FC<SocialWallProps> = ({
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImageUploadError(null);
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        setImageUploadError('A imagem selecionada excede o limite máximo permitido de 5MB.');
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        setImageUploadError('Formato de arquivo inválido. Selecione uma imagem JPEG, PNG ou WebP.');
+        return;
+      }
+      setSelectedImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
@@ -216,13 +228,15 @@ export const SocialWall: React.FC<SocialWallProps> = ({
       content: content.trim(),
       hashtags: finalHashtags,
       imageUrl: imagePreview || undefined,
+      imageFileName: selectedImageFile?.name,
       likes: 1,
       hasLiked: true,
       createdAt: `${dateStr} às ${timeStr}`,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      status: 'approved'
     };
 
-    onAddPost(newPost);
+    onAddPost(newPost, selectedImageFile || undefined);
     setCurrentPage(1);
 
     setAuthorName('');
@@ -230,6 +244,8 @@ export const SocialWall: React.FC<SocialWallProps> = ({
     setContent('');
     setHashtagsField(DEFAULT_EVENT_HASHTAGS);
     setImagePreview(null);
+    setSelectedImageFile(null);
+    setImageUploadError(null);
     setIsPosting(false);
   };
 
@@ -477,6 +493,9 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                     onChange={handleImageChange}
                     className="text-xs text-stone-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#0a3641] file:text-white hover:file:bg-[#0f4b59] cursor-pointer"
                   />
+                  {imageUploadError && (
+                    <p className="mt-1.5 text-xs text-rose-600 font-medium">{imageUploadError}</p>
+                  )}
                   {imagePreview && (
                     <div className="mt-2 relative rounded-xl overflow-hidden border border-stone-200 bg-stone-100 p-1.5 flex items-center justify-center">
                       <img

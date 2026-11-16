@@ -60,6 +60,16 @@ import {
   deleteSpeakerInDb,
   saveAllSpeakersToDb,
   subscribeSpeakers,
+  saveSocialPostToDb,
+  likeSocialPostInDb,
+  deleteSocialPostInDb,
+  subscribeSocialPosts,
+  saveNotificationToDb,
+  deleteNotificationInDb,
+  subscribeNotifications,
+  subscribeNewsletterInDb,
+  deleteSubscriberInDb,
+  subscribeAdminSubscribers,
   PRIMARY_ADMIN_EMAIL,
   type FirebaseAdminUser
 } from './services/firebaseDb.ts';
@@ -216,11 +226,32 @@ export default function App() {
       }
     });
 
+    const unsubPosts = subscribeSocialPosts((remotePosts) => {
+      const deletedIds = getDeletedPostIds();
+      const validRemote = remotePosts.filter((p) => !deletedIds.has(p.id));
+      setPosts((prev) => {
+        const remoteIds = new Set(validRemote.map((p) => p.id));
+        const localOnly = prev.filter((p) => !remoteIds.has(p.id) && !deletedIds.has(p.id));
+        const combined = [...validRemote, ...localOnly].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        saveToStorage(STORAGE_KEYS.POSTS, combined);
+        return combined;
+      });
+    });
+
+    const unsubNotifications = subscribeNotifications((remoteNotifs) => {
+      if (remoteNotifs && remoteNotifs.length > 0) {
+        setNotifications(remoteNotifs);
+        saveToStorage(STORAGE_KEYS.NOTIFICATIONS, remoteNotifs);
+      }
+    });
+
     return () => {
       unsubConfig();
       unsubMaterials();
       unsubAuth();
       unsubSpeakers();
+      unsubPosts();
+      unsubNotifications();
     };
   }, []);
 
@@ -274,10 +305,17 @@ export default function App() {
       saveToStorage(STORAGE_KEYS.CERT_DOWNLOADS, remoteDownloads);
     });
 
+    const unsubSubscribers = subscribeAdminSubscribers((remoteSubscribers) => {
+      if (!isActive || !remoteSubscribers) return;
+      setSubscribers(remoteSubscribers);
+      saveToStorage(STORAGE_KEYS.SUBSCRIBERS, remoteSubscribers);
+    });
+
     return () => {
       isActive = false;
       unsubRegs();
       unsubDownloads();
+      unsubSubscribers();
     };
   }, [firebaseUser]);
 
@@ -900,13 +938,30 @@ export default function App() {
   };
 
   // Handlers for Social Wall
-  const handleAddSocialPost = (post: SocialPost) => {
+  const handleAddSocialPost = async (post: SocialPost, rawImageFile?: File | Blob) => {
     const updated = [post, ...posts];
     setPosts(updated);
     saveToStorage(STORAGE_KEYS.POSTS, updated);
+
+    try {
+      const persisted = await saveSocialPostToDb(post, rawImageFile);
+      setPosts((prev) => prev.map((p) => (p.id === post.id ? persisted : p)));
+    } catch (err) {
+      console.warn('Post salvo localmente, falha na sincronização cloud:', err);
+    }
   };
 
-  const handleLikePost = (postId: string) => {
+  const handleLikePost = async (postId: string) => {
+    let voterId = typeof localStorage !== 'undefined' ? localStorage.getItem('sus_voter_id') : null;
+    if (!voterId) {
+      voterId = 'voter-' + Math.random().toString(36).substring(2, 12);
+      try {
+        localStorage?.setItem('sus_voter_id', voterId);
+      } catch {
+        // ignore
+      }
+    }
+
     setPosts((prev) => {
       const updated = prev.map((p) => {
         if (p.id === postId) {
@@ -922,9 +977,22 @@ export default function App() {
       saveToStorage(STORAGE_KEYS.POSTS, updated);
       return updated;
     });
+
+    try {
+      const res = await likeSocialPostInDb(postId, voterId);
+      if (res.success) {
+        setPosts((prev) =>
+          prev.map((p) =>
+            p.id === postId ? { ...p, likes: res.likes, hasLiked: res.hasLiked } : p
+          )
+        );
+      }
+    } catch (err) {
+      console.warn('Aviso ao sincronizar curtida no Firestore:', err);
+    }
   };
 
-  const handleDeletePost = (postId: string) => {
+  const handleDeletePost = async (postId: string) => {
     addDeletedPostId(postId);
     setPosts((prev) => {
       const updated = prev.filter((p) => p.id !== postId);
@@ -932,41 +1000,67 @@ export default function App() {
       return updated;
     });
 
-    if (isSupabaseConfigured()) {
-      supabaseRestQuery('social_posts', {
-        method: 'DELETE',
-        query: `id=eq.${postId}`
-      }).catch(() => {});
+    try {
+      await deleteSocialPostInDb(postId);
+    } catch (err) {
+      console.warn('Erro ao deletar post no Firestore:', err);
     }
   };
 
   // Handlers for Notifications & Newsletter
-  const handleSendNotification = (item: PushNotificationItem) => {
+  const handleSendNotification = async (item: PushNotificationItem) => {
     const updated = [item, ...notifications];
     setNotifications(updated);
     saveToStorage(STORAGE_KEYS.NOTIFICATIONS, updated);
+
+    try {
+      await saveNotificationToDb(item);
+    } catch (err) {
+      console.warn('Aviso salvo localmente, falha ao persistir no Firestore:', err);
+    }
   };
 
-  const handleDeleteNotification = (id: string) => {
+  const handleDeleteNotification = async (id: string) => {
     setNotifications((prev) => {
       const updated = prev.filter((n) => n.id !== id);
       saveToStorage(STORAGE_KEYS.NOTIFICATIONS, updated);
       return updated;
     });
+
+    try {
+      await deleteNotificationInDb(id);
+    } catch (err) {
+      console.warn('Erro ao deletar notificação no Firestore:', err);
+    }
   };
 
-  const handleSubscribeNewsletter = (subscriber: NewsletterSubscriber) => {
-    const updated = [subscriber, ...subscribers];
+  const handleSubscribeNewsletter = async (subscriber: NewsletterSubscriber) => {
+    const updated = [subscriber, ...subscribers.filter((s) => s.email !== subscriber.email)];
     setSubscribers(updated);
     saveToStorage(STORAGE_KEYS.SUBSCRIBERS, updated);
+
+    try {
+      const res = await subscribeNewsletterInDb(subscriber);
+      setSubscribers((prev) =>
+        prev.map((s) => (s.email === subscriber.email ? res.subscriber : s))
+      );
+    } catch (err) {
+      console.warn('Inscrição na newsletter mantida localmente:', err);
+    }
   };
 
-  const handleDeleteSubscriber = (id: string) => {
+  const handleDeleteSubscriber = async (id: string) => {
     setSubscribers((prev) => {
       const updated = prev.filter((s) => s.id !== id);
       saveToStorage(STORAGE_KEYS.SUBSCRIBERS, updated);
       return updated;
     });
+
+    try {
+      await deleteSubscriberInDb(id);
+    } catch (err) {
+      console.warn('Erro ao remover assinante no Firestore:', err);
+    }
   };
 
   const handleAddMaterial = async (

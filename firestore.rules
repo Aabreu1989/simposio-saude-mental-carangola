@@ -208,6 +208,76 @@ service cloud.firestore {
         data.data is string && data.data.size() >= 1 && data.data.size() <= 600000;
     }
 
+    function isValidSocialPost(data) {
+      return data.keys().hasAll(['id', 'authorName', 'authorRole', 'city', 'content', 'likes', 'createdAt']) &&
+        data.keys().hasOnly([
+          'id', 'authorName', 'authorRole', 'city', 'content', 'hashtags',
+          'imageUrl', 'storagePath', 'imageFileName', 'likes', 'createdAt',
+          'timestamp', 'pinned', 'status', 'voterIds', 'moderatedAt', 'moderatedBy', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 120 &&
+        data.authorRole is string && data.authorRole.size() >= 2 && data.authorRole.size() <= 120 &&
+        data.city is string && data.city.size() >= 2 && data.city.size() <= 100 &&
+        data.content is string && data.content.size() >= 2 && data.content.size() <= 1000 &&
+        data.likes is number && data.likes >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 60 &&
+        isValidOptionalNumber(data, 'timestamp') &&
+        isValidOptionalString(data, 'hashtags', 300) &&
+        isValidOptionalString(data, 'imageUrl', 1000) &&
+        isValidOptionalString(data, 'storagePath', 300) &&
+        isValidOptionalString(data, 'imageFileName', 160) &&
+        isValidOptionalBool(data, 'pinned') &&
+        isValidOptionalString(data, 'status', 20) &&
+        isValidOptionalString(data, 'moderatedAt', 40) &&
+        isValidOptionalString(data, 'moderatedBy', 120) &&
+        isValidOptionalString(data, 'updatedAt', 40);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'title', 'body', 'category', 'targetAudience', 'sentAt', 'readCount', 'totalSent']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'body', 'category', 'targetAudience', 'sentAt',
+          'readCount', 'totalSent', 'clickedUrl', 'createdAt', 'active', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 2 && data.title.size() <= 160 &&
+        data.body is string && data.body.size() >= 2 && data.body.size() <= 1000 &&
+        data.category in ['lembrete', 'aviso', 'material', 'certificado', 'urgente'] &&
+        data.targetAudience in ['todos', 'inscritos', 'presentes', 'profissionais'] &&
+        data.sentAt is string && data.sentAt.size() <= 40 &&
+        data.readCount is number && data.readCount >= 0 &&
+        data.totalSent is number && data.totalSent >= 0 &&
+        isValidOptionalString(data, 'clickedUrl', 300) &&
+        isValidOptionalString(data, 'createdAt', 40) &&
+        isValidOptionalBool(data, 'active') &&
+        isValidOptionalString(data, 'updatedAt', 40);
+    }
+
+    function isValidNewsletterSubscriber(data) {
+      return data.keys().hasAll(['id', 'email', 'subscribedAt', 'receiveWhatsapp']) &&
+        data.keys().hasOnly([
+          'id', 'email', 'name', 'phone', 'role', 'city', 'institution',
+          'subscribedAt', 'receiveWhatsapp', 'receiveEmail', 'origin',
+          'status', 'unsubscribedAt', 'consent', 'updatedAt'
+        ]) &&
+        isValidId(data.id) &&
+        data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
+        data.subscribedAt is string && data.subscribedAt.size() <= 40 &&
+        data.receiveWhatsapp is bool &&
+        isValidOptionalBool(data, 'receiveEmail') &&
+        isValidOptionalString(data, 'name', 120) &&
+        isValidOptionalString(data, 'phone', 32) &&
+        isValidOptionalString(data, 'role', 120) &&
+        isValidOptionalString(data, 'city', 100) &&
+        isValidOptionalString(data, 'institution', 180) &&
+        isValidOptionalString(data, 'origin', 40) &&
+        isValidOptionalString(data, 'status', 20) &&
+        isValidOptionalString(data, 'unsubscribedAt', 40) &&
+        isValidOptionalBool(data, 'consent') &&
+        isValidOptionalString(data, 'updatedAt', 40);
+    }
+
     match /admins/{userId} {
       allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow list, create, update, delete: if isAdmin() && isValidId(userId);
@@ -339,6 +409,87 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/download_materials/$(materialId));
         allow delete: if isValidId(materialId) && isValidId(chunkId) && isAdmin();
       }
+    }
+
+    match /social_posts/{postId} {
+      // Mural público comunitário: todos podem visualizar as postagens
+      allow get: if isValidId(postId);
+      allow list: if true;
+
+      // Criação de postagem por qualquer participante
+      allow create: if isValidId(postId) &&
+        isValidSocialPost(incoming()) &&
+        incoming().id == postId &&
+        (
+          isAdmin() ||
+          incoming().likes <= 1
+        );
+
+      // Atualização: Admin pode moderar/editar tudo; público pode apenas incrementar/decrementar curtidas de forma consistente
+      allow update: if isValidId(postId) &&
+        isValidSocialPost(incoming()) &&
+        incoming().id == existing().id &&
+        (
+          isAdmin() ||
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'updatedAt']) &&
+            (
+              incoming().likes == existing().likes + 1 ||
+              (existing().likes > 0 && incoming().likes == existing().likes - 1)
+            )
+          )
+        );
+
+      // Exclusão estritamente restrita a administradores autenticados
+      allow delete: if isValidId(postId) && isAdmin();
+
+      // Subcoleção para controle atômico de curtidas por eleitor/dispositivo
+      match /likes/{voterId} {
+        allow get: if isValidId(voterId);
+        allow list: if isAdmin();
+        allow create: if isValidId(voterId) &&
+          request.resource.data.keys().hasOnly(['votedAt', 'postId']) &&
+          request.resource.data.postId == postId;
+        allow delete: if isValidId(voterId) && (isAdmin() || resource.data.postId == postId);
+      }
+    }
+
+    match /notifications/{notificationId} {
+      // Alertas oficiais do simpósio: todos os participantes conectados recebem em tempo real
+      allow get: if isValidId(notificationId);
+      allow list: if true;
+
+      // Gestão de alertas (criação, edição e exclusão) restrita a administradores autenticados
+      allow create, update: if isValidId(notificationId) &&
+        isAdmin() &&
+        isValidNotification(incoming()) &&
+        incoming().id == notificationId;
+
+      allow delete: if isValidId(notificationId) && isAdmin();
+    }
+
+    match /newsletter_subscribers/{subscriberId} {
+      // PROTEÇÃO DE DADOS PESSOAIS (LGPD): leitura e listagem restrita estritamente a administradores autenticados
+      allow get, list: if isAdmin();
+
+      // Assinatura pública via portal ou modal de inscrição
+      allow create: if isValidId(subscriberId) &&
+        isValidNewsletterSubscriber(incoming()) &&
+        incoming().id == subscriberId;
+
+      // Atualização: Admin gerencia todos; assinante público pode atualizar apenas consentimento e status (cancelar inscrição)
+      allow update: if isValidId(subscriberId) &&
+        isValidNewsletterSubscriber(incoming()) &&
+        incoming().id == existing().id &&
+        (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'unsubscribedAt', 'receiveWhatsapp', 'receiveEmail', 'updatedAt'
+          ])
+        );
+
+      // Exclusão estritamente administrativa
+      allow delete: if isValidId(subscriberId) && isAdmin();
     }
   }
 }
