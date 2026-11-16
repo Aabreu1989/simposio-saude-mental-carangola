@@ -509,6 +509,19 @@ export const INITIAL_REGISTRATIONS: Registration[] = [
 
 export const INITIAL_MATERIALS: DownloadMaterial[] = [
   {
+    id: 'mat-caps-bem-te-quero-2026',
+    title: 'Supervisão Clínico-Institucional na RAPS: CAPS Como Bem Te Quero',
+    category: 'Cartilha',
+    author: 'Ana Marta Lobosque, Silvio Yasuí, Károl Veiga Cabral · Fiocruz Brasília (NUSMAD) · Ministério da Saúde (DESMAD)',
+    format: 'PDF',
+    size: '2.2 MB',
+    fileName: 'caps_como_bem_te_quero_supervisao_raps_fiocruz_ms_2026.pdf',
+    description: 'Livro oficial de referência nacional da Fiocruz e Ministério da Saúde (DESMAD/NUSMAD, 2026) para a supervisão clínico-institucional em mais de 300 CAPS. Resgata os pilares da Reforma Psiquiátrica e do cuidado em liberdade: portas abertas sem regulação de vagas, acolhimento, vínculo, corresponsabilização, permanência-dia, hospitalidade noturna, atenção à crise, interdisciplinaridade, Projeto Terapêutico Singular (PTS), território, apoio matricial, controle social e redução de danos.',
+    pages: 36,
+    downloadsCount: 0,
+    fileUrl: '/materiais/caps_como_bem_te_quero_supervisao_raps_fiocruz_ms_2026.pdf'
+  },
+  {
     id: 'mat-eap-desinst-2026',
     title: 'Cuidado, Território e Direitos: Orientações à Equipe de Avaliação e Acompanhamento de Medidas Terapêuticas (EAP-Desinst)',
     category: 'Legislação',

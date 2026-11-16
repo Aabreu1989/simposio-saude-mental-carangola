@@ -745,6 +745,7 @@ async function runTests() {
   const initialMaterials = loadStoredData().materials;
 
   const expectedNewIds = [
+    'mat-caps-bem-te-quero-2026',
     'mat-eap-desinst-2026',
     'mat-guia-raps-mg-2022',
     'mat-guia-crise-raps-2026'
@@ -755,7 +756,7 @@ async function runTests() {
   );
   assert(
     hasAllNewDocs,
-    'INITIAL_MATERIALS inclui os 3 novos documentos técnicos do MS e ESP-MG com rotas estáticas',
+    'INITIAL_MATERIALS inclui os 4 novos documentos técnicos oficiais (Fiocruz, MS, ESP-MG) com rotas estáticas',
     suite7
   );
 
@@ -767,7 +768,7 @@ async function runTests() {
   });
   assert(
     filesExistOnDisk,
-    'Arquivos PDF dos 3 novos documentos existem fisicamente na pasta public/materiais',
+    'Arquivos PDF dos 4 novos documentos existem fisicamente na pasta public/materiais',
     suite7
   );
 
