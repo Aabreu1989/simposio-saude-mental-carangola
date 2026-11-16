@@ -78,7 +78,8 @@ import {
   formatCPF,
   formatPhone,
   sendBrowserNotification,
-  triggerMaterialDownload
+  triggerMaterialDownload,
+  normalizeGoogleDriveImageUrl
 } from '../utils/helpers.ts';
 import {
   sendRegistrationConfirmationEmail,
@@ -3848,7 +3849,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="flex items-center gap-3">
                               {spk.photoUrl ? (
                                 <img
-                                  src={spk.photoUrl}
+                                  src={normalizeGoogleDriveImageUrl(spk.photoUrl).url}
                                   alt={spk.name}
                                   className="w-12 h-12 rounded-xl object-cover border border-stone-200 shadow-2xs shrink-0"
                                   onError={(e) => {
@@ -4099,20 +4100,86 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       </div>
 
-                      {/* URL da Foto */}
+                      {/* URL / Arquivo da Foto */}
                       <div>
-                        <label className="block text-xs font-bold text-stone-700 mb-1">
-                          URL da Foto de Perfil (Opcional)
-                        </label>
-                        <input
-                          type="url"
-                          placeholder="https://exemplo.com/foto-palestrante.jpg"
-                          value={speakerFormData.photoUrl}
-                          onChange={(e) => setSpeakerFormData({ ...speakerFormData, photoUrl: e.target.value })}
-                          className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
-                        />
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-bold text-stone-700">
+                            Foto de Perfil (Opcional)
+                          </label>
+                          {speakerFormData.photoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setSpeakerFormData({ ...speakerFormData, photoUrl: '' })}
+                              className="text-[11px] text-rose-600 hover:text-rose-800 font-medium cursor-pointer"
+                            >
+                              Remover foto
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Cole o link da foto ou selecione o arquivo ao lado..."
+                            value={speakerFormData.photoUrl}
+                            onChange={(e) => {
+                              const inputVal = e.target.value.trim();
+                              const normalized = normalizeGoogleDriveImageUrl(inputVal);
+                              setSpeakerFormData({
+                                ...speakerFormData,
+                                photoUrl: normalized.isDriveFile ? normalized.url : inputVal
+                              });
+                            }}
+                            className="flex-1 px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          />
+                          <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-stone-300 bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-semibold cursor-pointer transition-colors shrink-0 shadow-2xs" title="Carregar imagem do seu computador">
+                            <Upload className="w-3.5 h-3.5 text-[#0a3641]" />
+                            <span>Arquivo</span>
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  if (file.size > 4 * 1024 * 1024) {
+                                    alert('A foto selecionada excede o limite de 4MB. Por favor, escolha uma imagem menor.');
+                                    return;
+                                  }
+                                  const reader = new FileReader();
+                                  reader.onloadend = () => {
+                                    setSpeakerFormData((prev) => ({ ...prev, photoUrl: reader.result as string }));
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+
+                        {/* Alerta se colou link de pasta do Google Drive */}
+                        {normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).isDriveFolder && (
+                          <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2 mt-2">
+                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div>
+                              <strong>Link de pasta detectado:</strong> Você colou o link de uma <em>pasta</em> do Google Drive (<code className="text-[10px] bg-amber-100 px-1 py-0.5 rounded">/drive/folders/...</code>). Navegadores web não conseguem renderizar uma pasta como imagem.
+                              <div className="mt-1">
+                                <strong>Como resolver:</strong> Abra a foto dentro da pasta no Google Drive, clique com o botão direito &gt; <em>Compartilhar</em> (defina como &quot;Qualquer pessoa com o link&quot;) e cole o link do arquivo da foto (ou use o botão <strong>&quot;Arquivo&quot;</strong> acima para enviar a foto direto do seu computador).
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Confirmação quando link de arquivo do Google Drive foi convertido */}
+                        {speakerFormData.photoUrl.includes('googleusercontent.com/d/') && (
+                          <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-[11px] flex items-center gap-1.5 mt-2">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Link do Google Drive convertido automaticamente em imagem direta.</span>
+                          </div>
+                        )}
+
                         <p className="text-[11px] text-stone-500 mt-1">
-                          Cole o link direto da imagem (PNG ou JPG). Se deixar em branco, o sistema exibirá as iniciais com as cores institucionais do Simpósio.
+                          Cole o link direto da imagem (PNG, JPG) ou envie o arquivo do seu computador.
                         </p>
                       </div>
 

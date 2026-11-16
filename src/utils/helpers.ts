@@ -1355,3 +1355,44 @@ export const getShareContent = (config: EventConfig) => {
   };
 };
 
+/**
+ * Normaliza URLs do Google Drive para endpoints diretos de imagem.
+ * Identifica se a URL fornecida é de uma pasta (diretório) ou arquivo direto.
+ */
+export const normalizeGoogleDriveImageUrl = (
+  rawUrl?: string
+): { url: string; isDriveFolder: boolean; isDriveFile: boolean } => {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) {
+    return { url: '', isDriveFolder: false, isDriveFile: false };
+  }
+
+  // Detecta pasta do Google Drive (/drive/folders/ID)
+  if (trimmed.includes('drive.google.com/drive/folders/') || trimmed.includes('/folders/')) {
+    return { url: trimmed, isDriveFolder: true, isDriveFile: false };
+  }
+
+  // Detecta link de arquivo do Google Drive (/file/d/ID)
+  const fileMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (fileMatch && fileMatch[1]) {
+    return {
+      url: `https://lh3.googleusercontent.com/d/${fileMatch[1]}`,
+      isDriveFolder: false,
+      isDriveFile: true
+    };
+  }
+
+  // Detecta link de arquivo com parâmetro ?id=ID ou &id=ID
+  const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (trimmed.includes('drive.google.com') && idMatch && idMatch[1]) {
+    return {
+      url: `https://lh3.googleusercontent.com/d/${idMatch[1]}`,
+      isDriveFolder: false,
+      isDriveFile: true
+    };
+  }
+
+  return { url: trimmed, isDriveFolder: false, isDriveFile: false };
+};
+
+

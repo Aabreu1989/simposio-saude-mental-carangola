@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { FileDown, GraduationCap, Search, Users, ExternalLink, CheckCircle2 } from 'lucide-react';
 import { EventConfig, SpeakerProfile } from '../types.ts';
 import { exportSpeakersPdf } from '../utils/speakersPdfGenerator.ts';
+import { normalizeGoogleDriveImageUrl } from '../utils/helpers.ts';
 
 interface SpeakersSectionProps {
   speakers: SpeakerProfile[];
@@ -54,6 +55,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
   const [searchQuery, setSearchQuery] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [exportDone, setExportDone] = useState(false);
+  const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
 
   const filteredSpeakers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -183,12 +185,13 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                     {/* Headshot + Identity */}
                     <div className="flex items-start gap-4 mb-4">
                       <div className="w-20 h-20 rounded-2xl overflow-hidden shrink-0 border border-stone-200 bg-stone-100 shadow-2xs">
-                        {speaker.photoUrl ? (
+                        {speaker.photoUrl && !imgErrors[speaker.id] ? (
                           <img
-                            src={speaker.photoUrl}
+                            src={normalizeGoogleDriveImageUrl(speaker.photoUrl).url}
                             alt={`Retrato de ${speaker.name}`}
                             referrerPolicy="no-referrer"
                             loading="lazy"
+                            onError={() => setImgErrors((prev) => ({ ...prev, [speaker.id]: true }))}
                             className={`w-full h-full ${cropClass}`}
                           />
                         ) : (
