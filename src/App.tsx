@@ -12,7 +12,8 @@ import {
   PushNotificationItem,
   NewsletterSubscriber,
   EvaluationFeedback,
-  CertificateDownloadRecord
+  CertificateDownloadRecord,
+  SpeakerProfile
 } from './types.ts';
 import { UserCheck, Sparkles, Home, Calendar, FileDown, Menu, MessageSquare } from 'lucide-react';
 import { THEMATIC_AXES, INITIAL_SCHEDULE, INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES, INITIAL_MATERIALS } from './data/initialData.ts';
@@ -20,8 +21,10 @@ import {
   loadStoredData,
   saveToStorage,
   saveMaterialsToStorageSafe,
+  saveSpeakersToStorage,
   STORAGE_KEYS,
   REALTIME_CHANNEL_NAME,
+  TAB_INSTANCE_ID,
   sendBrowserNotification,
   isCertificateAvailableForPublic,
   getDeletedMaterialIds,
@@ -40,6 +43,7 @@ import {
   isVerifiedAdminUser,
   seedInitialDataIfNeeded,
   savePublicRegistrationToDb,
+  synchronizeOfflineRegistrationQueue,
   persistRegistrationAndPermissionInDb,
   persistMultipleRegistrationsInDb,
   deleteRegistrationInDb,
@@ -52,9 +56,11 @@ import {
   deleteDownloadMaterialInDb,
   incrementMaterialDownloadInDb,
   subscribeDownloadMaterials,
+  saveSpeakerToDb,
+  deleteSpeakerInDb,
+  saveAllSpeakersToDb,
+  subscribeSpeakers,
   PRIMARY_ADMIN_EMAIL,
-  getStoredLocalAdmin,
-  createLocalAdminSession,
   type FirebaseAdminUser
 } from './services/firebaseDb.ts';
 import { INITIAL_BADGE_DESIGN, INITIAL_CERTIFICATE_DESIGN } from './data/initialData.ts';
@@ -104,7 +110,7 @@ const getInitialView = (): 'public' | 'admin' | 'inscricao' => {
 };
 
 export default function App() {
-  const initialData = loadStoredData();
+  const [initialData] = useState(() => loadStoredData());
 
   // App State - 'public' landing, 'inscricao' direct form view, 'admin' dashboard
   const [currentView, setCurrentView] = useState<'public' | 'admin' | 'inscricao'>(getInitialView);
@@ -118,15 +124,14 @@ export default function App() {
   const [offlineQueue, setOfflineQueue] = useState<Registration[]>(initialData.offlineQueue);
   const [lastRegistered, setLastRegistered] = useState<Registration | null>(initialData.lastRegistered);
   const [certificateDownloads, setCertificateDownloads] = useState<CertificateDownloadRecord[]>(initialData.certificateDownloads);
+  const [speakers, setSpeakers] = useState<SpeakerProfile[]>(initialData.speakers || SPEAKERS_PROFILES);
 
   // Connectivity state
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   // Firebase Firestore auth & cloud sync state (Authorized official manager: farmaciademinas.marketing@gmail.com)
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseAdminUser | null>(() => {
-    return getStoredLocalAdmin() || createLocalAdminSession(PRIMARY_ADMIN_EMAIL);
-  });
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseAdminUser | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [firebaseSyncError, setFirebaseSyncError] = useState<string | null>(null);
 
@@ -139,14 +144,6 @@ export default function App() {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [selectedAxisFilter, setSelectedAxisFilter] = useState<string | undefined>(undefined);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  // Google Maps Quota Handling (Demo Key)
-  const [isMapsQuotaExceeded, setIsMapsQuotaExceeded] = useState(false);
-  useEffect(() => {
-    const handler = () => setIsMapsQuotaExceeded(true);
-    window.addEventListener('gmp-quota-exceeded', handler);
-    return () => window.removeEventListener('gmp-quota-exceeded', handler);
-  }, []);
 
   // Firestore Boot Connection Test & Global Config + Auth Subscriptions
   useEffect(() => {
@@ -212,10 +209,18 @@ export default function App() {
       }
     });
 
+    const unsubSpeakers = subscribeSpeakers((remoteSpeakers) => {
+      if (remoteSpeakers && remoteSpeakers.length > 0) {
+        setSpeakers(remoteSpeakers);
+        saveSpeakersToStorage(remoteSpeakers);
+      }
+    });
+
     return () => {
       unsubConfig();
       unsubMaterials();
       unsubAuth();
+      unsubSpeakers();
     };
   }, []);
 
@@ -556,6 +561,7 @@ export default function App() {
       if (typeof BroadcastChannel !== 'undefined') {
         channel = new BroadcastChannel(REALTIME_CHANNEL_NAME);
         channel.onmessage = (event) => {
+          if (event.data?.senderId === TAB_INSTANCE_ID) return;
           syncSliceFromStorage(event.data?.key || null);
         };
       }
@@ -616,51 +622,105 @@ export default function App() {
     };
   }, []);
 
-  // Sync offline queue to main registrations
-  const syncOfflineQueue = () => {
-    const queued = loadStoredData().offlineQueue;
-    if (queued.length === 0) return;
+  // Sync offline queue to main registrations with genuine atomic persistence
+  const syncOfflineQueue = async () => {
+    const stored = loadStoredData();
+    if (stored.offlineQueue.length === 0) return;
     setIsSyncing(true);
 
-    setTimeout(() => {
-      setRegistrations((prev) => {
-        const merged = [...queued, ...prev];
-        saveToStorage(STORAGE_KEYS.REGISTRATIONS, merged);
-        return merged;
-      });
-      setOfflineQueue([]);
-      saveToStorage(STORAGE_KEYS.OFFLINE_QUEUE, []);
-      setIsSyncing(false);
-
-      sendBrowserNotification(
-        'Sincronização Concluída',
-        'As inscrições realizadas em modo offline foram enviadas com sucesso ao SUS Carangola.'
+    try {
+      const outcome = await synchronizeOfflineRegistrationQueue(
+        stored.offlineQueue,
+        stored.registrations
       );
-    }, 1200);
+
+      if (outcome.synced.length > 0) {
+        setRegistrations(outcome.mergedRegistrations);
+        saveToStorage(STORAGE_KEYS.REGISTRATIONS, outcome.mergedRegistrations);
+        const latestSynced = outcome.synced[0];
+        setLastRegistered(latestSynced);
+        saveToStorage(STORAGE_KEYS.LAST_REGISTERED, latestSynced);
+      }
+
+      setOfflineQueue(outcome.remainingQueue);
+      saveToStorage(STORAGE_KEYS.OFFLINE_QUEUE, outcome.remainingQueue);
+
+      if (outcome.synced.length > 0 && outcome.allSucceeded) {
+        sendBrowserNotification(
+          'Sincronização Concluída',
+          `Todas as ${outcome.synced.length} inscrições realizadas offline foram confirmadas no Firestore.`
+        );
+      } else if (outcome.synced.length > 0 && !outcome.allSucceeded) {
+        sendBrowserNotification(
+          'Sincronização Parcial',
+          `${outcome.synced.length} inscrições sincronizadas. ${outcome.remainingQueue.length} ainda aguardam confirmação remota.`
+        );
+      }
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  // Handlers for Registrations
-  const handleSaveRegistration = (newReg: Registration, isQueued: boolean) => {
+  // Handlers for Registrations with true async persistence verification
+  const handleSaveRegistration = async (
+    newReg: Registration,
+    isQueued: boolean
+  ): Promise<{
+    status: 'persisted' | 'already_exists' | 'queued' | 'error';
+    registration: Registration;
+    error?: string;
+  }> => {
     const safeNewReg: Registration = {
       ...newReg,
       status: 'confirmada',
       certificateIssued: false,
       checkedInAt: undefined
     };
+
     if (isQueued) {
-      const updatedQueue = [safeNewReg, ...offlineQueue];
+      const updatedQueue = [safeNewReg, ...offlineQueue.filter((r) => r.id !== safeNewReg.id)];
       setOfflineQueue(updatedQueue);
       saveToStorage(STORAGE_KEYS.OFFLINE_QUEUE, updatedQueue);
-    } else {
-      const updated = [safeNewReg, ...registrations];
+      return { status: 'queued', registration: safeNewReg };
+    }
+
+    try {
+      const saveRes = await savePublicRegistrationToDb(safeNewReg);
+      const confirmedReg: Registration = {
+        ...safeNewReg,
+        id: saveRes.id,
+        code: saveRes.code
+      };
+      const updated = [confirmedReg, ...registrations.filter((r) => r.id !== confirmedReg.id && r.code !== confirmedReg.code)];
       setRegistrations(updated);
       saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      savePublicRegistrationToDb(safeNewReg).catch((err) => {
-        console.warn('Aviso ao persistir inscrição no Firestore:', err);
-      });
+      setLastRegistered(confirmedReg);
+      saveToStorage(STORAGE_KEYS.LAST_REGISTERED, confirmedReg);
+      return {
+        status: saveRes.alreadyExisted ? 'already_exists' : 'persisted',
+        registration: confirmedReg
+      };
+    } catch (err: unknown) {
+      console.warn('Falha ao persistir inscrição pública no Firestore:', err);
+      let errorMsg = 'Não foi possível gravar sua inscrição no banco de dados do Simpósio.';
+      if (err instanceof Error) {
+        try {
+          if (err.message.startsWith('{')) {
+            const parsed = JSON.parse(err.message);
+            errorMsg = parsed.error || errorMsg;
+          } else {
+            errorMsg = err.message;
+          }
+        } catch {
+          errorMsg = err.message;
+        }
+      }
+      return {
+        status: 'error',
+        registration: safeNewReg,
+        error: errorMsg
+      };
     }
-    setLastRegistered(safeNewReg);
-    saveToStorage(STORAGE_KEYS.LAST_REGISTERED, safeNewReg);
   };
 
   const handleToggleCheckIn = (regId: string) => {
@@ -1015,6 +1075,57 @@ export default function App() {
     });
   };
 
+  // Speakers Handlers (fully editable in Admin Dashboard)
+  const handleUpdateSpeaker = (updated: SpeakerProfile) => {
+    setSpeakers((prev) => {
+      const exists = prev.some((s) => s.id === updated.id);
+      const next = exists ? prev.map((s) => (s.id === updated.id ? updated : s)) : [...prev, updated];
+      saveSpeakersToStorage(next);
+      return next;
+    });
+    if (isVerifiedAdminUser(firebaseUser)) {
+      saveSpeakerToDb(updated).catch((err) => {
+        console.warn('Aviso ao persistir palestrante no Firestore:', err);
+      });
+    }
+  };
+
+  const handleAddSpeaker = (newSpeaker: SpeakerProfile) => {
+    setSpeakers((prev) => {
+      const next = [...prev, newSpeaker];
+      saveSpeakersToStorage(next);
+      return next;
+    });
+    if (isVerifiedAdminUser(firebaseUser)) {
+      saveSpeakerToDb(newSpeaker).catch((err) => {
+        console.warn('Aviso ao cadastrar palestrante no Firestore:', err);
+      });
+    }
+  };
+
+  const handleDeleteSpeaker = (speakerId: string) => {
+    setSpeakers((prev) => {
+      const next = prev.filter((s) => s.id !== speakerId);
+      saveSpeakersToStorage(next);
+      return next;
+    });
+    if (isVerifiedAdminUser(firebaseUser)) {
+      deleteSpeakerInDb(speakerId).catch((err) => {
+        console.warn('Aviso ao excluir palestrante do Firestore:', err);
+      });
+    }
+  };
+
+  const handleResetSpeakers = () => {
+    setSpeakers(SPEAKERS_PROFILES);
+    saveSpeakersToStorage(SPEAKERS_PROFILES);
+    if (isVerifiedAdminUser(firebaseUser)) {
+      saveAllSpeakersToDb(SPEAKERS_PROFILES).catch((err) => {
+        console.warn('Aviso ao restaurar palestrantes no Firestore:', err);
+      });
+    }
+  };
+
   const handleShareEvent = () => {
     if (navigator.share) {
       navigator
@@ -1031,24 +1142,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#faf8f5] text-slate-800 font-sans">
-      
-      {/* Google Maps Demo Quota Notification Banner */}
-      {isMapsQuotaExceeded && (
-        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
-          <span>
-            Google Maps Platform quota reached. If you are the app owner, visit{' '}
-            <a
-              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline font-semibold text-amber-950 hover:text-amber-800"
-            >
-              maps developer site
-            </a>{' '}
-            for instructions to update your account.
-          </span>
-        </div>
-      )}
 
       {/* Top Header */}
       <Header
@@ -1118,7 +1211,7 @@ export default function App() {
 
           {/* Palestrantes e Mediadores Convidados */}
           <SpeakersSection
-            speakers={SPEAKERS_PROFILES}
+            speakers={speakers}
             config={config}
           />
 
@@ -1269,6 +1362,11 @@ export default function App() {
               config={config}
               onUpdateConfig={handleUpdateConfig}
               onResetConfig={handleResetConfig}
+              speakers={speakers}
+              onUpdateSpeaker={handleUpdateSpeaker}
+              onAddSpeaker={handleAddSpeaker}
+              onDeleteSpeaker={handleDeleteSpeaker}
+              onResetSpeakers={handleResetSpeakers}
               registrations={registrations}
               onToggleCheckIn={handleToggleCheckIn}
               onUpdateRegistrationStatus={handleUpdateRegistrationStatus}

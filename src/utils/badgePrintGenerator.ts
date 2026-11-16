@@ -1,4 +1,3 @@
-import html2pdf from 'html2pdf.js';
 import { Registration, EventConfig, BadgeDesignConfig } from '../types.ts';
 import { getBadgeDesign } from './helpers.ts';
 
@@ -393,7 +392,8 @@ export const downloadBadgePdf = async (
 
   try {
     const target = host.querySelector('.badge-print-card') as HTMLElement | null;
-    const html2pdfLib = (html2pdf as any)?.default || html2pdf;
+    const html2pdfModule = await import('html2pdf.js');
+    const html2pdfLib = (html2pdfModule as any)?.default || html2pdfModule;
     if (!target || typeof html2pdfLib !== 'function') {
       throw new Error('Biblioteca PDF indisponível.');
     }

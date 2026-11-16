@@ -3,7 +3,9 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import nodemailer from 'nodemailer';
+import confirmRegistrationHandler from './api/email/confirm-registration.ts';
+import emailStatusHandler from './api/email/status.ts';
+import mapsConfigHandler from './api/maps/config.ts';
 
 dotenv.config();
 
@@ -35,121 +37,19 @@ const host = getCliArg('--host') || '0.0.0.0';
 
 app.use(express.json({ limit: '2mb' }));
 
-// Maps Config Route (Provides client-safe API key for @vis.gl/react-google-maps)
-app.get('/api/maps/config', (_req, res) => {
-  const apiKey =
-    process.env.VITE_GOOGLE_MAPS_API_KEY ||
-    process.env.GOOGLE_MAPS_API_KEY ||
-    '';
-  res.json({ apiKey });
+// Maps Config Route (Provides client-restricted public API key for @vis.gl/react-google-maps)
+app.all('/api/maps/config', (req, res) => {
+  mapsConfigHandler(req, res);
 });
 
-// Gmail SMTP Provider Readiness Status (no secrets exposed)
-app.get('/api/email/status', (_req, res) => {
-  const smtpConfigured = Boolean(process.env.SMTP_USER && process.env.SMTP_PASS);
-  res.json({
-    smtpConfigured,
-    activeProvider: smtpConfigured ? 'smtp' : 'none',
-    hasRealServerDelivery: smtpConfigured,
-    senderEmail: process.env.SMTP_USER || 'farmaciademinas.marketing@gmail.com'
-  });
+// Gmail SMTP & Firebase Admin Readiness Status (no secrets exposed)
+app.all('/api/email/status', (req, res) => {
+  emailStatusHandler(req, res);
 });
 
 // Official Registration Confirmation Email Endpoint (Gmail SMTP via Nodemailer)
-app.post('/api/email/confirm-registration', async (req, res) => {
-  try {
-    const { to, fullName, code, subject, bodyHtml, bodyText, replyTo } = req.body;
-    if (!to || !code) {
-      return res.status(400).json({ error: 'E-mail do participante e código de inscrição são obrigatórios.' });
-    }
-
-    const emailSubject =
-      subject || `Inscrição Confirmada [Nº ${code}] · 1º Simpósio de Saúde Mental de Carangola - SUS`;
-
-    let deliveryProvider: 'smtp' | 'pending_provider' = 'pending_provider';
-    let actuallySent = false;
-    let providerMessageId: string | undefined = undefined;
-    let deliveryError: string | undefined = undefined;
-
-    // Real transactional send via Gmail SMTP (Nodemailer)
-    const smtpUser = process.env.SMTP_USER || 'farmaciademinas.marketing@gmail.com';
-    const smtpPass = process.env.SMTP_PASS;
-
-    if (smtpPass) {
-      try {
-        const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
-        const smtpPort = Number(process.env.SMTP_PORT) || 465;
-        const transporter = nodemailer.createTransport({
-          host: smtpHost,
-          port: smtpPort,
-          secure: smtpPort === 465,
-          auth: {
-            user: smtpUser,
-            pass: smtpPass
-          }
-        });
-
-        const fromAddress = {
-          name: '1º Simpósio de Saúde Mental - SUS Carangola',
-          address: smtpUser
-        };
-
-        const info = await transporter.sendMail({
-          from: fromAddress,
-          to,
-          replyTo: replyTo || smtpUser,
-          subject: emailSubject,
-          text: bodyText,
-          html: bodyHtml,
-          encoding: 'utf-8'
-        });
-
-        deliveryProvider = 'smtp';
-        actuallySent = true;
-        providerMessageId = info.messageId;
-      } catch (smtpErr: any) {
-        deliveryError = smtpErr?.message || String(smtpErr);
-        console.warn('[E-mail SUS] Falha no envio Gmail SMTP:', deliveryError);
-      }
-    } else {
-      deliveryError = 'Gmail SMTP não configurado: defina SMTP_USER e SMTP_PASS (Senha de App de 16 caracteres) no .env.';
-    }
-
-    console.log(
-      `[E-mail SUS] Registro de confirmação (Gmail SMTP, enviado=${actuallySent}) para ${to} (Participante: ${fullName}, Nº: ${code})`
-    );
-
-    const receipt = {
-      id: `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      to,
-      fullName,
-      code,
-      participantCode: code,
-      certificateCode: code,
-      programIncluded: Boolean(bodyHtml || bodyText),
-      subject: emailSubject,
-      deliveryProvider,
-      actuallySent,
-      providerMessageId,
-      deliveryError,
-      status: actuallySent ? 'delivered' : 'pending_provider',
-      timestamp: new Date().toISOString()
-    };
-
-    return res.json({
-      success: true,
-      actuallySent,
-      deliveryProvider,
-      deliveryError,
-      message: actuallySent
-        ? `E-mail de confirmação enviado com sucesso via Gmail para ${to}.`
-        : `Comprovante gerado com número de participante (${code}). Para envio automático pelo Gmail, configure SMTP_USER e SMTP_PASS (Senha de App).`,
-      receipt
-    });
-  } catch (error: any) {
-    console.error('Erro no envio do e-mail de confirmação:', error);
-    return res.status(500).json({ error: error.message || 'Erro ao processar envio do e-mail de confirmação.' });
-  }
+app.all('/api/email/confirm-registration', async (req, res) => {
+  await confirmRegistrationHandler(req, res);
 });
 
 // Broadcast endpoint removido — apenas email de confirmação de inscrição é enviado automaticamente.

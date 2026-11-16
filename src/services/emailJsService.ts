@@ -78,10 +78,10 @@ export function getEmailJsConfig(eventConfig?: EventConfig): EmailJsConfig {
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
-        serviceId: parsed.serviceId || envServiceId || 'service_sus_carangola',
-        templateId: parsed.templateId || envTemplateId || 'template_inscricao_sus',
-        publicKey: parsed.publicKey || envPublicKey || 'user_sus_mg_default',
-        enabled: parsed.enabled !== undefined ? parsed.enabled : true
+        serviceId: parsed.serviceId || envServiceId || '',
+        templateId: parsed.templateId || envTemplateId || '',
+        publicKey: parsed.publicKey || envPublicKey || '',
+        enabled: parsed.enabled !== undefined ? parsed.enabled : false
       };
     }
   } catch (e) {
@@ -89,10 +89,10 @@ export function getEmailJsConfig(eventConfig?: EventConfig): EmailJsConfig {
   }
 
   return {
-    serviceId: envServiceId || 'service_sus_carangola',
-    templateId: envTemplateId || 'template_inscricao_sus',
-    publicKey: envPublicKey || 'user_sus_mg_default',
-    enabled: true
+    serviceId: envServiceId || '',
+    templateId: envTemplateId || '',
+    publicKey: envPublicKey || '',
+    enabled: Boolean(envServiceId && envTemplateId && envPublicKey)
   };
 }
 
@@ -123,7 +123,7 @@ export function isEmailJsConfigured(eventConfig?: EventConfig): boolean {
 
 /**
  * Sends a confirmation email to the participant using the EmailJS Browser SDK,
- * with automatic fallback to EmailJS REST API.
+ * with automatic fallback to EmailJS REST API if explicitly enabled and configured.
  */
 export async function sendEmailViaEmailJs(
   params: EmailJsTemplateParams,
@@ -132,11 +132,11 @@ export async function sendEmailViaEmailJs(
 ): Promise<EmailJsSendResult> {
   const config = { ...getEmailJsConfig(eventConfig), ...overrideConfig };
 
-  if (!config.enabled) {
+  if (!isEmailJsConfigured(eventConfig) || !config.enabled) {
     return {
       success: false,
       provider: 'fallback',
-      error: 'Integração EmailJS está desativada nas configurações.'
+      error: 'EmailJS não configurado. O canal de envio oficial da plataforma é o serviço Gmail SMTP no servidor.'
     };
   }
 
@@ -193,14 +193,13 @@ export async function sendEmailViaEmailJs(
     return {
       success: false,
       provider: 'fallback',
-      error: `EmailJS API indisponível (${errorMsg}). Fallback acionado.`
+      error: `EmailJS API indisponível (${errorMsg}).`
     };
   }
 
-  // If using placeholder default keys, simulate an intentional fallback
   return {
     success: false,
     provider: 'fallback',
-    error: 'Chaves personalizadas do EmailJS ainda não cadastradas (utilizando fallback automático com entrega garantida).'
+    error: 'Credenciais válidas do EmailJS não encontradas.'
   };
 }

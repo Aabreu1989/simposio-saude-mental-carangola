@@ -4,16 +4,17 @@
  */
 
 import { Registration, EventConfig, ScheduleSession } from '../types.ts';
-import { getAccessToken } from './gmailAuth.ts';
-import { sendGmailMessage } from './gmailService.ts';
-import {
-  sendEmailViaEmailJs,
-  EmailJsTemplateParams
-} from './emailJsService.ts';
+
+export type EmailDispatchStatus =
+  | 'accepted_by_smtp'
+  | 'pending_config'
+  | 'failed';
 
 export interface ConfirmationEmailResult {
   success: boolean;
   actuallyDelivered: boolean;
+  emailStatus: EmailDispatchStatus;
+  errorCode?: string;
   code: string;
   recipientEmail: string;
   recipientName: string;
@@ -21,13 +22,7 @@ export interface ConfirmationEmailResult {
   bodyText: string;
   bodyHtml: string;
   sentAt: string;
-  deliveryMethod:
-    | 'emailjs'
-    | 'emailjs_rest'
-    | 'gmail_api'
-    | 'smtp'
-    | 'pending_provider';
-  emailjsStatus?: string;
+  deliveryMethod: 'smtp' | 'pending_provider';
   deliveryDetail?: string;
   serverReceiptId?: string;
   scheduleUrl: string;
@@ -36,15 +31,17 @@ export interface ConfirmationEmailResult {
 
 export interface ServerEmailStatus {
   smtpConfigured: boolean;
+  firebaseAdminConfigured?: boolean;
   activeProvider: 'smtp' | 'none';
   hasRealServerDelivery: boolean;
-  senderEmail?: string;
+  senderConfigured?: boolean;
 }
 
 export async function getServerEmailStatus(): Promise<ServerEmailStatus> {
   try {
     const res = await fetch('/api/email/status');
-    if (res.ok) {
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
       return await res.json();
     }
   } catch {
@@ -52,6 +49,7 @@ export async function getServerEmailStatus(): Promise<ServerEmailStatus> {
   }
   return {
     smtpConfigured: false,
+    firebaseAdminConfigured: false,
     activeProvider: 'none',
     hasRealServerDelivery: false
   };
@@ -456,16 +454,16 @@ Colegiado Gestor da RAPS - Microrregião de Carangola / SUS-MG
 }
 
 /**
- * Sends the official registration confirmation email:
- * 1. Attempts delivery via EmailJS API (@emailjs/browser SDK & REST fallback)
- * 2. If Google OAuth token is active (from Gmail Hub), triggers Gmail API delivery
- * 3. Dispatches to the backend proxy `/api/email/confirm-registration` for audit logging
- * 4. Records confirmation in localStorage audit log for persistence and verification
+ * Sends the official registration confirmation email strictly via the serverless
+ * Gmail SMTP provider (/api/email/confirm-registration).
+ * Sends only the registration identifiers; the server validates the registration
+ * and retrieves the recipient address directly from the trusted Firestore record.
  */
 export async function sendRegistrationConfirmationEmail(
   reg: Registration,
   schedule: ScheduleSession[],
-  config: EventConfig
+  config: EventConfig,
+  options?: { resend?: boolean }
 ): Promise<ConfirmationEmailResult> {
   const { subject, bodyText, bodyHtml, scheduleUrl, certificateUrl } = buildRegistrationConfirmationEmail(reg, schedule, config);
   const recipientEmail = reg.email.trim().toLowerCase();
@@ -474,121 +472,64 @@ export async function sendRegistrationConfirmationEmail(
 
   let deliveryMethod: ConfirmationEmailResult['deliveryMethod'] = 'pending_provider';
   let actuallyDelivered = false;
-  let emailjsStatus: string | undefined = undefined;
+  let emailStatus: EmailDispatchStatus = 'failed';
+  let errorCode: string | undefined = undefined;
   let deliveryDetail: string | undefined = undefined;
   let serverReceiptId: string | undefined = undefined;
 
-  const scheduleProgramText = schedule
-    .map(
-      (s) =>
-        `${s.timeStart} - ${s.timeEnd}: ${s.title}${s.mediator ? ` (Mediadora: ${s.mediator.name})` : ''} — ${s.location}`
-    )
-    .join('\n');
-
-  const contactReplyTo = config.contactEmail || 'farmaciademinas.marketing@gmail.com';
-
-  // 1. Prepare EmailJS template parameters with participant code, full schedule program, and certificate instructions
-  const certificateInstructionsText = `Compareça no dia ${config.eventFullDate || config.eventDate || '08 de Dezembro de 2026'} às 07h30 na ${config.locationName || 'UEMG Carangola'}. Após o evento, acesse ${certificateUrl} e utilize o seu Número de Participante ${reg.code} (o mesmo número do seu comprovante) para baixar seu Certificado Oficial de 8 Horas.`;
-
-  const emailJsParams: EmailJsTemplateParams = {
-    to_name: recipientName,
-    to_email: recipientEmail,
-    participant_code: reg.code,
-    registration_code: reg.code,
-    certificate_code: reg.code,
-    event_program: scheduleProgramText,
-    schedule_link: scheduleUrl,
-    certificate_link: certificateUrl,
-    certificate_instructions: certificateInstructionsText,
-    event_title: config.editionTitle || '1º Simpósio de Saúde Mental',
-    event_date: config.eventFullDate || config.eventDate || '08 de Dezembro de 2026',
-    event_location: `${config.locationName || 'UEMG Carangola'} - ${config.locationAddress || 'Praça Cel. Maximiano, 180, Centro, Carangola - MG'}`,
-    event_hours: config.eventHours || '7h30 às 16h30',
-    participant_role: reg.professionalRole,
-    participant_city: reg.city,
-    participant_institution: reg.institution,
-    sus_care_level: reg.susCareLevel || 'Atenção Primária / RAPS',
-    subject,
-    message_html: bodyHtml,
-    message_text: bodyText,
-    reply_to: contactReplyTo
-  };
-
-  // 2. Attempt delivery via EmailJS API (using Firestore-synced or local/env EmailJS config)
-  try {
-    const emailJsRes = await sendEmailViaEmailJs(emailJsParams, undefined, config);
-    if (emailJsRes.success) {
-      deliveryMethod = emailJsRes.provider === 'emailjs_rest' ? 'emailjs_rest' : 'emailjs';
-      actuallyDelivered = true;
-      emailjsStatus = emailJsRes.text || 'EmailJS: Enviado com sucesso';
-      deliveryDetail = emailjsStatus;
-    } else {
-      emailjsStatus = emailJsRes.error || 'EmailJS não configurado';
-    }
-  } catch {
-    emailjsStatus = 'EmailJS indisponível, verificando outros provedores';
-  }
-
-  // 3. If Google Workspace Gmail OAuth token is active in memory, send real email via Gmail API
-  if (!actuallyDelivered) {
-    try {
-      const accessToken = await getAccessToken();
-      if (accessToken) {
-        await sendGmailMessage(accessToken, {
-          to: recipientEmail,
-          subject,
-          bodyText,
-          bodyHtml,
-          fromName: `${config.editionTitle || '1º Simpósio de Saúde Mental'} - SUS Carangola`,
-          replyTo: contactReplyTo
-        });
-        deliveryMethod = 'gmail_api';
-        actuallyDelivered = true;
-        deliveryDetail = 'E-mail enviado diretamente via Gmail API (Google Workspace).';
-      }
-    } catch (err) {
-      console.warn('Direct Gmail API attempt fallback to server dispatch:', err);
-    }
-  }
-
-  // Dispatch to backend proxy `/api/email/confirm-registration` for Gmail SMTP delivery & audit logging
   try {
     const serverResponse = await fetch('/api/email/confirm-registration', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        to: recipientEmail,
-        fullName: recipientName,
         code: reg.code,
-        subject,
-        bodyHtml,
-        bodyText,
-        deliveryMethod,
-        replyTo: contactReplyTo,
-        scheduleUrl,
-        certificateUrl,
-        programSummary: scheduleProgramText
+        registrationId: reg.id,
+        resend: Boolean(options?.resend)
       })
     });
-    if (serverResponse.ok) {
-      const serverData = await serverResponse.json();
-      serverReceiptId = serverData?.receipt?.id;
-      if (serverData?.actuallySent) {
-        actuallyDelivered = true;
-        deliveryMethod = 'smtp';
-        deliveryDetail = 'Enviado para a caixa de entrada via Gmail SMTP.';
-      } else if (!actuallyDelivered) {
-        deliveryMethod = 'pending_provider';
-        deliveryDetail = serverData?.deliveryError || serverData?.message;
-      }
+
+    const contentType = serverResponse.headers.get('content-type') || '';
+    const serverData = contentType.includes('application/json')
+      ? await serverResponse.json().catch(() => null)
+      : null;
+
+    if (!contentType.includes('application/json')) {
+      emailStatus = 'failed';
+      errorCode = 'INVALID_SERVER_RESPONSE';
+      deliveryDetail = 'A rota /api/email/confirm-registration não respondeu em formato JSON.';
+    } else if (serverResponse.ok && serverData?.actuallySent === true) {
+      actuallyDelivered = true;
+      emailStatus = 'accepted_by_smtp';
+      deliveryMethod = 'smtp';
+      serverReceiptId = serverData?.messageId;
+      deliveryDetail =
+        serverData?.message ||
+        'E-mail de confirmação aceito para envio pelo servidor Gmail SMTP.';
+    } else {
+      errorCode = serverData?.errorCode;
+      emailStatus =
+        serverResponse.status === 503 || serverData?.emailStatus === 'pending_config'
+          ? 'pending_config'
+          : 'failed';
+      deliveryMethod = 'pending_provider';
+      deliveryDetail =
+        serverData?.error ||
+        serverData?.message ||
+        `Servidor de e-mail retornou status ${serverResponse.status}.`;
     }
   } catch (err) {
-    console.warn('Backend email logging info:', err);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    emailStatus = 'failed';
+    errorCode = 'NETWORK_ERROR';
+    deliveryMethod = 'pending_provider';
+    deliveryDetail = `Falha de conexão com o servidor de e-mail: ${errorMsg}`;
   }
 
   const result: ConfirmationEmailResult = {
-    success: true,
+    success: actuallyDelivered,
     actuallyDelivered,
+    emailStatus,
+    errorCode,
     code: reg.code,
     recipientEmail,
     recipientName,
@@ -597,14 +538,13 @@ export async function sendRegistrationConfirmationEmail(
     bodyHtml,
     sentAt,
     deliveryMethod,
-    emailjsStatus,
     deliveryDetail,
     serverReceiptId,
     scheduleUrl,
     certificateUrl
   };
 
-  // 5. Store in local confirmation history so manager and participant can inspect
+  // Store in local confirmation history so manager and participant can inspect
   try {
     const existing = localStorage.getItem('sus_sent_confirmation_emails');
     const list: ConfirmationEmailResult[] = existing ? JSON.parse(existing) : [];

@@ -1,6 +1,5 @@
-import html2pdf from 'html2pdf.js';
-import { Registration, EventConfig, DownloadMaterial, SocialPost, PushNotificationItem, NewsletterSubscriber, EvaluationFeedback, CertificateDownloadRecord, CertificateDesignConfig, BadgeDesignConfig } from '../types.ts';
-import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, INITIAL_BADGE_DESIGN, INITIAL_REGISTRATIONS, INITIAL_MATERIALS, INITIAL_SCHEDULE, THEMATIC_AXES, INITIAL_SOCIAL_POSTS, INITIAL_NOTIFICATIONS, INITIAL_SUBSCRIBERS, INITIAL_EVALUATIONS, DEFAULT_EVENT_HASHTAGS } from '../data/initialData.ts';
+import { Registration, EventConfig, DownloadMaterial, SocialPost, PushNotificationItem, NewsletterSubscriber, EvaluationFeedback, CertificateDownloadRecord, CertificateDesignConfig, BadgeDesignConfig, SpeakerProfile } from '../types.ts';
+import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, INITIAL_BADGE_DESIGN, INITIAL_REGISTRATIONS, INITIAL_MATERIALS, INITIAL_SCHEDULE, THEMATIC_AXES, INITIAL_SOCIAL_POSTS, INITIAL_NOTIFICATIONS, INITIAL_SUBSCRIBERS, INITIAL_EVALUATIONS, DEFAULT_EVENT_HASHTAGS, SPEAKERS_PROFILES } from '../data/initialData.ts';
 import { generateScheduleHTML, openSchedulePDFWindow } from './schedulePdfGenerator.ts';
 import { fetchChunkedMaterialBlobUrl } from '../services/firebaseDb.ts';
 
@@ -17,7 +16,8 @@ const STORAGE_KEYS = {
   CERT_DOWNLOADS: 'carangola_sm_cert_downloads',
   DELETED_MATERIALS: 'carangola_sm_deleted_materials',
   DELETED_REGISTRATIONS: 'carangola_sm_deleted_registrations',
-  DELETED_POSTS: 'carangola_sm_deleted_posts'
+  DELETED_POSTS: 'carangola_sm_deleted_posts',
+  SPEAKERS: 'carangola_sm_speakers'
 };
 
 export const getDeletedMaterialIds = (): Set<string> => {
@@ -80,9 +80,15 @@ export const addDeletedPostId = (id: string): void => {
   }
 };
 
+// In-memory store for large base64 material blobs so localStorage stays <50KB and never freezes the UI thread
+const inMemoryMaterialBlobs = new Map<string, string>();
+
+export const TAB_INSTANCE_ID = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 export const loadStoredData = () => {
   const getItem = <T>(key: string, defaultValue: T): T => {
     try {
+      if (typeof localStorage === 'undefined') return defaultValue;
       const data = localStorage.getItem(key);
       return data ? JSON.parse(data) : defaultValue;
     } catch {
@@ -91,7 +97,6 @@ export const loadStoredData = () => {
   };
 
   const loadedConfig = getItem<EventConfig>(STORAGE_KEYS.CONFIG, INITIAL_EVENT_CONFIG);
-  let configChanged = false;
   if (
     !loadedConfig.locationName ||
     loadedConfig.locationName !== 'UEMG Carangola' ||
@@ -102,142 +107,114 @@ export const loadStoredData = () => {
     loadedConfig.locationName = 'UEMG Carangola';
     loadedConfig.locationAddress = 'Praça Cel. Maximiano, 180 - Centro, Carangola - MG, 36800-000';
     loadedConfig.eventHours = '7h30 às 16h30';
-    configChanged = true;
   }
-  if (!loadedConfig.certificateDesign) {
-    loadedConfig.certificateDesign = { ...INITIAL_CERTIFICATE_DESIGN };
-    configChanged = true;
-  } else {
-    loadedConfig.certificateDesign = {
-      ...INITIAL_CERTIFICATE_DESIGN,
-      ...loadedConfig.certificateDesign,
-      showBannerImage: false,
-      bannerImageUrl: '',
-      footerQuote: '',
-      badgeLabel: '',
-      mainTitle: 'CERTIFICADO',
-      primaryColor: '#0a3641',
-      accentColor: '#ea7a38',
-      secondaryColor: '#028090',
-      backgroundColor: '#ffffff'
-    };
-    configChanged = true;
-  }
-  if (!loadedConfig.badgeDesign) {
-    loadedConfig.badgeDesign = { ...INITIAL_BADGE_DESIGN };
-    configChanged = true;
-  } else {
-    loadedConfig.badgeDesign = {
-      ...INITIAL_BADGE_DESIGN,
-      ...loadedConfig.badgeDesign
-    };
-  }
+  loadedConfig.certificateDesign = {
+    ...INITIAL_CERTIFICATE_DESIGN,
+    ...(loadedConfig.certificateDesign || {}),
+    showBannerImage: false,
+    bannerImageUrl:
+      loadedConfig.certificateDesign?.bannerImageUrl &&
+      !loadedConfig.certificateDesign.bannerImageUrl.includes('WhatsApp_Image')
+        ? loadedConfig.certificateDesign.bannerImageUrl
+        : '/assets/banner-oficial-simposio-saude-mental-carangola.jpg',
+    footerQuote: '',
+    badgeLabel: '',
+    mainTitle: 'CERTIFICADO',
+    primaryColor: '#0a3641',
+    accentColor: '#ea7a38',
+    secondaryColor: '#028090',
+    backgroundColor: '#ffffff'
+  };
+  loadedConfig.badgeDesign = {
+    ...INITIAL_BADGE_DESIGN,
+    ...(loadedConfig.badgeDesign || {})
+  };
   if (!loadedConfig.bannerImage || loadedConfig.bannerImage.includes('WhatsApp_Image')) {
     loadedConfig.bannerImage = '/assets/banner-oficial-simposio-saude-mental-carangola.jpg';
-    configChanged = true;
-  }
-  if (
-    loadedConfig.certificateDesign &&
-    (!loadedConfig.certificateDesign.bannerImageUrl ||
-      loadedConfig.certificateDesign.bannerImageUrl.includes('WhatsApp_Image'))
-  ) {
-    loadedConfig.certificateDesign.bannerImageUrl =
-      '/assets/banner-oficial-simposio-saude-mental-carangola.jpg';
-    configChanged = true;
-  }
-  if (configChanged) {
-    saveToStorage(STORAGE_KEYS.CONFIG, loadedConfig);
   }
 
   const deletedMatIds = getDeletedMaterialIds();
-  if (!deletedMatIds.has('mat-0')) {
-    addDeletedMaterialId('mat-0');
-    deletedMatIds.add('mat-0');
+  deletedMatIds.add('mat-0');
+
+  const storedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
+  let hadHugeInlineBlobInStorage = false;
+
+  const syncedMaterials = storedMaterials
+    .filter((m) => m && !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#')
+    .map((m) => {
+      if (m.fileUrl?.startsWith('data:') && m.fileUrl.length > 100000) {
+        hadHugeInlineBlobInStorage = true;
+        inMemoryMaterialBlobs.set(m.id, m.fileUrl);
+        return m;
+      }
+      if (m.fileUrl?.startsWith('in-memory-blob://') && inMemoryMaterialBlobs.has(m.id)) {
+        return { ...m, fileUrl: inMemoryMaterialBlobs.get(m.id)! };
+      }
+      return m;
+    });
+
+  // If previous sessions left a multi-megabyte PDF in localStorage, compact it once without broadcasting
+  if (hadHugeInlineBlobInStorage && typeof localStorage !== 'undefined') {
+    try {
+      const compactForDisk = syncedMaterials.map((m) =>
+        m.fileUrl?.startsWith('data:') && m.fileUrl.length > 100000
+          ? {
+              ...m,
+              fileUrl: m.chunkCount ? `firestore-chunked://${m.id}` : `in-memory-blob://${m.id}`
+            }
+          : m
+      );
+      localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(compactForDisk));
+    } catch {
+      // ignore storage errors
+    }
   }
 
-  // Carregar materiais do localStorage (ou INITIAL_MATERIALS se primeira vez)
-  const storedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
-  
-  // REGRA ABSOLUTA: qualquer ID no deletedMatIds é PERMANENTEMENTE removido e NUNCA volta
-  const syncedMaterials = storedMaterials
-    .filter((m) => !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
-
-  // Salvar a lista limpa permanentemente
-  saveToStorage(STORAGE_KEYS.MATERIALS, syncedMaterials);
-
-  // IDs de posts de exemplo (fictícios) — removidos automaticamente da plataforma real
   const EXAMPLE_POST_IDS = new Set([
     'post-1','post-2','post-3','post-4','post-5','post-6','post-7','post-8'
   ]);
   const deletedPostIds = getDeletedPostIds();
   const rawPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, [])
-    .filter((p) => !deletedPostIds.has(p.id) && !EXAMPLE_POST_IDS.has(p.id));
-  let postsChanged = false;
-  let mergedPosts: SocialPost[] = rawPosts.map((post, index) => {
-    const needsHashtags = !post.hashtags || !post.hashtags.trim();
-    const needsTimestamp = typeof post.timestamp !== 'number';
-    if (needsHashtags || needsTimestamp) {
-      postsChanged = true;
-    }
-    return {
+    .filter((p) => p && !deletedPostIds.has(p.id) && !EXAMPLE_POST_IDS.has(p.id));
+  const mergedPosts: SocialPost[] = rawPosts
+    .map((post, index) => ({
       ...post,
-      hashtags: needsHashtags ? DEFAULT_EVENT_HASHTAGS : post.hashtags,
-      timestamp: needsTimestamp ? Date.now() - (index + 1) * 600000 : post.timestamp
-    };
-  });
+      hashtags: post.hashtags?.trim() ? post.hashtags : DEFAULT_EVENT_HASHTAGS,
+      timestamp: typeof post.timestamp === 'number' ? post.timestamp : Date.now() - (index + 1) * 600000
+    }))
+    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  mergedPosts = mergedPosts.filter((p) => !deletedPostIds.has(p.id) && !EXAMPLE_POST_IDS.has(p.id));
-  mergedPosts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-  if (postsChanged) {
-    saveToStorage(STORAGE_KEYS.POSTS, mergedPosts);
-  }
-
-  // IDs de inscrições de exemplo (fictícios) — nunca devem aparecer na plataforma real
   const EXAMPLE_REG_IDS = new Set([
     'reg-001','reg-002','reg-003','reg-004','reg-005',
     'reg-006','reg-007','reg-008','reg-009','reg-010','reg-011'
   ]);
   const deletedRegIds = getDeletedRegistrationIds();
   const rawRegistrations = getItem<Registration[]>(STORAGE_KEYS.REGISTRATIONS, [])
-    .filter((r) => !deletedRegIds.has(r.id) && !EXAMPLE_REG_IDS.has(r.id));
-  let registrationsNormalized = false;
-  const normalizedRegistrations = rawRegistrations.map((reg) => {
-    // Regra estrita: somente participantes credenciados ('presente') podem ter certificado liberado
-    if (reg.status !== 'presente' && reg.certificateIssued) {
-      registrationsNormalized = true;
-      return {
-        ...reg,
-        certificateIssued: false
-      };
-    }
-    return reg;
-  });
-  if (registrationsNormalized) {
-    saveToStorage(STORAGE_KEYS.REGISTRATIONS, normalizedRegistrations);
-  }
+    .filter((r) => r && !deletedRegIds.has(r.id) && !EXAMPLE_REG_IDS.has(r.id));
+  const normalizedRegistrations = rawRegistrations.map((reg) =>
+    reg.status !== 'presente' && reg.certificateIssued
+      ? { ...reg, certificateIssued: false }
+      : reg
+  );
+
+  const LEGACY_NOTIF_IDS = new Set(['notif-1', 'notif-2', 'notif-3']);
+  const notifications = getItem<PushNotificationItem[]>(
+    STORAGE_KEYS.NOTIFICATIONS,
+    INITIAL_NOTIFICATIONS
+  ).filter((n) => n && !LEGACY_NOTIF_IDS.has(n.id));
 
   return {
     config: loadedConfig,
     registrations: normalizedRegistrations,
     materials: syncedMaterials,
     posts: mergedPosts,
-    notifications: (() => {
-      const stored = getItem<PushNotificationItem[]>(STORAGE_KEYS.NOTIFICATIONS, INITIAL_NOTIFICATIONS);
-      // Remove alertas de exemplo hard-coded (notif-1, notif-2, notif-3) que foram desativados
-      const LEGACY_IDS = new Set(['notif-1', 'notif-2', 'notif-3']);
-      const cleaned = stored.filter((n) => !LEGACY_IDS.has(n.id));
-      if (cleaned.length !== stored.length) {
-        // Persiste a versão limpa para não repetir em reloads
-        try { localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(cleaned)); } catch { /* noop */ }
-      }
-      return cleaned;
-    })(),
+    notifications,
     subscribers: getItem<NewsletterSubscriber[]>(STORAGE_KEYS.SUBSCRIBERS, INITIAL_SUBSCRIBERS),
     evaluations: getItem<EvaluationFeedback[]>(STORAGE_KEYS.EVALUATIONS, INITIAL_EVALUATIONS),
     offlineQueue: getItem<Registration[]>(STORAGE_KEYS.OFFLINE_QUEUE, []),
     lastRegistered: getItem<Registration | null>(STORAGE_KEYS.LAST_REGISTERED, null),
-    certificateDownloads: getItem<CertificateDownloadRecord[]>(STORAGE_KEYS.CERT_DOWNLOADS, [])
+    certificateDownloads: getItem<CertificateDownloadRecord[]>(STORAGE_KEYS.CERT_DOWNLOADS, []),
+    speakers: getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES)
   };
 };
 
@@ -247,7 +224,7 @@ export const broadcastRealtimeUpdate = (key: string) => {
   try {
     if (typeof BroadcastChannel !== 'undefined') {
       const channel = new BroadcastChannel(REALTIME_CHANNEL_NAME);
-      channel.postMessage({ key, timestamp: Date.now() });
+      channel.postMessage({ key, senderId: TAB_INSTANCE_ID, timestamp: Date.now() });
       channel.close();
     }
   } catch {
@@ -255,48 +232,49 @@ export const broadcastRealtimeUpdate = (key: string) => {
   }
 };
 
+export const saveSpeakersToStorage = (speakers: SpeakerProfile[]): void => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(STORAGE_KEYS.SPEAKERS, JSON.stringify(speakers));
+    broadcastRealtimeUpdate(STORAGE_KEYS.SPEAKERS);
+  } catch (err) {
+    console.warn('Aviso ao gravar palestrantes em localStorage:', err);
+  }
+};
+
 export const saveToStorage = (key: string, data: unknown) => {
   try {
+    if (typeof localStorage === 'undefined') return;
     localStorage.setItem(key, JSON.stringify(data));
     broadcastRealtimeUpdate(key);
   } catch (err) {
-    console.error('Error saving to localStorage', err);
+    console.warn('Aviso ao gravar em localStorage:', err);
   }
 };
 
 export const saveMaterialsToStorageSafe = (materials: DownloadMaterial[]): { savedFull: boolean; quotaFallback: boolean } => {
+  // Never write multi-megabyte data: URLs to localStorage; cache them in memory so UI stays fast
   const sanitized = materials.map((mat) => {
-    // Materials already stored in Firestore chunks do not need large base64 strings cached locally
-    if (mat.fileUrl?.startsWith('data:') && !mat.pendingCloudSync && mat.chunkCount && mat.chunkCount > 0) {
+    if (mat.fileUrl?.startsWith('data:') && mat.fileUrl.length > 100000) {
+      inMemoryMaterialBlobs.set(mat.id, mat.fileUrl);
       return {
         ...mat,
-        fileUrl: `firestore-chunked://${mat.id}`
+        fileUrl:
+          !mat.pendingCloudSync && mat.chunkCount && mat.chunkCount > 0
+            ? `firestore-chunked://${mat.id}`
+            : `in-memory-blob://${mat.id}`
       };
     }
     return mat;
   });
 
   try {
-    localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(sanitized));
-    broadcastRealtimeUpdate(STORAGE_KEYS.MATERIALS);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(sanitized));
+      broadcastRealtimeUpdate(STORAGE_KEYS.MATERIALS);
+    }
     return { savedFull: true, quotaFallback: false };
   } catch {
-    // QuotaExceededError fallback: strip large data: payloads so metadata list survives reload
-    try {
-      const compact = sanitized.map((mat) => {
-        if (mat.fileUrl?.startsWith('data:') && mat.fileUrl.length > 200000) {
-          return {
-            ...mat,
-            fileUrl: mat.chunkCount ? `firestore-chunked://${mat.id}` : '#'
-          };
-        }
-        return mat;
-      });
-      localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(compact));
-      broadcastRealtimeUpdate(STORAGE_KEYS.MATERIALS);
-    } catch (innerErr) {
-      console.error('Error saving compact materials to localStorage', innerErr);
-    }
     return { savedFull: false, quotaFallback: true };
   }
 };
@@ -449,46 +427,168 @@ export const formatPhone = (value: string): string => {
     .replace(/(\d{5})(\d{1,4})$/, '$1-$2');
 };
 
+const CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+export const generateSecureToken = (length = 8): string => {
+  const bytes = new Uint8Array(length);
+  if (typeof globalThis !== 'undefined' && globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let out = '';
+  for (let i = 0; i < length; i += 1) {
+    out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  }
+  return out;
+};
+
+// Standard FIPS 180-4 SHA-256 (synchronous, deterministic across Browser & Node.js)
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+
+export const sha256Hex = (input: string): string => {
+  const utf8 = new TextEncoder().encode(input);
+  const bitLen = utf8.length * 8;
+  const totalBytes = (((utf8.length + 8) >> 6) + 1) << 6;
+  const buf = new Uint8Array(totalBytes);
+  buf.set(utf8);
+  buf[utf8.length] = 0x80;
+  const view = new DataView(buf.buffer);
+  view.setUint32(totalBytes - 8, Math.floor(bitLen / 0x100000000), false);
+  view.setUint32(totalBytes - 4, bitLen >>> 0, false);
+
+  let h0 = 0x6a09e667;
+  let h1 = 0xbb67ae85;
+  let h2 = 0x3c6ef372;
+  let h3 = 0xa54ff53a;
+  let h4 = 0x510e527f;
+  let h5 = 0x9b05688c;
+  let h6 = 0x1f83d9ab;
+  let h7 = 0x5be0cd19;
+  const w = new Uint32Array(64);
+
+  for (let offset = 0; offset < totalBytes; offset += 64) {
+    for (let i = 0; i < 16; i += 1) {
+      w[i] = view.getUint32(offset + i * 4, false);
+    }
+    for (let i = 16; i < 64; i += 1) {
+      const v0 = w[i - 15];
+      const s0 = ((v0 >>> 7) | (v0 << 25)) ^ ((v0 >>> 18) | (v0 << 14)) ^ (v0 >>> 3);
+      const v1 = w[i - 2];
+      const s1 = ((v1 >>> 17) | (v1 << 15)) ^ ((v1 >>> 19) | (v1 << 13)) ^ (v1 >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    let f = h5;
+    let g = h6;
+    let h = h7;
+
+    for (let i = 0; i < 64; i += 1) {
+      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) >>> 0;
+
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
+    h5 = (h5 + f) >>> 0;
+    h6 = (h6 + g) >>> 0;
+    h7 = (h7 + h) >>> 0;
+  }
+
+  return [h0, h1, h2, h3, h4, h5, h6, h7]
+    .map((n) => n.toString(16).padStart(8, '0'))
+    .join('');
+};
+
+export const buildRegistrationId = (existingId?: string): string => {
+  const cleanedExisting = (existingId || '').trim();
+  if (/^reg-[a-zA-Z0-9_-]{8,120}$/.test(cleanedExisting)) {
+    return cleanedExisting;
+  }
+  return `reg-${Date.now().toString(36)}-${generateSecureToken(10).toLowerCase()}`;
+};
+
 export const generateRegistrationCode = (
-  count: number,
-  existingCodes: string[] = []
+  _count?: number,
+  excludeCodes: string[] = []
 ): string => {
-  const knownCodes = new Set<string>(existingCodes.map((c) => c.toUpperCase()));
-  try {
-    const storedRegs = localStorage.getItem(STORAGE_KEYS.REGISTRATIONS);
-    if (storedRegs) {
-      (JSON.parse(storedRegs) as Array<{ code?: string }>).forEach((r) => {
-        if (r?.code) knownCodes.add(r.code.toUpperCase());
-      });
+  const excluded = new Set<string>(excludeCodes.map((c) => c.toUpperCase()));
+
+  // Generate cryptographically random, non-sequential code compliant with ^[A-Z0-9_-]{3,32}$
+  // Does not depend on localStorage count or loaded registrations for uniqueness.
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const candidate = `CAR-SM-${generateSecureToken(8)}`;
+    if (!excluded.has(candidate)) {
+      return candidate;
     }
-    const storedQueue = localStorage.getItem(STORAGE_KEYS.OFFLINE_QUEUE);
-    if (storedQueue) {
-      (JSON.parse(storedQueue) as Array<{ code?: string }>).forEach((r) => {
-        if (r?.code) knownCodes.add(r.code.toUpperCase());
-      });
+  }
+  return `CAR-SM-${generateSecureToken(10)}`;
+};
+
+const operationIdentityMap = new Map<string, { id: string; code: string }>();
+
+export const clearParticipantAttemptCache = (): void => {
+  operationIdentityMap.clear();
+};
+
+export const getOrCreateParticipantRegistrationIdentity = (
+  operationKey: string,
+   legacyKeyPart?: string,
+  excludeCodes: string[] = [],
+  forceNewCode = false
+): { id: string; code: string } => {
+  // Internal ephemeral in-memory key for idempotency of the active submission operation only.
+  // Never persisted publicly or embedded in document IDs/codes.
+  const normKey = `${(operationKey || '').trim().toLowerCase()}|${(legacyKeyPart || '').trim().toLowerCase()}`;
+
+  if (!forceNewCode && normKey !== '|') {
+    const cached = operationIdentityMap.get(normKey);
+    if (cached) {
+      return cached;
     }
-  } catch {
-    // ignore storage read error
   }
 
-  let maxNum = count;
-  knownCodes.forEach((code) => {
-    const match = code.match(/(\d+)$/);
-    if (match) {
-      const parsed = parseInt(match[1], 10);
-      if (!Number.isNaN(parsed) && parsed > maxNum) {
-        maxNum = parsed;
-      }
-    }
-  });
-
-  let nextNum = maxNum + 1;
-  let candidate = `CAR-SM-${nextNum.toString().padStart(3, '0')}`;
-  while (knownCodes.has(candidate)) {
-    nextNum += 1;
-    candidate = `CAR-SM-${nextNum.toString().padStart(3, '0')}`;
+  const prev = operationIdentityMap.get(normKey);
+  const nextExcluded = prev ? [...excludeCodes, prev.code] : excludeCodes;
+  const code = generateRegistrationCode(0, nextExcluded);
+  const id = prev?.id ? buildRegistrationId(prev.id) : buildRegistrationId();
+  const identity = { id, code };
+  if (normKey !== '|') {
+    operationIdentityMap.set(normKey, identity);
   }
-  return candidate;
+  return identity;
 };
 
 export const generateCertificateHash = (code: string, cpf: string): string => {
@@ -900,7 +1000,8 @@ export const generatePrintablePDFReport = async (opts: PDFReportOptions) => {
     document.body.appendChild(hostEl);
 
     const targetEl = hostEl.querySelector('.sus-pdf-report') as HTMLElement | null;
-    const html2pdfLib = (html2pdf as any)?.default || html2pdf;
+    const html2pdfModule = await import('html2pdf.js');
+    const html2pdfLib = (html2pdfModule as any)?.default || html2pdfModule;
     if (targetEl && typeof html2pdfLib === 'function') {
       await html2pdfLib()
         .set({

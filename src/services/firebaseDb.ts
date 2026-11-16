@@ -33,15 +33,27 @@ import {
   Registration,
   EventConfig,
   CertificateDownloadRecord,
-  DownloadMaterial
+  DownloadMaterial,
+  SpeakerProfile
 } from '../types.ts';
+import {
+  generateRegistrationCode,
+  buildRegistrationId
+} from '../utils/helpers.ts';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const firestoreAuth = getAuth(app);
-export const db = getFirestore(
-  app,
-  (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId || '(default)'
-);
+export const ACTIVE_FIREBASE_PROJECT_ID = firebaseConfig.projectId;
+export const ACTIVE_FIRESTORE_DATABASE_ID =
+  (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId || '(default)';
+export const db = getFirestore(app, ACTIVE_FIRESTORE_DATABASE_ID);
+
+export const getActiveFirebaseConfigSummary = () => ({
+  projectId: ACTIVE_FIREBASE_PROJECT_ID,
+  firestoreDatabaseId: ACTIVE_FIRESTORE_DATABASE_ID,
+  authDomain: firebaseConfig.authDomain,
+  appId: firebaseConfig.appId
+});
 
 export const PRIMARY_ADMIN_EMAIL = 'farmaciademinas.marketing@gmail.com';
 export const AUTHORIZED_ADMIN_EMAILS: readonly string[] = [
@@ -49,60 +61,20 @@ export const AUTHORIZED_ADMIN_EMAILS: readonly string[] = [
   'amandajhonnes@yahoo.com.br'
 ];
 
-export interface AdminUserInfo {
-  uid: string;
-  email: string | null;
-  emailVerified: boolean;
-  displayName: string | null;
-  photoURL?: string | null;
-  isLocalFallback?: boolean;
-}
-
-export type FirebaseAdminUser = User | AdminUserInfo;
+export type FirebaseAdminUser = User;
 
 export const LOCAL_ADMIN_STORAGE_KEY = 'simposio_admin_session_auth';
 
-export const getStoredLocalAdmin = (): AdminUserInfo | null => {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(LOCAL_ADMIN_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.email && isVerifiedAdminUser(parsed)) {
-      return parsed;
-    }
-  } catch {
-    // ignore parse error
-  }
-  return null;
-};
-
-export const setStoredLocalAdmin = (admin: AdminUserInfo | null): void => {
+// Clean up any legacy fake local admin session from localStorage
+const purgeLegacyLocalAdminSession = (): void => {
   if (typeof window === 'undefined') return;
   try {
-    if (admin) {
-      localStorage.setItem(LOCAL_ADMIN_STORAGE_KEY, JSON.stringify(admin));
-    } else {
-      localStorage.removeItem(LOCAL_ADMIN_STORAGE_KEY);
-    }
+    window.localStorage?.removeItem(LOCAL_ADMIN_STORAGE_KEY);
   } catch {
-    // ignore storage error
+    // ignore storage errors
   }
 };
-
-export const createLocalAdminSession = (
-  email: string = PRIMARY_ADMIN_EMAIL
-): AdminUserInfo => {
-  const session: AdminUserInfo = {
-    uid: 'gestor-carangola-local',
-    email,
-    emailVerified: true,
-    displayName: 'Gestor Oficial SUS (farmaciademinas.marketing@gmail.com)',
-    isLocalFallback: true
-  };
-  setStoredLocalAdmin(session);
-  return session;
-};
+purgeLegacyLocalAdminSession();
 
 export enum OperationType {
   CREATE = 'create',
@@ -113,8 +85,20 @@ export enum OperationType {
   WRITE = 'write'
 }
 
+export type FirestoreErrorCategory =
+  | 'offline'
+  | 'permission_denied'
+  | 'not_found'
+  | 'auth_error'
+  | 'config_error'
+  | 'collision'
+  | 'validation_error'
+  | 'unknown';
+
 export interface FirestoreErrorInfo {
   error: string;
+  code?: string;
+  category: FirestoreErrorCategory;
   operationType: OperationType;
   path: string | null;
   authInfo: {
@@ -132,13 +116,94 @@ export interface FirestoreErrorInfo {
   };
 }
 
+export function classifyFirestoreError(error: unknown): FirestoreErrorCategory {
+  const errObj = error as { code?: string; message?: string; status?: string };
+  const code = String(errObj?.code || errObj?.status || '').toLowerCase();
+  const msg = String(errObj?.message || error || '').toLowerCase();
+
+  if (
+    code.includes('unavailable') ||
+    msg.includes('client is offline') ||
+    msg.includes('network-request-failed') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('offline')
+  ) {
+    return 'offline';
+  }
+  if (
+    code.includes('permission-denied') ||
+    code.includes('permission_denied') ||
+    msg.includes('missing or insufficient permissions') ||
+    msg.includes('permission-denied') ||
+    msg.includes('permission_denied')
+  ) {
+    return 'permission_denied';
+  }
+  if (
+    code.includes('not-found') ||
+    code.includes('not_found') ||
+    msg.includes('does not exist') ||
+    msg.includes('not-found') ||
+    msg.includes('not_found')
+  ) {
+    return 'not_found';
+  }
+  if (
+    code.includes('unauthenticated') ||
+    code.includes('auth/') ||
+    msg.includes('unauthorized-domain') ||
+    msg.includes('unauthenticated')
+  ) {
+    return 'auth_error';
+  }
+  if (
+    code.includes('invalid-argument') ||
+    msg.includes('api key not valid') ||
+    msg.includes('configuration') ||
+    msg.includes('project_invalid')
+  ) {
+    return 'config_error';
+  }
+  return 'unknown';
+}
+
+export function formatFirestoreUserErrorMessage(
+  category: FirestoreErrorCategory,
+  error: unknown
+): string {
+  const rawMessage = error instanceof Error ? error.message : String(error || '');
+  switch (category) {
+    case 'offline':
+      return 'Sem conexão com o servidor Firestore no momento. Verifique sua internet e tente novamente.';
+    case 'permission_denied':
+      return 'O servidor recusou a gravação por restrição de permissão ou conflito de registro no Firestore.';
+    case 'not_found':
+      return 'Banco de dados ou coleção do Firestore não encontrada na configuração atual.';
+    case 'auth_error':
+      return `Falha de autenticação no Firebase: ${rawMessage || 'sessão não autorizada'}.`;
+    case 'config_error':
+      return `Erro de configuração do projeto Firebase (${ACTIVE_FIREBASE_PROJECT_ID}): ${rawMessage}`;
+    case 'collision':
+      return 'Não foi possível gerar um código exclusivo para a inscrição após novas tentativas. Tente novamente.';
+    case 'validation_error':
+      return rawMessage || 'Dados obrigatórios da inscrição estão incompletos ou inválidos.';
+    default:
+      return rawMessage || 'Erro técnico ao comunicar com o banco de dados Firestore.';
+  }
+}
+
 export function handleFirestoreError(
   error: unknown,
   operationType: OperationType,
   path: string | null
 ): never {
+  const category = classifyFirestoreError(error);
+  const code = (error as { code?: string })?.code;
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
+    code,
+    category,
     authInfo: {
       userId: firestoreAuth.currentUser?.uid,
       email: firestoreAuth.currentUser?.email,
@@ -161,16 +226,45 @@ export function handleFirestoreError(
   throw new Error(serialized);
 }
 
-export async function testFirestoreConnection(): Promise<{ ok: boolean; offline?: boolean; error?: string }> {
+export interface FirestoreConnectionResult {
+  ok: boolean;
+  offline?: boolean;
+  category?: FirestoreErrorCategory;
+  error?: string;
+  projectId: string;
+  databaseId: string;
+}
+
+type ConnectionProbeFn = () => Promise<void>;
+let customConnectionProbeForTests: ConnectionProbeFn | null = null;
+
+export function setFirestoreConnectionProbeForTests(probe: ConnectionProbeFn | null): void {
+  customConnectionProbeForTests = probe;
+}
+
+export async function testFirestoreConnection(): Promise<FirestoreConnectionResult> {
   try {
-    await getDocFromServer(doc(db, 'event_config', 'main'));
-    return { ok: true };
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration. Client appears offline.');
-      return { ok: false, offline: true, error: error.message };
+    if (customConnectionProbeForTests) {
+      await customConnectionProbeForTests();
+    } else {
+      await getDocFromServer(doc(db, 'event_config', 'main'));
     }
-    return { ok: true };
+    return {
+      ok: true,
+      projectId: ACTIVE_FIREBASE_PROJECT_ID,
+      databaseId: ACTIVE_FIRESTORE_DATABASE_ID
+    };
+  } catch (error) {
+    const category = classifyFirestoreError(error);
+    const errMessage = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      offline: category === 'offline',
+      category,
+      error: errMessage,
+      projectId: ACTIVE_FIREBASE_PROJECT_ID,
+      databaseId: ACTIVE_FIRESTORE_DATABASE_ID
+    };
   }
 }
 
@@ -294,7 +388,12 @@ const buildPermissionDoc = (reg: Registration, nowIso: string): Record<string, u
 export const isVerifiedAdminUser = (
   user: FirebaseAdminUser | null | undefined
 ): boolean => {
-  if (!user || !user.emailVerified) return false;
+  if (!user) return false;
+  if ((user as { isLocalFallback?: boolean }).isLocalFallback) return false;
+  if (!user.emailVerified) return false;
+  const activeAuthUser = firestoreAuth.currentUser;
+  if (activeAuthUser && activeAuthUser.uid !== user.uid) return false;
+  if (!user.uid || typeof user.uid !== 'string') return false;
   const userEmail = (user.email || '').trim().toLowerCase();
   return AUTHORIZED_ADMIN_EMAILS.some((adm) => adm.toLowerCase() === userEmail);
 };
@@ -308,7 +407,12 @@ export const signInFirestoreAdmin = async (): Promise<FirebaseAdminUser | null> 
 
   try {
     const result = await signInWithPopup(firestoreAuth, provider);
-    setStoredLocalAdmin(null);
+    if (!isVerifiedAdminUser(result.user)) {
+      await signOut(firestoreAuth);
+      throw new Error(
+        `A conta autenticada (${result.user.email || 'sem e-mail'}) não possui permissão de gestor autorizado no Firebase.`
+      );
+    }
     return result.user;
   } catch (error: unknown) {
     const err = error as { code?: string; message?: string };
@@ -319,76 +423,263 @@ export const signInFirestoreAdmin = async (): Promise<FirebaseAdminUser | null> 
     ) {
       return null;
     }
-
-    // Resolves auth/unauthorized-domain seamlessly:
-    // When running on localhost, preview URLs or environments where domain whitelist is pending,
-    // establish an authorized local manager session for farmaciademinas.marketing@gmail.com
     if (
       err?.code === 'auth/unauthorized-domain' ||
       err?.message?.includes('auth/unauthorized-domain') ||
       err?.message?.includes('unauthorized-domain')
     ) {
-      console.warn(
-        `[Firebase Auth] Domínio não autorizado no console Google/Firebase. Ativando sessão local autorizada do Gestor para ${PRIMARY_ADMIN_EMAIL}.`
+      const domain = typeof window !== 'undefined' ? window.location.hostname : 'domínio atual';
+      const authErr = new Error(
+        `Domínio não autorizado no Firebase Authentication (${domain}). Autorize este domínio em Firebase Console → Authentication → Settings → Authorized domains no projeto ${ACTIVE_FIREBASE_PROJECT_ID}.`
       );
-      const session = createLocalAdminSession(PRIMARY_ADMIN_EMAIL);
-      return session;
+      (authErr as { code?: string }).code = 'auth/unauthorized-domain';
+      throw authErr;
     }
-
     throw error;
   }
 };
 
 export const signOutFirestoreAdmin = async (): Promise<void> => {
-  setStoredLocalAdmin(null);
   await signOut(firestoreAuth);
 };
 
 export const subscribeAuthState = (
   callback: (user: FirebaseAdminUser | null) => void
 ) => {
-  const stored = getStoredLocalAdmin();
-  if (stored && !firestoreAuth.currentUser) {
-    callback(stored);
-  }
-
   return onAuthStateChanged(firestoreAuth, (user) => {
-    if (user) {
-      setStoredLocalAdmin(null);
-      callback(user);
-    } else {
-      const fallback = getStoredLocalAdmin();
-      callback(fallback);
-    }
+    callback(user);
   });
 };
 
-export const savePublicRegistrationToDb = async (reg: Registration): Promise<void> => {
-  const nowIso = new Date().toISOString();
-  const safeReg: Registration = {
-    ...reg,
-    status: 'confirmada',
-    certificateIssued: false,
-    checkedInAt: undefined
-  };
-  const regPayload = buildRegistrationDoc(safeReg, nowIso);
-  const permPayload = buildPermissionDoc(safeReg, nowIso);
-  const regId = String(regPayload.id);
-  const permCode = String(permPayload.code);
+export interface PublicRegistrationSaveResult {
+  success: boolean;
+  alreadyExisted?: boolean;
+  id: string;
+  code: string;
+  attemptsUsed: number;
+}
 
-  try {
+export interface FirestoreRegistrationStorageAdapter {
+  getPermissionDoc: (code: string) => Promise<{ exists: boolean; data?: Record<string, unknown> }>;
+  commitRegistrationBatch: (
+    regId: string,
+    regPayload: Record<string, unknown>,
+    permCode: string,
+    permPayload: Record<string, unknown>
+  ) => Promise<void>;
+}
+
+const defaultRegistrationAdapter: FirestoreRegistrationStorageAdapter = {
+  async getPermissionDoc(code: string) {
+    const snap = await getDocFromServer(doc(db, 'certificate_permissions', code));
+    return {
+      exists: snap.exists(),
+      data: snap.exists() ? (snap.data() as Record<string, unknown>) : undefined
+    };
+  },
+  async commitRegistrationBatch(regId, regPayload, permCode, permPayload) {
     const batch = writeBatch(db);
     batch.set(doc(db, 'registrations', regId), regPayload);
     batch.set(doc(db, 'certificate_permissions', permCode), permPayload);
     await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `registrations/${regId}`);
   }
+};
+
+let customRegistrationAdapterForTests: FirestoreRegistrationStorageAdapter | null = null;
+
+export function setFirestoreRegistrationAdapterForTests(
+  adapter: FirestoreRegistrationStorageAdapter | null
+): void {
+  customRegistrationAdapterForTests = adapter;
+}
+
+export const savePublicRegistrationToDb = async (
+  reg: Registration,
+  maxCollisionRetries = 3
+): Promise<PublicRegistrationSaveResult> => {
+  const adapter = customRegistrationAdapterForTests || defaultRegistrationAdapter;
+  const nowIso = new Date().toISOString();
+  const stableId = buildRegistrationId(reg.id);
+
+  let currentReg: Registration = {
+    ...reg,
+    id: stableId,
+    status: 'confirmada',
+    certificateIssued: false,
+    checkedInAt: undefined
+  };
+
+  let attemptsUsed = 0;
+  let lastError: unknown = null;
+  const triedCodes = new Set<string>();
+
+  for (let attempt = 0; attempt < maxCollisionRetries; attempt += 1) {
+    attemptsUsed += 1;
+    let candidateCode = sanitizeCode(currentReg.code);
+    const candidateId = sanitizeId(currentReg.id, 'reg');
+    triedCodes.add(candidateCode);
+
+    // 1. Pre-flight check on certificate_permissions/{candidateCode}
+    try {
+      const existingPerm = await adapter.getPermissionDoc(candidateCode);
+      if (existingPerm.exists) {
+        const existingRegId = String(existingPerm.data?.registrationId || '');
+        if (existingRegId === candidateId) {
+          // Idempotent retry of the exact same registration operation: do not duplicate or overwrite
+          return {
+            success: true,
+            alreadyExisted: true,
+            id: candidateId,
+            code: candidateCode,
+            attemptsUsed
+          };
+        }
+        // Genuine code collision with a different registration: generate a fresh unique code
+        const newCode = generateRegistrationCode(0, Array.from(triedCodes));
+        triedCodes.add(newCode);
+        currentReg = {
+          ...currentReg,
+          code: newCode
+        };
+        candidateCode = newCode;
+      }
+    } catch {
+      // If pre-flight check fails (e.g. offline), proceed to commit which will surface the authoritative error
+    }
+
+    const regPayload = buildRegistrationDoc(currentReg, nowIso);
+    const permPayload = buildPermissionDoc(currentReg, nowIso);
+
+    try {
+      await adapter.commitRegistrationBatch(candidateId, regPayload, candidateCode, permPayload);
+
+      return {
+        success: true,
+        alreadyExisted: false,
+        id: candidateId,
+        code: candidateCode,
+        attemptsUsed
+      };
+    } catch (error) {
+      lastError = error;
+      const category = classifyFirestoreError(error);
+
+      // If permission_denied occurred during commit, check if it was caused by a concurrent write on candidateCode
+      if (category === 'permission_denied') {
+        try {
+          const postPerm = await adapter.getPermissionDoc(candidateCode);
+          if (postPerm.exists) {
+            const existingRegId = String(postPerm.data?.registrationId || '');
+            if (existingRegId === candidateId) {
+              return {
+                success: true,
+                alreadyExisted: true,
+                id: candidateId,
+                code: candidateCode,
+                attemptsUsed
+              };
+            }
+            if (attempt < maxCollisionRetries - 1) {
+              const newCode = generateRegistrationCode(0, Array.from(triedCodes));
+              triedCodes.add(newCode);
+              currentReg = {
+                ...currentReg,
+                code: newCode
+              };
+              continue;
+            }
+          }
+        } catch {
+          // ignore secondary check error
+        }
+      }
+
+      handleFirestoreError(error, OperationType.WRITE, `registrations/${candidateId}`);
+    }
+  }
+
+  handleFirestoreError(lastError, OperationType.WRITE, `registrations/${currentReg.id}`);
+};
+
+export interface OfflineQueueSyncOutcome {
+  synced: Registration[];
+  remainingQueue: Registration[];
+  mergedRegistrations: Registration[];
+  allSucceeded: boolean;
+}
+
+let activeOfflineSyncPromise: Promise<OfflineQueueSyncOutcome> | null = null;
+
+export const synchronizeOfflineRegistrationQueue = async (
+  queuedItems: Registration[],
+  existingRegistrations: Registration[]
+): Promise<OfflineQueueSyncOutcome> => {
+  if (activeOfflineSyncPromise) {
+    return activeOfflineSyncPromise;
+  }
+
+  activeOfflineSyncPromise = (async (): Promise<OfflineQueueSyncOutcome> => {
+    try {
+      // Deduplicate input queue by stable id
+      const uniqueQueueMap = new Map<string, Registration>();
+      queuedItems.forEach((item) => {
+        if (item?.id && !uniqueQueueMap.has(item.id)) {
+          uniqueQueueMap.set(item.id, item);
+        }
+      });
+
+      const remainingQueue: Registration[] = [];
+      const synced: Registration[] = [];
+
+      for (const item of uniqueQueueMap.values()) {
+        try {
+          const res = await savePublicRegistrationToDb(item);
+          synced.push({
+            ...item,
+            id: res.id,
+            code: res.code,
+            status: 'confirmada',
+            certificateIssued: false
+          });
+        } catch (err) {
+          console.warn(`[Sync Offline] Falha ao sincronizar inscrição ${item.code}:`, err);
+          remainingQueue.push(item);
+        }
+      }
+
+      const seenIds = new Set<string>();
+      const seenCodes = new Set<string>();
+      const mergedRegistrations: Registration[] = [];
+
+      for (const reg of [...synced, ...existingRegistrations]) {
+        const cleanId = reg.id;
+        const cleanCode = (reg.code || '').toUpperCase();
+        if (!seenIds.has(cleanId) && !seenCodes.has(cleanCode)) {
+          seenIds.add(cleanId);
+          seenCodes.add(cleanCode);
+          mergedRegistrations.push(reg);
+        }
+      }
+
+      return {
+        synced,
+        remainingQueue,
+        mergedRegistrations,
+        allSucceeded: remainingQueue.length === 0
+      };
+    } finally {
+      activeOfflineSyncPromise = null;
+    }
+  })();
+
+  return activeOfflineSyncPromise;
 };
 
 export const persistRegistrationAndPermissionInDb = async (reg: Registration): Promise<void> => {
   const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) return;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
 
   const nowIso = new Date().toISOString();
   const regPayload = buildRegistrationDoc(reg, nowIso);
@@ -408,7 +699,10 @@ export const persistRegistrationAndPermissionInDb = async (reg: Registration): P
 
 export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Promise<void> => {
   const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user) || regs.length === 0) return;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+  if (regs.length === 0) return;
 
   const nowIso = new Date().toISOString();
   const chunkSize = 200; // 2 writes per registration => <= 400 ops per batch (<500 limit)
@@ -431,6 +725,10 @@ export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Pr
 };
 
 export const deleteRegistrationInDb = async (reg: Registration): Promise<void> => {
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
   const regId = sanitizeId(reg.id, 'reg');
   const permCode = sanitizeCode(reg.code);
 
@@ -440,7 +738,7 @@ export const deleteRegistrationInDb = async (reg: Registration): Promise<void> =
     batch.delete(doc(db, 'certificate_permissions', permCode));
     await batch.commit();
   } catch (error) {
-    console.warn(`Aviso ao excluir inscrição ${regId} no Firestore:`, error);
+    handleFirestoreError(error, OperationType.DELETE, `registrations/${regId}`);
   }
 };
 
@@ -536,7 +834,9 @@ export const fetchCertificatePermissionByCode = async (
 
 export const saveEventConfigInDb = async (config: EventConfig): Promise<void> => {
   const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) return;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
 
   const nowIso = new Date().toISOString();
   const payload = stripUndefined({
@@ -928,6 +1228,91 @@ export const subscribeCertificateDownloads = (
     },
     (error) => {
       console.warn('Aviso ao sincronizar downloads de certificados do Firestore:', error);
+    }
+  );
+};
+
+export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> => {
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+  const speakerId = sanitizeId(speaker.id, 'spk');
+  const payload = stripUndefined({
+    id: speakerId,
+    name: (speaker.name || '').trim().slice(0, 160),
+    role: (speaker.role || '').trim().slice(0, 160),
+    institution: (speaker.institution || '').trim().slice(0, 200),
+    sessionGroup: speaker.sessionGroup || 'abertura',
+    sessionLabel: (speaker.sessionLabel || '').trim().slice(0, 200),
+    sessionTime: (speaker.sessionTime || '').trim().slice(0, 80),
+    photoUrl: speaker.photoUrl ? speaker.photoUrl.trim().slice(0, 500) : '',
+    bio: (speaker.bio || '').trim().slice(0, 3000),
+    socials: {
+      instagram: speaker.socials?.instagram ? speaker.socials.instagram.trim().slice(0, 100) : '',
+      instagramUrl: speaker.socials?.instagramUrl ? speaker.socials.instagramUrl.trim().slice(0, 300) : '',
+      linkedin: speaker.socials?.linkedin ? speaker.socials.linkedin.trim().slice(0, 100) : '',
+      linkedinUrl: speaker.socials?.linkedinUrl ? speaker.socials.linkedinUrl.trim().slice(0, 300) : '',
+      lattesUrl: speaker.socials?.lattesUrl ? speaker.socials.lattesUrl.trim().slice(0, 300) : ''
+    },
+    updatedAt: new Date().toISOString()
+  });
+
+  try {
+    await setDoc(doc(db, 'speakers', speakerId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `speakers/${speakerId}`);
+  }
+};
+
+export const saveAllSpeakersToDb = async (speakers: SpeakerProfile[]): Promise<void> => {
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+  for (const spk of speakers) {
+    await saveSpeakerToDb(spk);
+  }
+};
+
+export const deleteSpeakerInDb = async (speakerId: string): Promise<void> => {
+  const user = firestoreAuth.currentUser;
+  if (!isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+  const id = sanitizeId(speakerId, 'spk');
+  try {
+    await deleteDoc(doc(db, 'speakers', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `speakers/${id}`);
+  }
+};
+
+export const subscribeSpeakers = (onUpdate: (speakers: SpeakerProfile[]) => void) => {
+  const q = collection(db, 'speakers');
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      if (snapshot.empty) return;
+      const list: SpeakerProfile[] = snapshot.docs.map((d) => {
+        const data = d.data() as SpeakerProfile;
+        return {
+          id: data.id || d.id,
+          name: data.name || '',
+          role: data.role || '',
+          institution: data.institution || '',
+          sessionGroup: data.sessionGroup || 'abertura',
+          sessionLabel: data.sessionLabel || '',
+          sessionTime: data.sessionTime || '',
+          photoUrl: data.photoUrl || '',
+          bio: data.bio || '',
+          socials: data.socials || {}
+        };
+      });
+      onUpdate(list);
+    },
+    (error) => {
+      console.warn('Aviso ao sincronizar palestrantes do Firestore:', error);
     }
   );
 };

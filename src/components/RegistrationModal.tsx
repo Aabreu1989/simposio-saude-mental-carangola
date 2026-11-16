@@ -27,11 +27,20 @@ import {
   FileText,
   ExternalLink,
   Lock,
-  MessageSquare
+  MessageSquare,
+  AlertCircle
 } from 'lucide-react';
 import { Registration, EventConfig, NewsletterSubscriber } from '../types.ts';
 import { REGIONAL_CITIES, PROFESSIONAL_ROLES, INITIAL_SCHEDULE } from '../data/initialData.ts';
-import { formatCPF, formatPhone, generateRegistrationCode, sendBrowserNotification, isCertificateAvailableForPublic, CERTIFICATE_RELEASE_LABEL } from '../utils/helpers.ts';
+import {
+  formatCPF,
+  formatPhone,
+  generateRegistrationCode,
+  getOrCreateParticipantRegistrationIdentity,
+  sendBrowserNotification,
+  isCertificateAvailableForPublic,
+  CERTIFICATE_RELEASE_LABEL
+} from '../utils/helpers.ts';
 import {
   sendRegistrationConfirmationEmail,
   buildRegistrationConfirmationEmail,
@@ -84,7 +93,16 @@ export const REFERRAL_SOURCES = [
 interface RegistrationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSaveRegistration: (reg: Registration, isOfflineQueued: boolean) => void;
+  onSaveRegistration: (
+    reg: Registration,
+    isOfflineQueued: boolean
+  ) =>
+    | Promise<{
+        status: 'persisted' | 'already_exists' | 'queued' | 'error';
+        registration: Registration;
+        error?: string;
+      }>
+    | void;
   onSubscribeNewsletter?: (sub: NewsletterSubscriber) => void;
   totalRegistered: number;
   existingCodes?: string[];
@@ -111,8 +129,13 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   isStandalone = false
 }) => {
   const [submittedVoucher, setSubmittedVoucher] = useState<Registration | null>(existingRegistration || null);
+  const [registrationStatus, setRegistrationStatus] = useState<
+    'idle' | 'confirmed' | 'already_exists' | 'pending_sync' | 'error'
+  >(existingRegistration ? 'confirmed' : 'idle');
   const [isQueuedOffline, setIsQueuedOffline] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirmationEmailResult, setConfirmationEmailResult] = useState<ConfirmationEmailResult | null>(null);
   const [isEmailPreviewOpen, setIsEmailPreviewOpen] = useState(false);
   const [isResendingEmail, setIsResendingEmail] = useState(false);
@@ -123,19 +146,26 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   useEffect(() => {
     if (existingRegistration === null) {
       setSubmittedVoucher(null);
+      setRegistrationStatus('idle');
       setConfirmationEmailResult(null);
     } else if (existingRegistration && !submittedVoucher) {
       setSubmittedVoucher(existingRegistration);
+      setRegistrationStatus('confirmed');
     }
   }, [existingRegistration]);
 
   const handleResendEmail = async () => {
-    if (!submittedVoucher) return;
+    if (!submittedVoucher || isQueuedOffline) return;
     setIsResendingEmail(true);
     try {
-      const res = await sendRegistrationConfirmationEmail(submittedVoucher, INITIAL_SCHEDULE, config);
+      const res = await sendRegistrationConfirmationEmail(
+        submittedVoucher,
+        INITIAL_SCHEDULE,
+        config,
+        { resend: true }
+      );
       setConfirmationEmailResult(res);
-      setEmailResentSuccess(true);
+      setEmailResentSuccess(res.actuallyDelivered);
       setTimeout(() => setEmailResentSuccess(false), 3000);
     } catch (err) {
       console.warn('Erro ao reenviar e-mail de confirmação:', err);
@@ -211,11 +241,19 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!validate()) return;
 
-    const code = generateRegistrationCode(totalRegistered, existingCodes);
+    setIsSubmitting(true);
+
+    const { id: regId, code } = getOrCreateParticipantRegistrationIdentity(
+      formData.cpf,
+      formData.email,
+      existingCodes
+    );
+
     const isOtherCity = formData.city === 'Outros' || formData.city === 'Outro Município de MG';
     const resolvedCity = isOtherCity && formData.customCity.trim()
       ? formData.customCity.trim()
@@ -232,7 +270,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     }
 
     const newReg: Registration = {
-      id: `reg-${Date.now()}`,
+      id: regId,
       code,
       fullName: formData.fullName.trim(),
       cpf: formData.cpf.trim(),
@@ -262,23 +300,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       acceptWhatsappNews: formData.notifyWhatsapp
     };
 
-    // Alimenta base de assinantes de newsletter e whatsapp no painel do gestor
-    if (onSubscribeNewsletter && (formData.notifyWhatsapp || formData.notifyEmail)) {
-      onSubscribeNewsletter({
-        id: `sub-${Date.now()}`,
-        email: formData.email.trim().toLowerCase(),
-        name: formData.fullName.trim(),
-        phone: formData.phone.trim(),
-        city: resolvedCity,
-        role: resolvedRole,
-        institution: formData.institution.trim(),
-        receiveWhatsapp: formData.notifyWhatsapp,
-        receiveEmail: formData.notifyEmail,
-        origin: 'inscricao',
-        subscribedAt: new Date().toISOString().split('T')[0]
-      });
-    }
-
     if (formData.notifyPush) {
       sendBrowserNotification(
         'Notificações do Simpósio Ativadas!',
@@ -287,22 +308,72 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     }
 
     const queued = !isOnline;
-    setIsQueuedOffline(queued);
-    onSaveRegistration(newReg, queued);
-    setSubmittedVoucher(newReg);
 
-    // Envio automático do e-mail oficial de confirmação com Programa Completo e Número de Participante
-    setIsSendingEmail(true);
-    sendRegistrationConfirmationEmail(newReg, INITIAL_SCHEDULE, config)
-      .then((res) => {
-        setConfirmationEmailResult(res);
-      })
-      .catch((err) => {
-        console.warn('Erro ao disparar e-mail de confirmação:', err);
-      })
-      .finally(() => {
-        setIsSendingEmail(false);
-      });
+    try {
+      const outcome = await onSaveRegistration(newReg, queued);
+
+      if (outcome && outcome.status === 'error') {
+        setRegistrationStatus('error');
+        setSubmitError(
+          outcome.error ||
+            'Não foi possível confirmar a inscrição no banco de dados Firestore. Seus dados foram preservados abaixo para você tentar novamente.'
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Alimenta base de assinantes de newsletter e whatsapp no painel do gestor apenas após confirmação
+      if (onSubscribeNewsletter && (formData.notifyWhatsapp || formData.notifyEmail)) {
+        onSubscribeNewsletter({
+          id: `sub-${Date.now()}`,
+          email: formData.email.trim().toLowerCase(),
+          name: formData.fullName.trim(),
+          phone: formData.phone.trim(),
+          city: resolvedCity,
+          role: resolvedRole,
+          institution: formData.institution.trim(),
+          receiveWhatsapp: formData.notifyWhatsapp,
+          receiveEmail: formData.notifyEmail,
+          origin: 'inscricao',
+          subscribedAt: new Date().toISOString().split('T')[0]
+        });
+      }
+
+      const confirmedRegistration =
+        outcome && outcome.registration ? outcome.registration : newReg;
+
+      const isOfflineQueuedResult = outcome ? outcome.status === 'queued' : queued;
+      setIsQueuedOffline(isOfflineQueuedResult);
+      setRegistrationStatus(
+        isOfflineQueuedResult
+          ? 'pending_sync'
+          : outcome?.status === 'already_exists'
+          ? 'already_exists'
+          : 'confirmed'
+      );
+      setSubmittedVoucher(confirmedRegistration);
+      setIsSubmitting(false);
+
+      // Dispara envio do e-mail oficial apenas após confirmação real no Firestore
+      if (!isOfflineQueuedResult) {
+        setIsSendingEmail(true);
+        sendRegistrationConfirmationEmail(confirmedRegistration, INITIAL_SCHEDULE, config)
+          .then((res) => {
+            setConfirmationEmailResult(res);
+          })
+          .catch((err) => {
+            console.warn('Erro ao disparar e-mail de confirmação:', err);
+          })
+          .finally(() => {
+            setIsSendingEmail(false);
+          });
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRegistrationStatus('error');
+      setSubmitError(`Erro durante o processamento da inscrição: ${msg}`);
+      setIsSubmitting(false);
+    }
   };
 
   const handlePrint = () => {
@@ -400,25 +471,38 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
       <div className={isStandalone ? "p-4 sm:p-8" : "p-6 max-h-[80vh] overflow-y-auto"}>
           {submittedVoucher ? (
-            /* Confirmation Voucher Screen */
+            /* Confirmation / Pending Sync Voucher Screen */
             <div className="space-y-6">
-              <div className="p-6 bg-[#f5faf8] border-2 border-[#2a9d8f]/30 rounded-2xl text-center space-y-3">
-                <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-2xs">
-                  <CheckCircle className="w-8 h-8" />
-                </div>
-                <h4 className="text-2xl font-extrabold text-[#0a3641]">
-                  Inscrição Confirmada com Sucesso!
-                </h4>
-                <p className="text-sm text-stone-600 max-w-md mx-auto">
-                  Sua vaga no <strong>{config.editionTitle}</strong> está garantida. Apresente este comprovante no credenciamento em <strong>{config.eventDate}</strong> às 07h30.
-                </p>
-
-                {isQueuedOffline && (
-                  <div className="inline-block bg-amber-100 text-amber-800 text-xs px-3 py-1 rounded-full font-medium">
-                    Salvo localmente (Sincronização pendente com rede)
+              {isQueuedOffline || registrationStatus === 'pending_sync' ? (
+                <div className="p-6 bg-amber-50 border-2 border-amber-300 rounded-2xl text-center space-y-3">
+                  <div className="w-14 h-14 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto shadow-2xs">
+                    <WifiOff className="w-8 h-8" />
                   </div>
-                )}
-              </div>
+                  <h4 className="text-2xl font-extrabold text-amber-950">
+                    Inscrição Pendente de Sincronização
+                  </h4>
+                  <p className="text-sm text-amber-900 max-w-md mx-auto">
+                    Seus dados foram preservados localmente neste dispositivo, mas a gravação remota no Firestore ainda não foi confirmada. A sua vaga no <strong>{config.editionTitle}</strong> somente estará confirmada após a sincronização com o servidor.
+                  </p>
+                  <div className="inline-block bg-amber-200/80 text-amber-950 text-xs px-3 py-1 rounded-full font-bold">
+                    Aguardando conexão para confirmar inscrição remota
+                  </div>
+                </div>
+              ) : (
+                <div className="p-6 bg-[#f5faf8] border-2 border-[#2a9d8f]/30 rounded-2xl text-center space-y-3">
+                  <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-2xs">
+                    <CheckCircle className="w-8 h-8" />
+                  </div>
+                  <h4 className="text-2xl font-extrabold text-[#0a3641]">
+                    {registrationStatus === 'already_exists'
+                      ? 'Inscrição Já Confirmada no Sistema!'
+                      : 'Inscrição Confirmada com Sucesso!'}
+                  </h4>
+                  <p className="text-sm text-stone-600 max-w-md mx-auto">
+                    Sua inscrição no <strong>{config.editionTitle}</strong> foi gravada e confirmada no banco de dados oficial. Apresente este comprovante no credenciamento em <strong>{config.eventDate}</strong> às 07h30.
+                  </p>
+                </div>
+              )}
 
               {/* Printable Voucher Card */}
               <div id="comprovante-voucher" className="p-5 bg-white border border-stone-300 rounded-xl shadow-xs space-y-4">
@@ -432,9 +516,15 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                      Vaga Confirmada
-                    </span>
+                    {isQueuedOffline || registrationStatus === 'pending_sync' ? (
+                      <span className="text-[10px] uppercase font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
+                        Pendente de Sincronização
+                      </span>
+                    ) : (
+                      <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                        Inscrição Confirmada
+                      </span>
+                    )}
                     <div className="text-xs text-stone-500 mt-1">Carangola - MG</div>
                   </div>
                 </div>
@@ -509,26 +599,30 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
               {/* Confirmação de Envio do E-mail Oficial com Programa Completo e Número de Participante */}
               {(() => {
                 const actuallyDelivered = Boolean(confirmationEmailResult?.actuallyDelivered);
+                const emailStatus = confirmationEmailResult?.emailStatus;
+                const isFailed = !isSendingEmail && emailStatus === 'failed';
                 const cardClasses = isSendingEmail
                   ? 'from-teal-50 via-stone-50 to-teal-50 border-teal-300'
                   : actuallyDelivered
                   ? 'from-emerald-50 via-teal-50 to-emerald-50 border-emerald-300'
+                  : isFailed
+                  ? 'from-rose-50 via-amber-50 to-rose-50 border-rose-300'
                   : 'from-amber-50 via-stone-50 to-amber-50 border-amber-300';
                 const iconBg = isSendingEmail
                   ? 'bg-[#028090]'
                   : actuallyDelivered
                   ? 'bg-emerald-600'
+                  : isFailed
+                  ? 'bg-rose-600'
                   : 'bg-[#d96522]';
                 const providerLabel =
-                  confirmationEmailResult?.deliveryMethod === 'emailjs'
-                    ? 'EmailJS API Ativa'
-                    : confirmationEmailResult?.deliveryMethod === 'emailjs_rest'
-                    ? 'EmailJS REST'
-                    : confirmationEmailResult?.deliveryMethod === 'gmail_api'
-                    ? 'Gmail API'
-                    : confirmationEmailResult?.deliveryMethod === 'smtp'
-                    ? 'Gmail SMTP'
-                    : 'Aguardando Configuração Gmail SMTP';
+                  actuallyDelivered
+                    ? 'Gmail SMTP · Aceito'
+                    : isQueuedOffline
+                    ? 'Sincronização Pendente'
+                    : emailStatus === 'pending_config'
+                    ? 'Gmail SMTP Pendente'
+                    : 'Falha no Envio SMTP';
 
                 return (
                   <div className={`p-4 sm:p-5 rounded-2xl bg-gradient-to-r ${cardClasses} border-2 shadow-sm space-y-3`}>
@@ -548,18 +642,26 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                                 ? 'text-[#0a3641]'
                                 : actuallyDelivered
                                 ? 'text-emerald-800'
+                                : isFailed
+                                ? 'text-rose-900'
                                 : 'text-amber-900'
                             }`}>
-                              {isSendingEmail
-                                ? 'Disparando E-mail Oficial de Confirmação...'
+                              {isQueuedOffline
+                                ? 'Envio de E-mail Aguardando Sincronização da Inscrição'
+                                : isSendingEmail
+                                ? 'Solicitando Envio no Servidor Gmail SMTP...'
                                 : actuallyDelivered
-                                ? 'E-mail de Confirmação Enviado com Sucesso'
-                                : 'E-mail Oficial Gerado (Envio Automático Aguardando Provedor)'}
+                                ? 'E-mail Aceito pelo Servidor Gmail SMTP'
+                                : emailStatus === 'pending_config'
+                                ? 'Inscrição Confirmada · E-mail Pendente de Configuração SMTP'
+                                : 'Inscrição Confirmada · Falha no Envio do E-mail'}
                             </span>
-                            {!isSendingEmail && confirmationEmailResult && (
+                            {!isSendingEmail && (confirmationEmailResult || isQueuedOffline) && (
                               <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                                 actuallyDelivered
                                   ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                  : isFailed
+                                  ? 'bg-rose-100 text-rose-900 border-rose-300'
                                   : 'bg-amber-100 text-amber-900 border-amber-300'
                               }`}>
                                 {providerLabel}
@@ -567,11 +669,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                             )}
                           </div>
                           <div className="text-sm font-extrabold text-[#0a3641] break-all mt-0.5">
-                            Destinatário: <span className={actuallyDelivered ? 'text-emerald-700 underline' : 'text-[#0a3641] underline'}>{submittedVoucher.email}</span>
+                            Destinatário registado: <span className={actuallyDelivered ? 'text-emerald-700 underline' : 'text-[#0a3641] underline'}>{submittedVoucher.email}</span>
                           </div>
-                          {!isSendingEmail && confirmationEmailResult && !actuallyDelivered && (
+                          {!isSendingEmail && actuallyDelivered && (
+                            <p className="text-[11px] text-emerald-900 mt-1 leading-relaxed">
+                              O servidor Gmail SMTP aceitou o envio para o endereço registado. A entrega final na caixa de entrada depende do provedor de e-mail (verifique também a caixa de spam).
+                            </p>
+                          )}
+                          {!isSendingEmail && !actuallyDelivered && (
                             <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
-                              O conteúdo completo (Programa do Evento + Número de Participante <strong>{submittedVoucher.code}</strong>) já está pronto abaixo. Caso não chegue na sua caixa de entrada automaticamente, envie ou salve agora usando os botões abaixo.
+                              {confirmationEmailResult?.deliveryDetail ||
+                                `O conteúdo completo (Programa do Evento + Número de Participante ${submittedVoucher.code}) está disponível abaixo. Você pode reenviar ou salvar agora mesmo sem recriar sua inscrição.`}
                             </p>
                           )}
                         </div>
@@ -581,7 +689,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                           ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                           : 'bg-white text-stone-700 border-stone-300'
                       }`}>
-                        {actuallyDelivered ? 'SUS · Enviado' : 'SUS · Comprovante Pronto'}
+                        {actuallyDelivered ? 'SMTP · Aceito' : 'E-mail Pendente'}
                       </span>
                     </div>
 
@@ -781,6 +889,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
           ) : (
             /* Registration Form */
             <form onSubmit={handleSubmit} className="space-y-5">
+
+              {/* Submit Error Banner */}
+              {submitError && (
+                <div className="p-4 rounded-xl bg-rose-50 border-2 border-rose-300 text-rose-800 text-xs flex items-start gap-3 animate-in fade-in duration-200">
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-bold text-sm text-rose-900">Falha ao Confirmar Inscrição</div>
+                    <div className="leading-relaxed">{submitError}</div>
+                  </div>
+                </div>
+              )}
 
               {/* SECTION 1: DADOS PESSOAIS */}
               <div className="space-y-3">
@@ -1169,9 +1288,21 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
                   <button
                     type="submit"
-                    className="px-6 py-3 sm:py-2.5 text-xs sm:text-sm font-bold text-white bg-[#d96522] hover:bg-[#c25516] active:scale-98 rounded-xl shadow-sm transition-all cursor-pointer text-center"
+                    disabled={isSubmitting}
+                    className={`px-6 py-3 sm:py-2.5 text-xs sm:text-sm font-bold text-white rounded-xl shadow-sm transition-all text-center inline-flex items-center justify-center gap-2 ${
+                      isSubmitting
+                        ? 'bg-stone-400 cursor-not-allowed opacity-80'
+                        : 'bg-[#d96522] hover:bg-[#c25516] active:scale-98 cursor-pointer'
+                    }`}
                   >
-                    Confirmar Inscrição Gratuita
+                    {isSubmitting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                        <span>Confirmando no Firestore...</span>
+                      </>
+                    ) : (
+                      <span>Confirmar Inscrição Gratuita</span>
+                    )}
                   </button>
                 </div>
               </div>

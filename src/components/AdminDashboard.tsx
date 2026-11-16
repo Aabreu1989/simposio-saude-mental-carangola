@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users,
   CheckCircle2,
@@ -55,6 +55,8 @@ import {
   AlertCircle,
   Loader2,
   Link2,
+  ExternalLink,
+  Edit3,
   X
 } from 'lucide-react';
 import {
@@ -65,7 +67,8 @@ import {
   DownloadMaterial,
   SocialPost,
   EvaluationFeedback,
-  CertificateDownloadRecord
+  CertificateDownloadRecord,
+  SpeakerProfile
 } from '../types.ts';
 import { REGIONAL_CITIES, PROFESSIONAL_ROLES, INITIAL_SCHEDULE } from '../data/initialData.ts';
 import {
@@ -132,6 +135,11 @@ interface AdminDashboardProps {
   onToggleCertificateIssued?: (id: string) => void;
   onReleaseAllPresentCertificates?: () => number;
   onPreviewCertificate?: (attendee: Registration) => void;
+  speakers?: SpeakerProfile[];
+  onUpdateSpeaker?: (speaker: SpeakerProfile) => void;
+  onAddSpeaker?: (speaker: SpeakerProfile) => void;
+  onDeleteSpeaker?: (id: string) => void;
+  onResetSpeakers?: () => void;
   firebaseSyncState?: FirebaseSyncState;
   onConnectFirebaseAdmin?: () => Promise<void>;
   onDisconnectFirebaseAdmin?: () => Promise<void>;
@@ -162,11 +170,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onToggleCertificateIssued,
   onReleaseAllPresentCertificates,
   onPreviewCertificate,
+  speakers = [],
+  onUpdateSpeaker,
+  onAddSpeaker,
+  onDeleteSpeaker,
+  onResetSpeakers,
   firebaseSyncState,
   onConnectFirebaseAdmin,
   onDisconnectFirebaseAdmin
 }) => {
-  const [activeTab, setActiveTab] = useState<'analytics' | 'attendees' | 'certificates' | 'materials' | 'posts' | 'notifications' | 'subscribers' | 'customizer'>('analytics');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'attendees' | 'certificates' | 'materials' | 'posts' | 'notifications' | 'subscribers' | 'customizer' | 'speakers'>('analytics');
   const [customizerSubView, setCustomizerSubView] = useState<'event' | 'badge'>('event');
   const [isGoogleFormsModalOpen, setIsGoogleFormsModalOpen] = useState(false);
   const [filterOrigin, setFilterOrigin] = useState<'all' | 'portal' | 'google_forms'>('all');
@@ -203,6 +216,122 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     fileName: '',
     externalUrl: ''
   });
+
+  // Speakers Management State & Handlers
+  const [speakerSearch, setSpeakerSearch] = useState('');
+  const [speakerGroupFilter, setSpeakerGroupFilter] = useState<'todos' | SpeakerProfile['sessionGroup']>('todos');
+  const [editingSpeaker, setEditingSpeaker] = useState<SpeakerProfile | null>(null);
+  const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
+  const [speakerToDelete, setSpeakerToDelete] = useState<SpeakerProfile | null>(null);
+  const [speakerNotice, setSpeakerNotice] = useState<{ type: 'success' | 'warning' | 'info'; text: string } | null>(null);
+
+  const [speakerFormData, setSpeakerFormData] = useState({
+    id: '',
+    name: '',
+    role: '',
+    institution: '',
+    sessionGroup: 'abertura' as SpeakerProfile['sessionGroup'],
+    sessionLabel: '',
+    sessionTime: '',
+    photoUrl: '',
+    bio: '',
+    instagramUrl: '',
+    linkedinUrl: '',
+    lattesUrl: ''
+  });
+
+  const handleOpenAddSpeaker = () => {
+    setEditingSpeaker(null);
+    setSpeakerFormData({
+      id: '',
+      name: '',
+      role: '',
+      institution: '',
+      sessionGroup: 'abertura',
+      sessionLabel: 'Sessão Solene de Abertura & Conferência Magna',
+      sessionTime: '08h30 às 09h30',
+      photoUrl: '',
+      bio: '',
+      instagramUrl: '',
+      linkedinUrl: '',
+      lattesUrl: ''
+    });
+    setIsSpeakerModalOpen(true);
+  };
+
+  const handleOpenEditSpeaker = (spk: SpeakerProfile) => {
+    setEditingSpeaker(spk);
+    setSpeakerFormData({
+      id: spk.id,
+      name: spk.name,
+      role: spk.role,
+      institution: spk.institution,
+      sessionGroup: spk.sessionGroup,
+      sessionLabel: spk.sessionLabel,
+      sessionTime: spk.sessionTime,
+      photoUrl: spk.photoUrl || '',
+      bio: spk.bio,
+      instagramUrl: spk.socials?.instagramUrl || '',
+      linkedinUrl: spk.socials?.linkedinUrl || '',
+      lattesUrl: spk.socials?.lattesUrl || ''
+    });
+    setIsSpeakerModalOpen(true);
+  };
+
+  const handleSaveSpeakerSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!speakerFormData.name.trim() || !speakerFormData.role.trim()) {
+      setSpeakerNotice({ type: 'warning', text: 'Por favor, informe ao menos o nome completo e a especialidade/cargo do palestrante.' });
+      return;
+    }
+
+    const speakerId = editingSpeaker?.id || (speakerFormData.id ? speakerFormData.id : `spk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
+    const savedProfile: SpeakerProfile = {
+      id: speakerId,
+      name: speakerFormData.name.trim(),
+      role: speakerFormData.role.trim(),
+      institution: speakerFormData.institution.trim() || 'Secretaria Municipal de Saúde',
+      sessionGroup: speakerFormData.sessionGroup,
+      sessionLabel: speakerFormData.sessionLabel.trim() || 'Apresentação Técnica',
+      sessionTime: speakerFormData.sessionTime.trim() || '09h00 às 10h00',
+      photoUrl: speakerFormData.photoUrl.trim() || undefined,
+      bio: speakerFormData.bio.trim(),
+      socials: {
+        instagramUrl: speakerFormData.instagramUrl.trim() || undefined,
+        linkedinUrl: speakerFormData.linkedinUrl.trim() || undefined,
+        lattesUrl: speakerFormData.lattesUrl.trim() || undefined
+      }
+    };
+
+    if (editingSpeaker) {
+      onUpdateSpeaker?.(savedProfile);
+      setSpeakerNotice({ type: 'success', text: `Palestrante "${savedProfile.name}" atualizado com sucesso!` });
+    } else {
+      onAddSpeaker?.(savedProfile);
+      setSpeakerNotice({ type: 'success', text: `Palestrante "${savedProfile.name}" adicionado com sucesso!` });
+    }
+
+    setIsSpeakerModalOpen(false);
+    setEditingSpeaker(null);
+    setTimeout(() => setSpeakerNotice(null), 4000);
+  };
+
+  const handleConfirmDeleteSpeaker = () => {
+    if (!speakerToDelete) return;
+    const name = speakerToDelete.name;
+    onDeleteSpeaker?.(speakerToDelete.id);
+    setSpeakerToDelete(null);
+    setSpeakerNotice({ type: 'success', text: `Palestrante "${name}" removido com sucesso.` });
+    setTimeout(() => setSpeakerNotice(null), 4000);
+  };
+
+  const handleConfirmResetSpeakers = () => {
+    if (window.confirm('Deseja realmente restaurar os palestrantes oficiais do Simpósio? Alterações personalizadas serão substituídas pela lista padrão.')) {
+      onResetSpeakers?.();
+      setSpeakerNotice({ type: 'info', text: 'Lista oficial de palestrantes restaurada.' });
+      setTimeout(() => setSpeakerNotice(null), 4000);
+    }
+  };
 
   // Light Theme Enforced (Dark theme removed per request)
   const isDarkMode = false;
@@ -1517,9 +1646,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        {/* Tab Navigation: As 8 Opções Oficiais do Painel Gestor */}
+        {/* Tab Navigation: Painel Gestor com Palestrantes Editáveis */}
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 border-t border-white/10 pt-3 pb-3">
-          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-9 gap-2 sm:gap-2.5">
             {/* 1. Análises & Estatísticas */}
             <button
               type="button"
@@ -1618,6 +1747,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   activeTab === 'certificates' ? 'text-white/85' : 'text-stone-400'
                 }`}>
                   Downloads & layout
+                </div>
+              </div>
+            </button>
+
+            {/* 4. Palestrantes & Convidados */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('speakers')}
+              className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl text-left transition-all cursor-pointer flex flex-col justify-between border ${
+                activeTab === 'speakers'
+                  ? 'bg-[#ea7a38] text-white border-[#ea7a38] shadow-md ring-2 ring-white/30'
+                  : 'bg-white/5 hover:bg-white/10 text-stone-200 border-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1.5 mb-1.5 sm:mb-2">
+                <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  activeTab === 'speakers' ? 'bg-white/20 text-white' : 'bg-teal-600 text-white'
+                }`}>
+                  <GraduationCap className="w-4 h-4" />
+                </div>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                  activeTab === 'speakers' ? 'bg-white text-[#ea7a38]' : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                }`}>
+                  {speakers.length}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs sm:text-xs md:text-sm font-bold leading-tight">
+                  Palestrantes ({speakers.length})
+                </div>
+                <div className={`text-[10px] sm:text-[11px] leading-tight mt-0.5 ${
+                  activeTab === 'speakers' ? 'text-white/85' : 'text-stone-400'
+                }`}>
+                  Mesa, biografia & links
                 </div>
               </div>
             </button>
@@ -3460,6 +3623,626 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           </div>
         )}
+
+        {/* TAB: PALESTRANTES E CORPO TÉCNICO EDITÁVEL */}
+        {activeTab === 'speakers' && (() => {
+          const filteredAdminSpeakers = speakers.filter((spk) => {
+            const q = speakerSearch.trim().toLowerCase();
+            const matchesGroup =
+              speakerGroupFilter === 'todos' ||
+              spk.sessionGroup === speakerGroupFilter;
+            if (!matchesGroup) return false;
+            if (!q) return true;
+            return (
+              spk.name.toLowerCase().includes(q) ||
+              spk.role.toLowerCase().includes(q) ||
+              spk.institution.toLowerCase().includes(q) ||
+              spk.sessionLabel.toLowerCase().includes(q) ||
+              spk.bio.toLowerCase().includes(q)
+            );
+          });
+
+          const getSpeakerInitials = (name: string): string => {
+            const clean = name.replace(/^(Dra?\.ª?|Dr\.|Enf\.|Psic\.)\s+/i, '').trim();
+            const parts = clean.split(/\s+/).filter(Boolean);
+            if (parts.length === 0) return 'SM';
+            if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+            return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+          };
+
+          const getGroupBadge = (group: SpeakerProfile['sessionGroup']) => {
+            switch (group) {
+              case 'mesa-1':
+                return { label: 'Mesa 1 · RAPS', bg: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+              case 'mesa-2':
+                return { label: 'Mesa 2 · Urgência & Hospital', bg: 'bg-amber-50 text-amber-800 border-amber-200' };
+              case 'mesa-3':
+                return { label: 'Mesa 3 · Justiça & Direitos', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
+              default:
+                return { label: 'Abertura & Mediação', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+            }
+          };
+
+          return (
+            <div className="space-y-6">
+              {/* Cloud Sync Status Banner */}
+              {firebaseSyncState?.isVerifiedAdmin ? (
+                <div className="p-3.5 rounded-2xl border border-emerald-200 bg-emerald-50/90 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <Cloud className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>
+                      <strong>Nuvem Firebase Conectada:</strong> qualquer edição de palestrante, bio, foto ou links é salva na nuvem e exibida instantaneamente para todos os participantes na página pública.
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[11px] shrink-0">
+                    Sincronizado
+                  </span>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl border border-amber-300 bg-amber-50 text-amber-950 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-start gap-2.5">
+                    <CloudOff className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block text-amber-900">Armazenamento Local Ativo (Para nuvem pública, conecte o Gestor)</strong>
+                      <span className="text-amber-800/90">
+                        Os palestrantes cadastrados ou editados ficam salvos neste navegador. Para que apareçam na nuvem para todos os usuários externos, entre com a conta oficial (<span className="font-mono">farmaciademinas.marketing@gmail.com</span>).
+                      </span>
+                    </div>
+                  </div>
+                  {onConnectFirebaseAdmin && (
+                    <button
+                      type="button"
+                      onClick={onConnectFirebaseAdmin}
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs cursor-pointer shrink-0"
+                    >
+                      <Cloud className="w-3.5 h-3.5 text-[#ea7a38]" />
+                      <span>Conectar Firebase</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Notice Banner */}
+              {speakerNotice && (
+                <div className={`p-3.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 border animate-in fade-in ${
+                  speakerNotice.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : speakerNotice.type === 'warning'
+                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{speakerNotice.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSpeakerNotice(null)}
+                    className="p-1 hover:bg-black/5 rounded cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Top Controls: Search, Filters & Action Buttons */}
+              <div className={`p-4 sm:p-5 rounded-2xl border ${theme.card} space-y-4`}>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-[#0a3641] flex items-center gap-2">
+                      <GraduationCap className="w-5 h-5 text-[#ea7a38]" />
+                      <span>Gestão de Palestrantes & Mediadores</span>
+                      <span className="text-xs font-normal text-stone-500">({speakers.length} cadastrados)</span>
+                    </h2>
+                    <p className="text-xs text-stone-600 mt-0.5">
+                      Edite nomes, títulos, biografias, fotos e links sociais (Instagram, LinkedIn, Currículo Lattes) que aparecem na plataforma pública.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenAddSpeaker}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#ea7a38] hover:bg-[#d96522] rounded-xl shadow-xs cursor-pointer transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Novo Palestrante</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmResetSpeakers}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl border border-stone-200 cursor-pointer transition-all"
+                      title="Restaura a lista oficial padrão de palestrantes do Simpósio"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-stone-500" />
+                      <span>Restaurar Oficiais</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter and Search Bar */}
+                <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-2 border-t border-stone-100">
+                  {/* Search Input */}
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nome, especialidade, instituição ou tema..."
+                      value={speakerSearch}
+                      onChange={(e) => setSpeakerSearch(e.target.value)}
+                      className={`w-full pl-9 pr-8 py-2 text-xs rounded-xl border ${theme.input} focus:outline-none`}
+                    />
+                    {speakerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setSpeakerSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Group Filter Tabs */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { id: 'todos', label: 'Todos' },
+                      { id: 'abertura', label: 'Abertura' },
+                      { id: 'mesa-1', label: 'Mesa 1 · RAPS' },
+                      { id: 'mesa-2', label: 'Mesa 2 · Urgência' },
+                      { id: 'mesa-3', label: 'Mesa 3 · Direitos' }
+                    ].map((tab) => {
+                      const isSelected = speakerGroupFilter === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setSpeakerGroupFilter(tab.id as 'todos' | SpeakerProfile['sessionGroup'])}
+                          className={`px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer border ${
+                            isSelected
+                              ? 'bg-[#0a3641] text-white border-[#0a3641]'
+                              : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Speaker Cards Grid */}
+              {filteredAdminSpeakers.length === 0 ? (
+                <div className={`p-12 text-center rounded-2xl border ${theme.card}`}>
+                  <GraduationCap className="w-12 h-12 text-stone-300 mx-auto mb-3" />
+                  <h3 className="text-sm font-bold text-stone-800">Nenhum palestrante encontrado</h3>
+                  <p className="text-xs text-stone-500 mt-1 max-w-md mx-auto">
+                    Não encontramos nenhum palestrante correspondente à busca ou ao filtro selecionado. Tente alterar o filtro ou clique em "Novo Palestrante".
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddSpeaker}
+                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#ea7a38] hover:bg-[#d96522] rounded-xl cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Adicionar Palestrante</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {filteredAdminSpeakers.map((spk) => {
+                    const badge = getGroupBadge(spk.sessionGroup);
+                    const hasInstagram = Boolean(spk.socials?.instagramUrl || spk.socials?.instagram);
+                    const hasLinkedin = Boolean(spk.socials?.linkedinUrl || spk.socials?.linkedin);
+                    const hasLattes = Boolean(spk.socials?.lattesUrl);
+
+                    return (
+                      <div
+                        key={spk.id}
+                        className={`rounded-2xl border ${theme.card} p-4 sm:p-5 flex flex-col justify-between transition-all hover:shadow-md`}
+                      >
+                        <div>
+                          {/* Card Top: Photo/Initials + Badges */}
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div className="flex items-center gap-3">
+                              {spk.photoUrl ? (
+                                <img
+                                  src={spk.photoUrl}
+                                  alt={spk.name}
+                                  className="w-12 h-12 rounded-xl object-cover border border-stone-200 shadow-2xs shrink-0"
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                    e.currentTarget.parentElement?.querySelector('.fallback-initials')?.classList.remove('hidden');
+                                  }}
+                                />
+                              ) : null}
+                              <div
+                                className={`fallback-initials ${spk.photoUrl ? 'hidden' : 'flex'} w-12 h-12 rounded-xl bg-gradient-to-br from-[#0a3641] to-[#028090] text-white font-extrabold text-sm items-center justify-center shrink-0 shadow-2xs`}
+                              >
+                                {getSpeakerInitials(spk.name)}
+                              </div>
+
+                              <div>
+                                <h3 className="text-sm font-bold text-[#0a3641] leading-snug line-clamp-1">
+                                  {spk.name}
+                                </h3>
+                                <p className="text-xs font-medium text-stone-600 line-clamp-1">
+                                  {spk.role}
+                                </p>
+                                <p className="text-[11px] text-stone-500 line-clamp-1">
+                                  {spk.institution}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Session Info Badges */}
+                          <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded-md border ${badge.bg}`}>
+                              {badge.label}
+                            </span>
+                            <span className="px-2 py-0.5 text-[10px] font-semibold rounded-md bg-stone-100 text-stone-700 border border-stone-200">
+                              {spk.sessionTime || 'Horário oficial'}
+                            </span>
+                          </div>
+
+                          {/* Session Title */}
+                          <div className="text-xs font-semibold text-stone-700 mb-2 line-clamp-1 bg-stone-50 px-2 py-1 rounded-md border border-stone-150">
+                            {spk.sessionLabel}
+                          </div>
+
+                          {/* Bio Excerpt */}
+                          <p className="text-xs text-stone-600 line-clamp-3 leading-relaxed mb-3">
+                            {spk.bio}
+                          </p>
+
+                          {/* Social & Institutional Links */}
+                          <div className="pt-2.5 border-t border-stone-100 mb-3">
+                            <div className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-1.5">
+                              Links e Perfis Oficiais
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {hasInstagram && (
+                                <a
+                                  href={spk.socials?.instagramUrl || `https://instagram.com/${spk.socials?.instagram}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-pink-700 bg-pink-50 hover:bg-pink-100 rounded-md border border-pink-200 transition-colors"
+                                  title="Ver Instagram do palestrante"
+                                >
+                                  <Instagram className="w-3 h-3 text-pink-600" />
+                                  <span>Instagram</span>
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                                </a>
+                              )}
+                              {hasLinkedin && (
+                                <a
+                                  href={spk.socials?.linkedinUrl || `https://linkedin.com/in/${spk.socials?.linkedin}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-md border border-sky-200 transition-colors"
+                                  title="Ver LinkedIn do palestrante"
+                                >
+                                  <Linkedin className="w-3 h-3 text-sky-600" />
+                                  <span>LinkedIn</span>
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                                </a>
+                              )}
+                              {hasLattes && (
+                                <a
+                                  href={spk.socials?.lattesUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-md border border-emerald-200 transition-colors"
+                                  title="Acessar Currículo Lattes (CNPq)"
+                                >
+                                  <GraduationCap className="w-3 h-3 text-emerald-600" />
+                                  <span>Lattes CNPq</span>
+                                  <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                                </a>
+                              )}
+                              {!hasInstagram && !hasLinkedin && !hasLattes && (
+                                <span className="text-[11px] text-stone-400 italic">
+                                  Nenhum link externo cadastrado
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Footer Actions */}
+                        <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditSpeaker(spk)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-[#0a3641] bg-teal-50 hover:bg-teal-100 rounded-lg border border-teal-200 cursor-pointer transition-colors"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-[#028090]" />
+                            <span>Editar Palestrante</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSpeakerToDelete(spk)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200 cursor-pointer transition-colors"
+                            title="Remover palestrante"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Excluir</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Modal: Adicionar ou Editar Palestrante */}
+              {isSpeakerModalOpen && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+                  <div className={`relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-stone-200 overflow-hidden my-6 animate-in zoom-in-95 duration-150`}>
+                    {/* Modal Header */}
+                    <div className="bg-[#0a3641] text-white px-5 py-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <GraduationCap className="w-5 h-5 text-[#ea7a38]" />
+                        <h3 className="text-base font-bold">
+                          {editingSpeaker ? `Editar Palestrante: ${editingSpeaker.name}` : 'Cadastrar Novo Palestrante / Mediador'}
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSpeakerModalOpen(false)}
+                        className="p-1 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Modal Form */}
+                    <form onSubmit={handleSaveSpeakerSubmit} className="p-5 sm:p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        {/* Nome Completo */}
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1">
+                            Nome Completo *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ex: Dra. Raquel Martins Pinheiro"
+                            value={speakerFormData.name}
+                            onChange={(e) => setSpeakerFormData({ ...speakerFormData, name: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          />
+                        </div>
+
+                        {/* Cargo / Especialidade */}
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1">
+                            Cargo / Especialidade *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Ex: Supervisora Clínico-Institucional"
+                            value={speakerFormData.role}
+                            onChange={(e) => setSpeakerFormData({ ...speakerFormData, role: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          />
+                        </div>
+
+                        {/* Instituição */}
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1">
+                            Instituição / Vínculo
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: Ministério da Saúde / Fiocruz · CAPS AD"
+                            value={speakerFormData.institution}
+                            onChange={(e) => setSpeakerFormData({ ...speakerFormData, institution: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          />
+                        </div>
+
+                        {/* Grupo da Mesa */}
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1">
+                            Grupo da Mesa / Sessão *
+                          </label>
+                          <select
+                            value={speakerFormData.sessionGroup}
+                            onChange={(e) => {
+                              const group = e.target.value as SpeakerProfile['sessionGroup'];
+                              let defaultLabel = speakerFormData.sessionLabel;
+                              if (group === 'abertura') defaultLabel = 'Sessão Solene de Abertura & Conferência Magna';
+                              if (group === 'mesa-1') defaultLabel = 'Mesa 1 · Rede de Atenção Psicossocial (RAPS) Microrregional';
+                              if (group === 'mesa-2') defaultLabel = 'Mesa 2 · O Papel do Hospital Geral e da Urgência em Saúde Mental';
+                              if (group === 'mesa-3') defaultLabel = 'Mesa 3 · Saúde Mental, Direitos Humanos e Intersetorialidade';
+                              setSpeakerFormData({ ...speakerFormData, sessionGroup: group, sessionLabel: defaultLabel });
+                            }}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641] bg-white cursor-pointer"
+                          >
+                            <option value="abertura">Abertura & Mediação</option>
+                            <option value="mesa-1">Mesa 1 · RAPS e Atenção Básica</option>
+                            <option value="mesa-2">Mesa 2 · Urgência e Hospital Geral</option>
+                            <option value="mesa-3">Mesa 3 · Direitos Humanos e Justiça</option>
+                          </select>
+                        </div>
+
+                        {/* Título da Mesa */}
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1">
+                            Título da Apresentação / Mesa
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: Mesa 1 · Fortalecimento da RAPS Microrregional"
+                            value={speakerFormData.sessionLabel}
+                            onChange={(e) => setSpeakerFormData({ ...speakerFormData, sessionLabel: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          />
+                        </div>
+
+                        {/* Horário */}
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1">
+                            Horário da Apresentação
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: 09h30 às 11h30"
+                            value={speakerFormData.sessionTime}
+                            onChange={(e) => setSpeakerFormData({ ...speakerFormData, sessionTime: e.target.value })}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* URL da Foto */}
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1">
+                          URL da Foto de Perfil (Opcional)
+                        </label>
+                        <input
+                          type="url"
+                          placeholder="https://exemplo.com/foto-palestrante.jpg"
+                          value={speakerFormData.photoUrl}
+                          onChange={(e) => setSpeakerFormData({ ...speakerFormData, photoUrl: e.target.value })}
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                        />
+                        <p className="text-[11px] text-stone-500 mt-1">
+                          Cole o link direto da imagem (PNG ou JPG). Se deixar em branco, o sistema exibirá as iniciais com as cores institucionais do Simpósio.
+                        </p>
+                      </div>
+
+                      {/* Biografia / Currículo */}
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1">
+                          Resumo Biográfico / Minicurriculo *
+                        </label>
+                        <textarea
+                          required
+                          rows={4}
+                          placeholder="Descreva a trajetória técnica, formação acadêmica e contribuições na saúde mental..."
+                          value={speakerFormData.bio}
+                          onChange={(e) => setSpeakerFormData({ ...speakerFormData, bio: e.target.value })}
+                          className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
+                        />
+                      </div>
+
+                      {/* Redes Sociais e Links Oficiais */}
+                      <div className="p-3.5 bg-stone-50 rounded-xl border border-stone-200 space-y-3">
+                        <div className="text-xs font-bold text-[#0a3641] flex items-center gap-1.5">
+                          <Link2 className="w-4 h-4 text-[#ea7a38]" />
+                          <span>Links e Redes Oficiais do Palestrante</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {/* Instagram */}
+                          <div>
+                            <label className="block text-[11px] font-semibold text-stone-600 mb-1 flex items-center gap-1">
+                              <Instagram className="w-3.5 h-3.5 text-pink-600" />
+                              <span>Link do Instagram</span>
+                            </label>
+                            <input
+                              type="url"
+                              placeholder="https://instagram.com/usuario"
+                              value={speakerFormData.instagramUrl}
+                              onChange={(e) => setSpeakerFormData({ ...speakerFormData, instagramUrl: e.target.value })}
+                              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-stone-300 focus:outline-none bg-white"
+                            />
+                          </div>
+
+                          {/* LinkedIn */}
+                          <div>
+                            <label className="block text-[11px] font-semibold text-stone-600 mb-1 flex items-center gap-1">
+                              <Linkedin className="w-3.5 h-3.5 text-sky-600" />
+                              <span>Link do LinkedIn</span>
+                            </label>
+                            <input
+                              type="url"
+                              placeholder="https://linkedin.com/in/usuario"
+                              value={speakerFormData.linkedinUrl}
+                              onChange={(e) => setSpeakerFormData({ ...speakerFormData, linkedinUrl: e.target.value })}
+                              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-stone-300 focus:outline-none bg-white"
+                            />
+                          </div>
+
+                          {/* Lattes */}
+                          <div>
+                            <label className="block text-[11px] font-semibold text-stone-600 mb-1 flex items-center gap-1">
+                              <GraduationCap className="w-3.5 h-3.5 text-emerald-700" />
+                              <span>Currículo Lattes (CNPq)</span>
+                            </label>
+                            <input
+                              type="url"
+                              placeholder="http://lattes.cnpq.br/..."
+                              value={speakerFormData.lattesUrl}
+                              onChange={(e) => setSpeakerFormData({ ...speakerFormData, lattesUrl: e.target.value })}
+                              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-stone-300 focus:outline-none bg-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Modal Footer */}
+                      <div className="pt-3 border-t border-stone-200 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsSpeakerModalOpen(false)}
+                          className="px-4 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs cursor-pointer transition-all"
+                        >
+                          <Check className="w-4 h-4 text-[#ea7a38]" />
+                          <span>{editingSpeaker ? 'Salvar Alterações' : 'Cadastrar Palestrante'}</span>
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal de Exclusão com Confirmação */}
+              {speakerToDelete && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+                  <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-md w-full p-6 text-center animate-in zoom-in-95">
+                    <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+                      <Trash2 className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-base font-bold text-stone-900 mb-1">
+                      Excluir Palestrante?
+                    </h3>
+                    <p className="text-xs text-stone-600 mb-5">
+                      Tem certeza de que deseja remover <strong>"{speakerToDelete.name}"</strong>? Ele deixará de aparecer na programação e no mural de palestrantes da plataforma.
+                    </p>
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSpeakerToDelete(null)}
+                        className="px-4 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmDeleteSpeaker}
+                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer"
+                      >
+                        Confirmar Exclusão
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* TAB: MATERIAIS DE APOIO & PDFS */}
         {activeTab === 'materials' && (

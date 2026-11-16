@@ -1,4 +1,3 @@
-import html2pdf from 'html2pdf.js';
 import { EventConfig, SpeakerProfile } from '../types.ts';
 import { INITIAL_EVENT_CONFIG } from '../data/initialData.ts';
 
@@ -259,7 +258,8 @@ export const exportSpeakersPdf = async (
     document.body.appendChild(hostEl);
 
     const targetEl = hostEl.querySelector('.spk-pdf-doc') as HTMLElement | null;
-    const html2pdfLib = (html2pdf as any)?.default || html2pdf;
+    const html2pdfModule = await import('html2pdf.js');
+    const html2pdfLib = (html2pdfModule as any)?.default || html2pdfModule;
     if (targetEl && typeof html2pdfLib === 'function') {
       await html2pdfLib()
         .set({

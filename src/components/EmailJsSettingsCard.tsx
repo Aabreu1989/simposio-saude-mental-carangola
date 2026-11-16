@@ -107,41 +107,29 @@ export const EmailJsSettingsCard: React.FC<EmailJsSettingsCardProps> = ({
     };
 
     try {
-      const res = await sendEmailViaEmailJs(sampleParams, config, eventConfig);
-      if (res.success) {
+      const backendRes = await fetch('/api/email/confirm-registration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: 'CAR-SM-001',
+          resend: true
+        })
+      });
+
+      const backendData = await backendRes.json().catch(() => null);
+      if (backendRes.ok && backendData?.actuallySent) {
         setTestResult({
           success: true,
-          message: `E-mail de teste enviado com sucesso via ${res.provider}! Verifique a caixa postal ${testEmail}.`
+          message: `E-mail de teste enviado com sucesso via Gmail SMTP para ${testEmail}!`
         });
       } else {
-        const backendRes = await fetch('/api/email/confirm-registration', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: testEmail.trim(),
-            fullName: 'Participante de Teste',
-            code: 'SM-CAR-2026-TESTE',
-            subject: sampleParams.subject,
-            bodyHtml: sampleParams.message_html,
-            bodyText: sampleParams.message_text,
-            scheduleUrl,
-            certificateUrl,
-            programSummary: sampleParams.event_program
-          })
+        setTestResult({
+          success: false,
+          message:
+            backendData?.error ||
+            backendData?.message ||
+            `Servidor retornou erro (${backendRes.status}). Certifique-se de que SMTP_USER e SMTP_PASS estão definidos na Vercel.`
         });
-
-        const backendData = backendRes.ok ? await backendRes.json() : null;
-        if (backendData?.actuallySent) {
-          setTestResult({
-            success: true,
-            message: `Enviado com sucesso via servidor (${backendData.deliveryProvider === 'resend' ? 'Resend API' : 'SMTP'}) para ${testEmail}!`
-          });
-        } else {
-          setTestResult({
-            success: false,
-            message: `Nenhum provedor real de e-mail entregou a mensagem ainda. Cadastre as chaves do EmailJS acima (e salve) ou defina RESEND_API_KEY / SMTP_HOST nas variáveis de ambiente do servidor.`
-          });
-        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

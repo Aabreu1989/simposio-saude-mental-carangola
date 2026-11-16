@@ -21,7 +21,6 @@ import {
 import { openCertificatePrintWindow, downloadCertificateHTML } from '../utils/certificatePdfGenerator.ts';
 import { fetchCertificatePermissionByCode, CertificatePermissionRecord } from '../services/firebaseDb.ts';
 import { CertificateSheet } from './CertificateSheet.tsx';
-import html2pdf from 'html2pdf.js';
 
 interface CertificateModalProps {
   isOpen: boolean;
@@ -253,7 +252,8 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
         pagebreak: { mode: ['avoid-all', 'css'] }
       };
 
-      const html2pdfLib = (html2pdf as any).default || html2pdf;
+      const html2pdfModule = await import('html2pdf.js');
+      const html2pdfLib = (html2pdfModule as any).default || html2pdfModule;
       await html2pdfLib().set(options).from(certElement).save();
 
       onRecordDownload?.(foundAttendee, 'pdf');

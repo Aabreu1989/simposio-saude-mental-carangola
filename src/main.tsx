@@ -3,39 +3,6 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Google Maps Platform Quota Defense (Demo Key)
-if (typeof window !== 'undefined') {
-  try {
-    (window as any).gm_authFailure = () => {
-      window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-    };
-    const origError = console.error;
-    console.error = (...args: unknown[]) => {
-      try {
-        origError.apply(console, args);
-      } catch {
-        // ignore
-      }
-      try {
-        const msg = args.map((a) => {
-          try {
-            return String(a);
-          } catch {
-            return '';
-          }
-        }).join(' ');
-        if (msg.includes('OverQuotaMapError') || msg.includes('QuotaExceededError')) {
-          window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-        }
-      } catch {
-        // ignore
-      }
-    };
-  } catch {
-    // ignore
-  }
-}
-
 interface ErrorBoundaryProps {
   children: ReactNode;
 }
