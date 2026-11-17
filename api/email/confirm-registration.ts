@@ -718,18 +718,19 @@ export default async function handler(req: ExtendedRequest, res: ExtendedRespons
   }
 
   // 3. Validate registration & retrieve trusted email directly from Firestore
-  const lookupFn = customRegistrationLookupForTests || defaultFirestoreLookup;
+  const lookupFn: RegistrationLookupFn = customRegistrationLookupForTests || defaultFirestoreLookup;
   const lookupResult = await lookupFn(rawCode, rawRegId);
 
   if (!lookupResult.ok) {
+    const failedResult = lookupResult as Extract<RegistrationLookupResult, { ok: false }>;
     const emailStatus =
-      lookupResult.errorCode === 'FIREBASE_ADMIN_NOT_CONFIGURED' ? 'pending_config' : 'failed';
-    return res.status(lookupResult.httpStatus).json({
+      failedResult.errorCode === 'FIREBASE_ADMIN_NOT_CONFIGURED' ? 'pending_config' : 'failed';
+    return res.status(failedResult.httpStatus).json({
       success: false,
       actuallySent: false,
       emailStatus,
-      errorCode: lookupResult.errorCode,
-      error: lookupResult.error
+      errorCode: failedResult.errorCode,
+      error: failedResult.error
     });
   }
 
