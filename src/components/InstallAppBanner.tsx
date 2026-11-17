@@ -10,8 +10,7 @@ import {
   X,
   Sparkles,
   WifiOff,
-  ChevronRight,
-  Info
+  ChevronRight
 } from 'lucide-react';
 
 interface InstallAppBannerProps {
@@ -120,17 +119,6 @@ export const InstallAppBanner: React.FC<InstallAppBannerProps> = ({
             >
               <Download className="w-3.5 h-3.5" />
               <span>{isTriggering ? 'Abrindo...' : 'Baixar WebApp'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenInstallModal}
-              className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 text-white text-xs font-bold border border-white/20 transition-all cursor-pointer whitespace-nowrap"
-              title="Ver instruções de instalação para iPhone, Android e Computador"
-            >
-              <Info className="w-3.5 h-3.5 text-teal-300" />
-              <span className="hidden sm:inline">Como Instalar</span>
-              <span className="sm:hidden">Instruções</span>
             </button>
 
             <button

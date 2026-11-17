@@ -191,19 +191,6 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>Painel do Gestor</span>
                   </button>
 
-                  {/* Baixar WebApp Button for Desktop & Tablet */}
-                  {onOpenInstallApp && (
-                    <button
-                      type="button"
-                      onClick={onOpenInstallApp}
-                      className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-[#0a3641] bg-teal-50 hover:bg-teal-100 rounded-xl border border-teal-200/80 transition-colors whitespace-nowrap cursor-pointer shadow-2xs"
-                      title="Baixar ou instalar o WebApp do Simpósio no seu celular ou computador"
-                    >
-                      <Download className="w-3.5 h-3.5 text-teal-600" />
-                      <span>Baixar WebApp</span>
-                    </button>
-                  )}
-
                   {/* Registration Action: ALWAYS PRESENT ON ALL SCREENS - NEVER REMOVED */}
                   <button
                     type="button"

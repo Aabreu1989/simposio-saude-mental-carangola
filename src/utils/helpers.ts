@@ -234,12 +234,15 @@ export const loadStoredData = () => {
     }
   }
 
-  const EXAMPLE_POST_IDS = new Set([
-    'post-1','post-2','post-3','post-4','post-5','post-6','post-7','post-8'
-  ]);
   const deletedPostIds = getDeletedPostIds();
-  const rawPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, [])
-    .filter((p) => p && !deletedPostIds.has(p.id) && !EXAMPLE_POST_IDS.has(p.id));
+  const storedPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, INITIAL_SOCIAL_POSTS) || [];
+  const storedIds = new Set(storedPosts.map((p) => p.id));
+  const missingInitialPosts = INITIAL_SOCIAL_POSTS.filter(
+    (sp) => !storedIds.has(sp.id) && !deletedPostIds.has(sp.id)
+  );
+  const rawPosts = [...storedPosts, ...missingInitialPosts].filter(
+    (p) => p && !deletedPostIds.has(p.id)
+  );
   const mergedPosts: SocialPost[] = rawPosts
     .map((post, index) => ({
       ...post,
@@ -247,6 +250,8 @@ export const loadStoredData = () => {
       timestamp: typeof post.timestamp === 'number' ? post.timestamp : Date.now() - (index + 1) * 600000
     }))
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+  saveToStorage(STORAGE_KEYS.POSTS, mergedPosts);
 
   const EXAMPLE_REG_IDS = new Set([
     'reg-001','reg-002','reg-003','reg-004','reg-005',
