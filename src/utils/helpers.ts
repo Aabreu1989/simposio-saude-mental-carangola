@@ -209,27 +209,23 @@ export const loadStoredData = () => {
   ).filter((n) => n && !LEGACY_NOTIF_IDS.has(n.id));
 
   const rawStoredSpeakers = getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES);
-  const syncedSpeakers = (rawStoredSpeakers || []).map((spk) => {
-    const initialMatch = SPEAKERS_PROFILES.find((p) => p.id === spk.id);
-    if (!initialMatch) return spk;
-    let updated = { ...spk };
-    if (
-      (spk.id === 'spk-raquel-pinheiro' &&
-        spk.bio?.startsWith('Supervisora clínico-institucional vinculada ao projeto')) ||
-      (spk.id === 'spk-christine-vianna' &&
-        spk.bio?.startsWith('Supervisora clínico-institucional do Ministério da Saúde'))
-    ) {
-      updated.bio = initialMatch.bio;
-    }
-    // Sincroniza fotos padrão e enquadramento caso o usuário local ainda não tenha definido foto customizada
-    if (initialMatch.photoUrl && (!updated.photoUrl || updated.photoUrl.trim() === '')) {
-      updated.photoUrl = initialMatch.photoUrl;
-    }
-    if (initialMatch.photoPosition && (!updated.photoPosition || updated.photoPosition.trim() === '')) {
-      updated.photoPosition = initialMatch.photoPosition;
-    }
-    return updated;
-  });
+  const officialIds = new Set(SPEAKERS_PROFILES.map((s) => s.id));
+  const customStoredSpeakers = (rawStoredSpeakers || []).filter((s) => s && !officialIds.has(s.id));
+  const syncedSpeakers = [
+    ...SPEAKERS_PROFILES.map((initialMatch) => {
+      const stored = (rawStoredSpeakers || []).find((s) => s.id === initialMatch.id);
+      return {
+        ...initialMatch,
+        photoUrl: stored?.photoUrl || initialMatch.photoUrl,
+        photoPosition: stored?.photoPosition || initialMatch.photoPosition,
+        socials: {
+          ...initialMatch.socials,
+          ...(stored?.socials || {})
+        }
+      };
+    }),
+    ...customStoredSpeakers
+  ];
 
   return {
     config: loadedConfig,

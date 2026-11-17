@@ -594,12 +594,16 @@ export const generateScheduleHTML = (
     <!-- Official Signatures Area -->
     <div class="signatures">
       <div class="signature-box">
-        <strong>Coordenação do Simpósio de Saúde Mental</strong><br>
-        Secretaria Municipal de Saúde de Carangola - MG
+        <strong>Superintendência de Saúde Mental</strong><br>
+        Coordenação do Simpósio
       </div>
       <div class="signature-box">
-        <strong>Representante do Colegiado Gestor da RAPS</strong><br>
-        Microrregião de Carangola / COSEMS Zona da Mata
+        <strong>Supervisão Clínico Institucional da RAPS</strong><br>
+        Coordenação do Simpósio
+      </div>
+      <div class="signature-box">
+        <strong>Secretaria Municipal de Saúde de Carangola</strong><br>
+        Coordenação do Simpósio
       </div>
     </div>
 

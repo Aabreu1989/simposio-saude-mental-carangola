@@ -96,13 +96,11 @@ interface RegistrationModalProps {
   onSaveRegistration: (
     reg: Registration,
     isOfflineQueued: boolean
-  ) =>
-    | Promise<{
-        status: 'persisted' | 'already_exists' | 'queued' | 'error';
-        registration: Registration;
-        error?: string;
-      }>
-    | void;
+  ) => Promise<{
+    status: 'persisted' | 'already_exists' | 'queued' | 'error';
+    registration: Registration;
+    error?: string;
+  }>;
   onSubscribeNewsletter?: (sub: NewsletterSubscriber) => void;
   totalRegistered: number;
   existingCodes?: string[];

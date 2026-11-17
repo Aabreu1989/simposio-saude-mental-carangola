@@ -104,12 +104,17 @@ export const Footer: React.FC<FooterProps> = ({
             </div>
           </div>
 
-          {/* Comissão Organizadora & Painel */}
-          <div className="lg:col-span-3 space-y-2">
+          {/* Coordenação do Simpósio */}
+          <div className="lg:col-span-3 space-y-2.5">
             <h4 className="text-xs font-bold uppercase tracking-wider text-white font-mono">
-              Comissão Organizadora
+              Coordenação do Simpósio
             </h4>
-            <div className="space-y-1.5 text-xs text-stone-400">
+            <div className="space-y-1 text-xs text-stone-200">
+              <p className="font-semibold text-white">Superintendência de Saúde Mental</p>
+              <p className="font-semibold text-white">Supervisão clínico institucional da RAPS</p>
+              <p className="font-semibold text-white">Secretaria Municipal de Saúde de Carangola</p>
+            </div>
+            <div className="pt-1.5 space-y-1 text-xs text-stone-400">
               <div className="flex items-start gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-[#d96522] shrink-0 mt-0.5" />
                 <span className="leading-snug">{config.locationAddress}</span>

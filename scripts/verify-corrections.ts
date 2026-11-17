@@ -762,16 +762,25 @@ async function runTests() {
   const initialSpeakers = loadStoredData().speakers;
   const raquelSpk = initialSpeakers.find((s) => s.id === 'spk-raquel-pinheiro');
   const camilaSpk = initialSpeakers.find((s) => s.id === 'spk-camila-lima');
-  const gisellaSpk = initialSpeakers.find((s) => s.id === 'spk-gisella-consensa');
   const christineSpk = initialSpeakers.find((s) => s.id === 'spk-christine-vianna');
+  const martaSpk = initialSpeakers.find((s) => s.id === 'spk-marta-elizabeth');
+  const giseleSpk = initialSpeakers.find((s) => s.id === 'spk-gisele-souza');
+  const ricardoSpk = initialSpeakers.find((s) => s.id === 'spk-ricardo-moebus');
 
   assert(
     Boolean(
       raquelSpk?.photoUrl?.includes('164x1fTpuX5ccozFhrOyIII3Dda-EutZo') &&
       raquelSpk?.photoPosition === 'center 18%' &&
       camilaSpk?.photoUrl?.includes('1qPmMioljImchVKsJXMxcdD2DtBR-F5ea') &&
-      gisellaSpk?.photoUrl?.includes('1bfOsNTplIqDFlTgNeulg_0Bnx4fzZI7Z') &&
-      christineSpk?.photoUrl?.includes('1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY')
+      camilaSpk?.photoPosition === 'center 18%' &&
+      christineSpk?.photoUrl?.includes('1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY') &&
+      christineSpk?.photoPosition === 'center 18%' &&
+      martaSpk?.photoUrl?.includes('1wa5ODL3uWgnrpM89TvEBQwAoP3fKH_-d') &&
+      martaSpk?.photoPosition === 'center 18%' &&
+      giseleSpk?.photoUrl?.includes('1oTUz3LV55E7_oFaiJuonOk4UzpcFfZ-1') &&
+      giseleSpk?.photoPosition === 'center 18%' &&
+      ricardoSpk?.photoUrl?.includes('1xllBR5PaSr5y39gBITmcxU-tvRVTAv5U') &&
+      ricardoSpk?.photoPosition === 'center 18%'
     ),
     'Palestrantes oficiais possuem links de fotos normalizados e posicionamento anti-corte (center 18%) configurado',
     suite6
@@ -1609,6 +1618,290 @@ async function runTests() {
     sRules.includes("allow create: if isSignedIn()"),
     'storage.rules exige autenticação ativa para upload de fotografias no Social Wall',
     suite9
+  );
+
+  // =========================================================================
+  // SUITE 10: Auditoria Forense — Painel do Gestor & Busca de Inscritos
+  // =========================================================================
+  const suite10 = 'Auditoria Forense — Painel do Gestor & Busca';
+
+  const sampleAttendees: Registration[] = [
+    makeSampleRegistration({
+      id: 'reg-01',
+      code: 'CAR-SM-001',
+      fullName: 'Amanda Silva',
+      cpf: '111.222.333-44',
+      email: 'amandasabreu89@gmail.com',
+      city: 'Carangola',
+      status: 'confirmada',
+      professionalRole: 'Psicólogo(a)'
+    }),
+    makeSampleRegistration({
+      id: 'reg-02',
+      code: 'CAR-SM-002',
+      fullName: 'Carlos Eduardo',
+      cpf: '555.666.777-88',
+      email: 'amandajhonnes@yahoo.com.br',
+      city: 'Fervedouro',
+      status: 'presente',
+      professionalRole: 'Enfermeiro(a)'
+    }),
+    makeSampleRegistration({
+      id: 'reg-03',
+      code: 'CAR-SM-003',
+      fullName: 'Beatriz Santos',
+      cpf: '999.888.777-66',
+      email: 'mira.app@hotmail.com',
+      city: 'Espera Feliz',
+      status: 'confirmada',
+      professionalRole: 'Assistente Social'
+    }),
+    makeSampleRegistration({
+      id: 'reg-04',
+      code: 'CAR-SM-004',
+      fullName: 'Inscrito Sem Email',
+      cpf: '000.111.222-33',
+      email: '',
+      city: 'Carangola',
+      status: 'confirmada',
+      professionalRole: 'Médico(a)'
+    })
+  ];
+
+  const filterAttendeesLogic = (
+    regs: Registration[],
+    search: string,
+    city = 'all',
+    status = 'all'
+  ) => {
+    return regs.filter((reg) => {
+      const matchesSearch =
+        search.trim() === '' ||
+        reg.fullName.toLowerCase().includes(search.toLowerCase()) ||
+        (reg.email && reg.email.toLowerCase().includes(search.toLowerCase())) ||
+        reg.code.toLowerCase().includes(search.toLowerCase()) ||
+        reg.cpf.includes(search) ||
+        reg.institution.toLowerCase().includes(search.toLowerCase()) ||
+        reg.city.toLowerCase().includes(search.toLowerCase()) ||
+        reg.professionalRole.toLowerCase().includes(search.toLowerCase());
+
+      const matchesCity = city === 'all' || reg.city === city;
+      const matchesStatus = status === 'all' || reg.status === status;
+
+      return matchesSearch && matchesCity && matchesStatus;
+    });
+  };
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, 'amandasabreu89@gmail.com').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, 'amandasabreu89@gmail.com')[0].code === 'CAR-SM-001',
+    'Busca por e-mail completo localiza o participante correto',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, 'amanda').length === 2,
+    'Busca por parte do e-mail (amanda) localiza registros correspondentes (Gmail e Yahoo)',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, '@yahoo.com.br').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, '@yahoo.com.br')[0].code === 'CAR-SM-002',
+    'Busca por domínio (@yahoo.com.br) localiza participante com exatidão',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, 'AMANDASABREU89@GMAIL.COM').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, 'AMANDASABREU89@GMAIL.COM')[0].code === 'CAR-SM-001',
+    'Busca por e-mail é estritamente insensível a maiúsculas e minúsculas (case-insensitive)',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, '111.222.333-44').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, '111.222.333-44')[0].code === 'CAR-SM-001',
+    'Busca por CPF continua funcionando perfeitamente sem colisão com o e-mail',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, 'Beatriz Santos').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, 'Beatriz Santos')[0].email === 'mira.app@hotmail.com',
+    'Busca por nome completo preserva a correspondência com o e-mail oficial',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, '').length === 4,
+    'Busca em branco retorna todos os registros incluindo participantes sem e-mail',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, 'Sem Email').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, 'Sem Email')[0].code === 'CAR-SM-004',
+    'Registro sem e-mail não causa exceção ou falha de leitura na filtragem',
+    suite10
+  );
+
+  assert(
+    filterAttendeesLogic(sampleAttendees, 'amanda', 'Carangola', 'confirmada').length === 1 &&
+      filterAttendeesLogic(sampleAttendees, 'amanda', 'Carangola', 'confirmada')[0].code === 'CAR-SM-001',
+    'Filtros combinados (busca por e-mail + município + status) operam com lógica cumulativa (AND)',
+    suite10
+  );
+
+  const adminDashboardSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf-8');
+
+  assert(
+    adminDashboardSrc.includes('reg.email ? (') && adminDashboardSrc.includes('title={`E-mail cadastrado: ${reg.email}`'),
+    'AdminDashboard renderiza o e-mail oficial do participante nos cards da visualização mobile',
+    suite10
+  );
+
+  assert(
+    adminDashboardSrc.includes('title={`E-mail oficial de cadastro: ${reg.email}`'),
+    'AdminDashboard renderiza o e-mail oficial do participante na tabela da visualização desktop',
+    suite10
+  );
+
+  assert(
+    adminDashboardSrc.includes('(reg.email && reg.email.toLowerCase().includes(attendeeSearch.toLowerCase()))'),
+    'AdminDashboard inclui reg.email na cláusula matchesSearch da barra de pesquisa',
+    suite10
+  );
+
+  // =========================================================================
+  // SUITE 11: Auditoria Forense — Instalação PWA, WebApp Banner & Modal
+  // =========================================================================
+  const suite11 = 'Auditoria Forense — PWA & WebApp Install';
+
+  const manifestPath = path.join(process.cwd(), 'public/manifest.json');
+  assert(fs.existsSync(manifestPath), 'Arquivo public/manifest.json existe na raiz pública', suite11);
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  assert(
+    manifest.display === 'standalone' && manifest.start_url === '/' && manifest.theme_color === '#005BAC',
+    'Web App Manifest define display standalone, start_url / e theme_color oficial do SUS (#005BAC)',
+    suite11
+  );
+
+  assert(
+    Array.isArray(manifest.icons) && manifest.icons.length >= 2,
+    'Web App Manifest possui ícones de resolução mínima para Android e Desktop (192px e 512px)',
+    suite11
+  );
+
+  const swPath = path.join(process.cwd(), 'public/sw.js');
+  assert(fs.existsSync(swPath), 'Arquivo public/sw.js existe na raiz pública', suite11);
+
+  const swSrc = fs.readFileSync(swPath, 'utf-8');
+  assert(
+    swSrc.includes("url.pathname.startsWith('/api/')"),
+    'Service Worker exclui explicitamente endpoints /api/ de cacheamento indevido',
+    suite11
+  );
+
+  assert(
+    swSrc.includes('caches.match(event.request)') && swSrc.includes("event.request.mode === 'navigate'"),
+    'Service Worker implementa estratégia network-first com fallback para cache em modo offline',
+    suite11
+  );
+
+  const bannerPath = path.join(process.cwd(), 'src/components/InstallAppBanner.tsx');
+  assert(fs.existsSync(bannerPath), 'Componente InstallAppBanner.tsx implementado', suite11);
+
+  const bannerSrc = fs.readFileSync(bannerPath, 'utf-8');
+  assert(
+    !bannerSrc.includes("localStorage.getItem('pwa_") && !bannerSrc.includes("localStorage.setItem('pwa_"),
+    'InstallAppBanner NÃO bloqueia permanentemente via localStorage, garantindo exibição em toda entrada',
+    suite11
+  );
+
+  assert(
+    bannerSrc.includes('isDismissed') && bannerSrc.includes('fixed bottom-4 right-4'),
+    'Fechamento do banner recolhe para botão flutuante discreto sem desativar a funcionalidade',
+    suite11
+  );
+
+  const modalPath = path.join(process.cwd(), 'src/components/InstallAppModal.tsx');
+  assert(fs.existsSync(modalPath), 'Componente InstallAppModal.tsx implementado', suite11);
+
+  const modalSrc = fs.readFileSync(modalPath, 'utf-8');
+  assert(
+    modalSrc.includes("activeTab === 'android'") &&
+      modalSrc.includes("activeTab === 'ios'") &&
+      modalSrc.includes("activeTab === 'desktop'"),
+    'InstallAppModal disponibiliza abas e instruções dedicadas para Android, iOS (Safari) e Computador',
+    suite11
+  );
+
+  assert(
+    modalSrc.includes('Adicionar à Tela de Início') && modalSrc.includes('Compartilhar'),
+    'Instruções iOS guiam precisamente a ação manual nativa do Safari (Compartilhar -> Tela de Início)',
+    suite11
+  );
+
+  const headerSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/Header.tsx'), 'utf-8');
+  assert(
+    headerSrc.includes('onOpenInstallApp') && headerSrc.includes('Baixar WebApp Oficial'),
+    'Header disponibiliza botão na barra superior e card no menu gaveta mobile para baixar o WebApp',
+    suite11
+  );
+
+  // =========================================================================
+  // SUITE 12: Auditoria de Segurança Anti-Relay e Validação de E-mail
+  // =========================================================================
+  const suite12 = 'Auditoria Forense — Anti-Relay & Validação de E-mail';
+
+  resetEmailServerStateForTests();
+  const mockHttpRelay1 = createMockHttp('POST', {
+    code: 'CAR-SM-TEST01',
+    recipientEmail: 'hacker@malicious.com'
+  });
+  await emailHandler(mockHttpRelay1.req, mockHttpRelay1.res);
+  assert(
+    mockHttpRelay1.getStatus() === 400 &&
+      mockHttpRelay1.getData()?.errorCode === 'FORBIDDEN_CLIENT_PARAMETERS',
+    'Endpoint rejeita estritamente parâmetro proibido recipientEmail com HTTP 400 FORBIDDEN_CLIENT_PARAMETERS',
+    suite12
+  );
+
+  const mockHttpRelay2 = createMockHttp('POST', {
+    code: 'CAR-SM-TEST01',
+    recipientName: 'Fake Name'
+  });
+  await emailHandler(mockHttpRelay2.req, mockHttpRelay2.res);
+  assert(
+    mockHttpRelay2.getStatus() === 400 &&
+      mockHttpRelay2.getData()?.errorCode === 'FORBIDDEN_CLIENT_PARAMETERS',
+    'Endpoint rejeita estritamente parâmetro proibido recipientName com HTTP 400 FORBIDDEN_CLIENT_PARAMETERS',
+    suite12
+  );
+
+  const mockHttpRelay3 = createMockHttp('POST', {
+    code: 'CAR-SM-TEST01',
+    email: 'hacker2@malicious.com'
+  });
+  await emailHandler(mockHttpRelay3.req, mockHttpRelay3.res);
+  assert(
+    mockHttpRelay3.getStatus() === 400 &&
+      mockHttpRelay3.getData()?.errorCode === 'FORBIDDEN_CLIENT_PARAMETERS',
+    'Endpoint rejeita estritamente parâmetro proibido email com HTTP 400 FORBIDDEN_CLIENT_PARAMETERS',
+    suite12
+  );
+
+  const mockHttpInvalidCode = createMockHttp('POST', {
+    code: 'X'
+  });
+  await emailHandler(mockHttpInvalidCode.req, mockHttpInvalidCode.res);
+  assert(
+    mockHttpInvalidCode.getStatus() === 400 &&
+      mockHttpInvalidCode.getData()?.errorCode === 'INVALID_CODE',
+    'Endpoint rejeita códigos com tamanho inferior a 3 caracteres com HTTP 400 INVALID_CODE',
+    suite12
   );
 
   console.log('\n======================================================');

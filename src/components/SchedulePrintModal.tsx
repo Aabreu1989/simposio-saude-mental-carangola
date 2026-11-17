@@ -290,14 +290,18 @@ export const SchedulePrintModal: React.FC<SchedulePrintModalProps> = ({
                 <strong>Orientações de Frequência e Certificação:</strong> O credenciamento é obrigatório na chegada às 07h30. Para a emissão do certificado digital de 8 horas chancelado pela Secretaria Municipal de Saúde de Carangola, é exigida a permanência de no mínimo 75% da carga horária.
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4 text-center text-[11px] text-stone-700">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 text-center text-[11px] text-stone-700">
                 <div className="border-t border-stone-400 pt-2">
-                  <strong>Coordenação Geral do Simpósio</strong>
-                  <div className="text-[10px] text-stone-500">Secretaria Municipal de Saúde de Carangola</div>
+                  <strong>Superintendência de Saúde Mental</strong>
+                  <div className="text-[10px] text-stone-500">Coordenação do Simpósio</div>
                 </div>
                 <div className="border-t border-stone-400 pt-2">
-                  <strong>Colegiado Gestor da RAPS</strong>
-                  <div className="text-[10px] text-stone-500">Microrregião de Carangola / COSEMS-MG</div>
+                  <strong>Supervisão Clínico Institucional da RAPS</strong>
+                  <div className="text-[10px] text-stone-500">Coordenação do Simpósio</div>
+                </div>
+                <div className="border-t border-stone-400 pt-2">
+                  <strong>Secretaria Municipal de Saúde de Carangola</strong>
+                  <div className="text-[10px] text-stone-500">Coordenação do Simpósio</div>
                 </div>
               </div>
             </div>

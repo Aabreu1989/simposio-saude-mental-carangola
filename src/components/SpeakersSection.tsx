@@ -23,7 +23,6 @@ const LinkedInGlyph = ({ className = 'w-3.5 h-3.5' }: { className?: string }) =>
 
 const FILTER_TABS: Array<{ id: 'todos' | SpeakerProfile['sessionGroup']; label: string }> = [
   { id: 'todos', label: 'Todos' },
-  { id: 'abertura', label: 'Abertura & Mediação' },
   { id: 'mesa-1', label: 'Mesa 1 · RAPS' },
   { id: 'mesa-2', label: 'Mesa 2 · Hospital & Urgência' },
   { id: 'mesa-3', label: 'Mesa 3 · Justiça & Direitos' }
@@ -252,58 +251,68 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                     </div>
 
                     {/* Short Bio */}
-                    <p className="text-xs sm:text-[13px] text-stone-700 leading-relaxed whitespace-pre-line mb-4">
-                      {speaker.bio}
-                    </p>
+                    {speaker.bio ? (
+                      <p className="text-xs sm:text-[13px] text-stone-700 leading-relaxed whitespace-pre-line mb-4">
+                        {speaker.bio}
+                      </p>
+                    ) : null}
                   </div>
 
                   {/* Social Links Footer */}
-                  <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex flex-wrap items-center gap-3">
-                      {(speaker.socials?.instagramUrl || speaker.socials?.instagram) && (
-                        <a
-                          href={
-                            speaker.socials?.instagramUrl ||
-                            `https://www.instagram.com/${(speaker.socials?.instagram || '').replace(/^@/, '')}`
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-stone-600 hover:text-[#c13584] font-semibold transition-colors"
-                          title={`Instagram de ${speaker.name}`}
-                        >
-                          <InstagramGlyph className="w-3.5 h-3.5 text-[#c13584]" />
-                          <span className="truncate max-w-[140px]">
-                            {speaker.socials?.instagram || 'Instagram'}
-                          </span>
-                        </a>
-                      )}
-                      {(speaker.socials?.linkedinUrl || speaker.socials?.linkedin) && (
-                        <a
-                          href={speaker.socials?.linkedinUrl || 'https://www.linkedin.com/'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-stone-600 hover:text-[#0a66c2] font-semibold transition-colors"
-                          title={`LinkedIn de ${speaker.name}`}
-                        >
-                          <LinkedInGlyph className="w-3.5 h-3.5 text-[#0a66c2]" />
-                          <span>LinkedIn</span>
-                        </a>
-                      )}
-                      {speaker.socials?.lattesUrl && (
-                        <a
-                          href={speaker.socials.lattesUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-stone-600 hover:text-[#0a3641] font-semibold transition-colors"
-                          title={`Currículo Lattes de ${speaker.name}`}
-                        >
-                          <GraduationCap className="w-3.5 h-3.5 text-[#028090]" />
-                          <span>Lattes</span>
-                          <ExternalLink className="w-2.5 h-2.5 opacity-60" />
-                        </a>
-                      )}
+                  {Boolean(
+                    speaker.socials?.instagramUrl ||
+                      speaker.socials?.instagram ||
+                      speaker.socials?.linkedinUrl ||
+                      speaker.socials?.linkedin ||
+                      speaker.socials?.lattesUrl
+                  ) && (
+                    <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-3">
+                        {(speaker.socials?.instagramUrl || speaker.socials?.instagram) && (
+                          <a
+                            href={
+                              speaker.socials?.instagramUrl ||
+                              `https://www.instagram.com/${(speaker.socials?.instagram || '').replace(/^@/, '')}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-stone-600 hover:text-[#c13584] font-semibold transition-colors"
+                            title={`Instagram de ${speaker.name}`}
+                          >
+                            <InstagramGlyph className="w-3.5 h-3.5 text-[#c13584]" />
+                            <span className="truncate max-w-[140px]">
+                              {speaker.socials?.instagram || 'Instagram'}
+                            </span>
+                          </a>
+                        )}
+                        {(speaker.socials?.linkedinUrl || speaker.socials?.linkedin) && (
+                          <a
+                            href={speaker.socials?.linkedinUrl || 'https://www.linkedin.com/'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-stone-600 hover:text-[#0a66c2] font-semibold transition-colors"
+                            title={`LinkedIn de ${speaker.name}`}
+                          >
+                            <LinkedInGlyph className="w-3.5 h-3.5 text-[#0a66c2]" />
+                            <span>LinkedIn</span>
+                          </a>
+                        )}
+                        {speaker.socials?.lattesUrl && (
+                          <a
+                            href={speaker.socials.lattesUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-stone-600 hover:text-[#0a3641] font-semibold transition-colors"
+                            title={`Currículo Lattes de ${speaker.name}`}
+                          >
+                            <GraduationCap className="w-3.5 h-3.5 text-[#028090]" />
+                            <span>Lattes</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                          </a>
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </article>
               );
             })}

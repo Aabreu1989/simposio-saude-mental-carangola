@@ -56,6 +56,27 @@ export const EventIntroSection: React.FC = () => {
             </p>
           </div>
 
+          {/* Coordenação do Simpósio */}
+          <div className="rounded-2xl bg-white border border-stone-200/90 p-5 shadow-2xs space-y-2">
+            <span className="text-[11px] font-mono font-bold uppercase tracking-widest text-[#028090] block">
+              A Coordenação do Simpósio
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs sm:text-sm font-semibold text-[#0a3641]">
+              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/70 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#028090] shrink-0" />
+                <span>Superintendência de Saúde Mental</span>
+              </div>
+              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/70 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#ea7a38] shrink-0" />
+                <span>Supervisão clínico institucional da RAPS</span>
+              </div>
+              <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/70 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#0a3641] shrink-0" />
+                <span>Secretaria Municipal de Saúde de Carangola</span>
+              </div>
+            </div>
+          </div>
+
           {/* Highlighted Closing Manifesto */}
           <div className="pt-2">
             <div className="relative rounded-2xl bg-gradient-to-r from-[#0a3641] to-[#0d4654] text-white p-5 sm:p-6 shadow-sm overflow-hidden">

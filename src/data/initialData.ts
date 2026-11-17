@@ -72,7 +72,7 @@ export const INITIAL_EVENT_CONFIG: EventConfig = {
   certificateWorkload: 8,
   bannerImage: '/assets/banner-oficial-simposio-saude-mental-carangola.jpg',
   isRegistrationOpen: true,
-  organizer: 'Secretaria Municipal de Saúde de Carangola · Colegiado Gestor da RAPS Microrregional',
+  organizer: 'Superintendência de Saúde Mental · Supervisão clínico institucional da RAPS · Secretaria Municipal de Saúde de Carangola',
   googleFormsUrl: '',
   googleSheetsSyncUrl: '',
   enableGoogleFormsOption: false,
@@ -121,7 +121,7 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     title: 'Credenciamento',
     type: 'credenciamento',
     location: 'Hall de Entrada - UEMG Carangola',
-    description: 'Recepção dos participantes, validação de presença e retirada de crachás e materiais de apoio do simpósio.'
+    description: 'Credenciamento e recepção dos participantes.'
   },
   {
     id: 'sch-2',
@@ -130,7 +130,7 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     title: 'Café com acolhimento: um encontro para chegar, conversar e fortalecer vínculos.',
     type: 'credenciamento',
     location: 'Hall de Entrada / Pátio - UEMG Carangola',
-    description: 'Momento inicial de confraternização, chegada das equipes da microrregião e fortalecimento dos laços entre trabalhadores, usuários e familiares.'
+    description: 'Um encontro para chegar, conversar e fortalecer vínculos.'
   },
   {
     id: 'sch-3',
@@ -141,27 +141,22 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     location: 'Auditório UEMG Carangola',
     speakers: [
       {
-        name: 'Raquel Martins Pinheiro',
-        role: 'Supervisora Clínico Institucional',
-        institution: 'Ministério da Saúde / Fiocruz no CAPS ad de Carangola'
+        name: 'Superintendência de Saúde Mental',
+        role: 'Coordenação do Simpósio',
+        institution: 'Coordenação RAPS'
       },
       {
-        name: 'Christine Vianna Algarves Magalhães',
-        role: 'Supervisora Clínico Institucional',
-        institution: 'Ministério da Saúde e Fiocruz do CAPS I e do CAPS Infanto Juvenil'
+        name: 'Supervisão clínico institucional da RAPS',
+        role: 'Coordenação do Simpósio',
+        institution: 'Coordenação RAPS'
       },
       {
-        name: 'Gisella Loiola Consensa',
-        role: 'Secretária de Saúde',
-        institution: 'Secretaria Municipal de Saúde de Carangola'
-      },
-      {
-        name: 'Camila Lima',
-        role: 'Superintendente da Saúde Mental',
-        institution: 'Superintendência de Saúde Mental'
+        name: 'Secretaria Municipal de Saúde de Carangola',
+        role: 'Coordenação do Simpósio',
+        institution: 'Prefeitura de Carangola'
       }
     ],
-    description: 'Mesa solene de abertura com falas institucionais e afirmação do compromisso coletivo com o fortalecimento da RAPS na microrregião.'
+    description: 'Abertura oficial: Quando nos encontramos, a Rede ganha vida! Coordenação do Simpósio: Superintendência de Saúde Mental, Supervisão clínico institucional da RAPS e Secretaria Municipal de Saúde de Carangola.'
   },
   {
     id: 'sch-4',
@@ -170,22 +165,59 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     title: 'A arte que nos conecta',
     type: 'abertura',
     location: 'Auditório UEMG Carangola',
-    description: 'Apresentação cultural. Música com afeto: a arte como expressão, encontro e cuidado.'
+    description: 'Apresentação cultural.\nMúsica com afeto: a arte como expressão, encontro e cuidado.'
   },
   {
     id: 'sch-5',
     timeStart: '09:30',
     timeEnd: '11:30',
-    title: 'Mesa 1: Encontros, afetos e redes que produzem cuidado e liberdade.',
+    title: 'Mesa 1 Encontros, afetos e redes que produzem cuidado e liberdade.',
     type: 'mesa',
     axisId: 'eixo-1',
     location: 'Auditório UEMG Carangola',
     mediator: {
       name: 'Camila Lima',
-      role: 'Mediadora · Superintendente da Saúde Mental',
-      institution: 'Superintendência de Saúde Mental'
+      role: 'Mediadora',
+      institution: 'Mesa 1 · Fluxograma'
     },
-    description: 'Tema: Fluxograma da RAPS. Articulação entre Atenção Primária, CAPS e dispositivos do território para construção de fluxos integrados e Projetos Terapêuticos Singulares.'
+    speakers: [
+      {
+        name: 'Marta Elizabeth de Souza',
+        role: 'Psicóloga · Militante da Luta Antimanicomial em MG',
+        institution: 'CECO'
+      },
+      {
+        name: 'Patricia Amaral',
+        role: 'Debatedora',
+        institution: 'CAPS ij'
+      },
+      {
+        name: 'Flávia Silva Cardoso',
+        role: 'Debatedora',
+        institution: 'CAPS 1'
+      },
+      {
+        name: 'Kendyson Campos',
+        role: 'Debatedor',
+        institution: 'CAPS 1'
+      },
+      {
+        name: 'Lilian Oliveira',
+        role: 'Debatedora',
+        institution: 'CAPS ad'
+      },
+      {
+        name: 'Karina dos Santos Heitor',
+        role: 'Debatedora',
+        institution: 'CAPS ad'
+      },
+      {
+        name: 'Amanda Souza Lopes dos Santos',
+        role: 'Debatedora',
+        institution: 'CECO'
+      }
+    ],
+    description: 'Tema: Fluxograma'
   },
   {
     id: 'sch-6',
@@ -194,46 +226,75 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     title: 'Intervalo para almoço',
     type: 'intervalo',
     location: 'Pátio Central - UEMG Carangola',
-    description: 'Pausa para almoço e convivência entre as delegações e equipes participantes dos municípios da microrregião.'
+    description: '11:30 às 13:00h intervalo para almoço'
   },
   {
     id: 'sch-7',
     timeStart: '13:00',
     timeEnd: '14:30',
-    title: 'Mesa 2: Palavras que cuidam, histórias que transformam',
+    title: 'Mesa 2 Palavras que cuidam, histórias que transformam',
     type: 'mesa',
     axisId: 'eixo-2',
     location: 'Auditório UEMG Carangola',
     mediator: {
       name: 'Raquel Martins Pinheiro',
-      role: 'Mediadora · Supervisora Clínico Institucional',
-      institution: 'Ministério da Saúde / Fiocruz no CAPS ad de Carangola'
+      role: 'Mediadora',
+      institution: 'Mesa 2 · O hospital geral, leitos de retaguarda e pronto socorro'
     },
-    description: 'Tema: O hospital geral, leitos de retaguarda e pronto socorro. Acolhimento às crises, manejo humanizado e integração clínica na urgência e emergência.'
+    speakers: [
+      {
+        name: 'Gisele de Souza Gomes',
+        role: 'Assistente Social',
+        institution: 'UFJF · CAPS I Carangola'
+      },
+      {
+        name: 'Juliana',
+        role: 'Debatedora',
+        institution: 'GRS'
+      }
+    ],
+    description: 'Tema: O hospital geral, leitos de retaguarda e pronto socorro.'
   },
   {
     id: 'sch-8',
     timeStart: '14:30',
     timeEnd: '14:45',
-    title: 'Apresentação Centro de Convivência',
+    title: 'Apresentaçao Centro de Convivência',
     type: 'plenaria',
     location: 'Auditório UEMG Carangola',
-    description: 'Poemas que encantam: palavras que abraçam, provocam e fazem pensar. Momento cultural e de sensibilização.'
+    description: 'Poemas que encantam: palavras que abraçam, provocam e fazem pensar.\nMomento cultural e de sensibilização.'
   },
   {
     id: 'sch-9',
     timeStart: '14:45',
     timeEnd: '16:00',
-    title: 'Mesa 3: Redes que se encontram, cuidados que se constroem',
+    title: 'Mesa 3 Redes que se encontram, cuidados que se constroem',
     type: 'mesa',
     axisId: 'eixo-3',
     location: 'Auditório UEMG Carangola',
     mediator: {
       name: 'Christine Vianna Algarves Magalhães',
-      role: 'Mediadora · Supervisora Clínico Institucional',
-      institution: 'Ministério da Saúde e Fiocruz · CAPS I e CAPS Infanto Juvenil'
+      role: 'Mediadora',
+      institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade'
     },
-    description: 'Tema: A judicialização da saúde mental e o cuidado em liberdade. Diálogo intersetorial pela garantia de direitos e fortalecimento da Lei 10.216/2001.'
+    speakers: [
+      {
+        name: 'Cristiana Marina de Souza',
+        role: 'Debatedora',
+        institution: 'Mesa 3'
+      },
+      {
+        name: 'Marcos Alexandre',
+        role: 'Debatedor',
+        institution: 'Mesa 3'
+      },
+      {
+        name: 'Dr. Ricardo Luiz Narciso Moebus',
+        role: 'Médico Psiquiatra · Professor e Pesquisador',
+        institution: 'Escola de Medicina UFOP · CAPS Infância e Juventude Ouro Preto'
+      }
+    ],
+    description: 'Tema: A judicialização da saúde mental e o cuidado em liberdade'
   },
   {
     id: 'sch-10',
@@ -730,78 +791,181 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
 
 export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   {
+    id: 'spk-camila-lima',
+    name: 'Camila Lima',
+    role: 'Mediadora',
+    institution: 'Mesa 1 · Fluxograma',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1qPmMioljImchVKsJXMxcdD2DtBR-F5ea',
+    photoPosition: 'center 18%',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-patricia-amaral',
+    name: 'Patricia Amaral',
+    role: 'Debatedora',
+    institution: 'CAPS ij',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-flavia',
+    name: 'Flávia Silva Cardoso',
+    role: 'Debatedora',
+    institution: 'CAPS 1',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-kendyson',
+    name: 'Kendyson Campos',
+    role: 'Debatedor',
+    institution: 'CAPS 1',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-lilian',
+    name: 'Lilian Oliveira',
+    role: 'Debatedora',
+    institution: 'CAPS ad',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-karina',
+    name: 'Karina dos Santos Heitor',
+    role: 'Debatedora',
+    institution: 'CAPS ad',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-amanda',
+    name: 'Amanda Souza Lopes dos Santos',
+    role: 'Debatedora',
+    institution: 'CECO',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionTime: '09:30 – 11:30',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-marta-elizabeth',
+    name: 'Marta Elizabeth de Souza',
+    role: 'Psicóloga · Militante da Luta Antimanicomial em MG',
+    institution: 'CECO · Fórum Mineiro de Saúde Mental / RENILA',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1 · Fluxograma da RAPS',
+    sessionTime: '09:30 – 11:30',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1wa5ODL3uWgnrpM89TvEBQwAoP3fKH_-d',
+    photoPosition: 'center 18%',
+    bio: 'Psicóloga, militante da Luta Antimanicomial e integrante do Fórum Mineiro de Saúde Mental / RENILA.\n• Ex-Coordenadora Estadual de Saúde Mental da SES/MG - Secretaria de Estado de Saúde de Minas Gerais.\n• Presidente do CRP-MG - Conselho Regional de Psicologia - 4ª Região, XIII Plenário (Conselheira Presidente).\n• Coordenadora Interina Estadual de Saúde Mental/SES-MG em 2004, designada para a Comissão Nacional de Acompanhamento do Processo de Reestruturação da Assistência Hospitalar Psiquiátrica no SUS.',
+    socials: {}
+  },
+  {
     id: 'spk-raquel-pinheiro',
     name: 'Raquel Martins Pinheiro',
-    role: 'Supervisora Clínico-Institucional',
-    institution: 'Ministério da Saúde / Fiocruz · CAPS AD Carangola',
+    role: 'Mediadora',
+    institution: 'Mesa 2 · O hospital geral, leitos de retaguarda e pronto socorro',
     sessionGroup: 'mesa-2',
-    sessionLabel: 'Abertura Solene & Mediação Mesa 2',
-    sessionTime: '08:30 – 09:15 · 13:00 – 14:30',
+    sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
+    sessionTime: '13:00 – 14:30',
     photoUrl: 'https://lh3.googleusercontent.com/d/164x1fTpuX5ccozFhrOyIII3Dda-EutZo',
     photoPosition: 'center 18%',
-    bio: 'Terapeuta Ocupacional. Especialista em Saúde Mental. Experto em dependências (UCM - Espanha). MBA Executivo em Saúde. Especialista em Gestão de Redes de Atenção à Saúde. Ex-diretora e Terapeuta do Centro Mineiro de Toxicomania/ FHEMIG. Supervisora Clínico Institucional - Montes Claros (2012) / Itabira (2015) / Betim (2019) / Ubá (2021/2022) / Poços de Caldas (2022/2023) / Ibirité (2022/2023). Membro e fundadora da ONG/ Terceira Margem Prevenção e Pesquisa em Toxicomania.',
-    socials: {
-      instagram: '@capsad.carangola',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Raquel Martins Pinheiro · Fiocruz/MS',
-      linkedinUrl: 'https://www.linkedin.com/',
-      lattesUrl: 'https://lattes.cnpq.br/'
-    }
+    bio: 'Terapeuta Ocupacional. Especialista em Saúde Mental. Experto em dependências (UCM - Espanha). MBA Executivo em Saúde. Especialista em Gestão de Redes de Atenção à Saúde. Ex-diretora e Terapeuta do Centro Mineiro de Toxicomania/ FHEMIG. Supervisora Clínico Institucional.',
+    socials: {}
+  },
+  {
+    id: 'spk-gisele-souza',
+    name: 'Gisele de Souza Gomes',
+    role: 'Assistente Social · Especialista em Saúde Mental',
+    institution: 'UFJF · CAPS I Carangola',
+    sessionGroup: 'mesa-2',
+    sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
+    sessionTime: '13:00 – 14:30',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1oTUz3LV55E7_oFaiJuonOk4UzpcFfZ-1',
+    photoPosition: 'center 18%',
+    bio: 'Assistente Social, graduada pela Universidade Federal de Juiz de Fora (UFJF), especialista em Saúde Mental pela mesma instituição. Possui formação em Terapia Familiar e Psicanálise, além de participação no curso Nós na Rede, da Fundação Oswaldo Cruz (Fiocruz). Atua na área da Saúde Mental desde sua formação acadêmica, período em que participou de pesquisa nos hospitais psiquiátricos de Juiz de Fora. Possui experiência profissional em clínica psiquiátrica, tendo atuado também na construção da rede de atenção psicossocial de Carangola, integrando a primeira equipe do CAPS I do município.',
+    socials: {}
+  },
+  {
+    id: 'spk-juliana-grs',
+    name: 'Juliana',
+    role: 'Debatedora',
+    institution: 'GRS',
+    sessionGroup: 'mesa-2',
+    sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
+    sessionTime: '13:00 – 14:30',
+    bio: '',
+    socials: {}
   },
   {
     id: 'spk-christine-vianna',
     name: 'Christine Vianna Algarves Magalhães',
-    role: 'Supervisora Clínico-Institucional',
-    institution: 'Ministério da Saúde / Fiocruz · CAPS I e CAPS IJ',
+    role: 'Mediadora',
+    institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade',
     sessionGroup: 'mesa-3',
-    sessionLabel: 'Abertura Solene & Mediação Mesa 3',
-    sessionTime: '08:30 – 09:15 · 14:45 – 16:00',
+    sessionLabel: 'Mesa 3 · Judicialização e Direitos',
+    sessionTime: '14:45 – 16:00',
     photoUrl: 'https://lh3.googleusercontent.com/d/1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY',
     photoPosition: 'center 18%',
-    bio: 'Supervisora clínico institucional da Rede de Atenção Psicossocial de Carangola, RAPS.\n\nProfissional com graduação em Artes Plásticas pela Universidade do Estado de Minas Gerais (UEMG) e ampla formação acadêmica, com especializações em Análise Institucional, Esquizoanálise e Esquizodrama; Assistência aos Usuários de Álcool e Outras Drogas; Políticas de Saúde Mental e Atenção Psicossocial; Arteterapia; e Pesquisa e Ensino no Campo das Artes Plásticas. Possui sólida trajetória profissional nas áreas de Saúde Mental, Atenção Psicossocial, Educação Inclusiva e políticas públicas, com experiência no SUS desde 2000.',
-    socials: {
-      instagram: '@raps.carangola',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Christine Vianna · Fiocruz/MS',
-      linkedinUrl: 'https://www.linkedin.com/',
-      lattesUrl: 'https://lattes.cnpq.br/'
-    }
+    bio: 'Supervisora clínico institucional da Rede de Atenção Psicossocial de Carangola, RAPS.\n\nGraduação em Artes Plásticas pela Universidade do Estado de Minas Gerais (UEMG), com especializações em Análise Institucional, Esquizoanálise e Esquizodrama; Assistência aos Usuários de Álcool e Outras Drogas; Políticas de Saúde Mental e Atenção Psicossocial; Arteterapia; e Pesquisa e Ensino no Campo das Artes Plásticas. Experiência no SUS desde 2000.',
+    socials: {}
   },
   {
-    id: 'spk-camila-lima',
-    name: 'Camila Lima',
-    role: 'Superintendente de Saúde Mental',
-    institution: 'Superintendência de Saúde Mental',
-    sessionGroup: 'mesa-1',
-    sessionLabel: 'Abertura Solene & Mediação Mesa 1',
-    sessionTime: '08:30 – 09:15 · 09:30 – 11:30',
-    photoUrl: 'https://lh3.googleusercontent.com/d/1qPmMioljImchVKsJXMxcdD2DtBR-F5ea',
-    photoPosition: 'center 18%',
-    bio: 'Gestora pública à frente da Superintendência de Saúde Mental, articulando políticas microrregionais, educação permanente das equipes e implantação integrada da Rede de Atenção Psicossocial.',
-    socials: {
-      instagram: '@saudemental.carangola',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Camila Lima · Saúde Mental SUS',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
+    id: 'spk-cristiana-marina',
+    name: 'Cristiana Marina de Souza',
+    role: 'Debatedora',
+    institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade',
+    sessionGroup: 'mesa-3',
+    sessionLabel: 'Mesa 3 · Judicialização e Direitos',
+    sessionTime: '14:45 – 16:00',
+    bio: '',
+    socials: {}
   },
   {
-    id: 'spk-gisella-consensa',
-    name: 'Gisella Loiola Consensa',
-    role: 'Secretária Municipal de Saúde',
-    institution: 'Secretaria Municipal de Saúde de Carangola',
-    sessionGroup: 'abertura',
-    sessionLabel: 'Abertura Solene Oficial',
-    sessionTime: '08:30 – 09:15',
-    photoUrl: 'https://lh3.googleusercontent.com/d/1bfOsNTplIqDFlTgNeulg_0Bnx4fzZI7Z',
+    id: 'spk-marcos-alexandre',
+    name: 'Marcos Alexandre',
+    role: 'Debatedor',
+    institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade',
+    sessionGroup: 'mesa-3',
+    sessionLabel: 'Mesa 3 · Judicialização e Direitos',
+    sessionTime: '14:45 – 16:00',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-ricardo-moebus',
+    name: 'Dr. Ricardo Luiz Narciso Moebus',
+    role: 'Médico Psiquiatra · Professor e Pesquisador',
+    institution: 'Escola de Medicina UFOP · CAPS Infância e Juventude Ouro Preto',
+    sessionGroup: 'mesa-3',
+    sessionLabel: 'Mesa 3 · Judicialização e Direitos',
+    sessionTime: '14:45 – 16:00',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1xllBR5PaSr5y39gBITmcxU-tvRVTAv5U',
     photoPosition: 'center 18%',
-    bio: 'Secretária Municipal de Saúde de Carangola, liderando a cooperação interfederativa entre os municípios da microrregião para consolidação dos serviços de saúde pública e da RAPS no SUS.',
-    socials: {
-      instagram: '@saude.carangola',
-      instagramUrl: 'https://www.instagram.com/',
-      linkedin: 'Secretaria Municipal de Saúde · Carangola',
-      linkedinUrl: 'https://www.linkedin.com/'
-    }
+    bio: 'Médico psiquiatra, professor e pesquisador brasileiro.\n\nFormação Acadêmica:\n• Medicina: Universidade Federal de Minas Gerais (UFMG), formado em 1994.\n• Especialização: Psiquiatria e Psiquiatria da Infância e Adolescência pela Fundação Hospitalar do Estado de Minas Gerais (FHEMIG).\n• Mestrado e Doutorado: Medicina pela Universidade Federal do Rio de Janeiro (UFRJ).\n• Pós-doutorado: Racionalidades da Saúde pela Universidade Federal Fluminense (UFF).\n\nAtuação Profissional:\n• Docência: Professor associado do Departamento de Medicina de Família, Saúde Mental e Coletiva da Escola de Medicina da Universidade Federal de Ouro Preto (UFOP).\n• Saúde Pública: Atua como psiquiatra no CAPS Infância e Juventude em Ouro Preto, além de desenvolver pesquisas em áreas como saúde coletiva, dependências químicas.',
+    socials: {}
   }
 ];
 

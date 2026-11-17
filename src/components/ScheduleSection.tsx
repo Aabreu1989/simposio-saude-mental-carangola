@@ -213,10 +213,10 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
             </span>
 
             {[
-              { label: 'Raquel Martins Pinheiro (Mesa 2 · Supervisora)', query: 'Raquel' },
-              { label: 'Christine Vianna (Mesa 3 · Supervisora)', query: 'Christine' },
-              { label: 'Camila Lima (Mesa 1 · Superintendente)', query: 'Camila' },
-              { label: 'Gisella Loiola Consensa (Abertura · Sec. Saúde)', query: 'Gisella' }
+              { label: 'Mesa 1 (Fluxograma da RAPS · Camila Lima)', query: 'Mesa 1' },
+              { label: 'Mesa 2 (Hospital Geral & Urgência · Raquel Pinheiro)', query: 'Mesa 2' },
+              { label: 'Mesa 3 (Judicialização & Direitos · Christine Vianna)', query: 'Mesa 3' },
+              { label: 'Gisella Loiola Consensa (Abertura Oficial)', query: 'Gisella' }
             ].map((chip) => {
               const isSelected = searchTerm.toLowerCase().includes(chip.query.toLowerCase());
               return (
@@ -431,7 +431,9 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
                             className={`grid grid-cols-1 gap-3 ${
                               session.speakers.length === 4
                                 ? 'sm:grid-cols-2 lg:grid-cols-4'
-                                : 'sm:grid-cols-3'
+                                : session.speakers.length >= 5
+                                ? 'sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'
+                                : 'sm:grid-cols-2 md:grid-cols-3'
                             }`}
                           >
                             {session.speakers.map((spk, idx) => {

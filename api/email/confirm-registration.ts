@@ -599,6 +599,8 @@ export function buildServerInstitutionalEmail(record: TrustedRegistrationRecord)
 const FORBIDDEN_CLIENT_KEYS = [
   'to',
   'recipient',
+  'recipientEmail',
+  'recipientName',
   'email',
   'subject',
   'bodyHtml',
