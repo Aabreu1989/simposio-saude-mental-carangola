@@ -18,7 +18,9 @@ import {
   Award,
   Lock,
   Users,
-  Bell
+  Bell,
+  Smartphone,
+  Download
 } from 'lucide-react';
 import { isCertificateAvailableForPublic, CERTIFICATE_RELEASE_LABEL, sendBrowserNotification } from '../utils/helpers.ts';
 import { PushNotificationItem } from '../types.ts';
@@ -31,6 +33,7 @@ interface HeaderProps {
   onShare?: () => void;
   onOpenCalendar?: () => void;
   onOpenCertificate?: () => void;
+  onOpenInstallApp?: () => void;
   isMobileMenuOpen?: boolean;
   setIsMobileMenuOpen?: (open: boolean) => void;
   notifications?: PushNotificationItem[];
@@ -44,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   onShare,
   onOpenCalendar,
   onOpenCertificate,
+  onOpenInstallApp,
   isMobileMenuOpen: externalMenuOpen,
   setIsMobileMenuOpen: setExternalMenuOpen,
   notifications = []
@@ -186,6 +190,19 @@ export const Header: React.FC<HeaderProps> = ({
                     <Shield className="w-3.5 h-3.5 text-[#ea7a38]" />
                     <span>Painel do Gestor</span>
                   </button>
+
+                  {/* Baixar WebApp Button for Desktop & Tablet */}
+                  {onOpenInstallApp && (
+                    <button
+                      type="button"
+                      onClick={onOpenInstallApp}
+                      className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-[#0a3641] bg-teal-50 hover:bg-teal-100 rounded-xl border border-teal-200/80 transition-colors whitespace-nowrap cursor-pointer shadow-2xs"
+                      title="Baixar ou instalar o WebApp do Simpósio no seu celular ou computador"
+                    >
+                      <Download className="w-3.5 h-3.5 text-teal-600" />
+                      <span>Baixar WebApp</span>
+                    </button>
+                  )}
 
                   {/* Registration Action: ALWAYS PRESENT ON ALL SCREENS - NEVER REMOVED */}
                   <button
@@ -391,6 +408,29 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="text-[10px] font-mono font-bold text-stone-400 uppercase tracking-wider px-1">
                   Seções do Portal
                 </div>
+
+                {/* Baixar WebApp Card in Mobile Drawer */}
+                {onOpenInstallApp && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenInstallApp();
+                    }}
+                    className="w-full text-left p-3 rounded-2xl bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 hover:from-teal-100 hover:to-emerald-100 text-teal-950 text-xs sm:text-sm font-bold flex items-center gap-3 transition-all cursor-pointer border border-teal-300/80 shadow-2xs group"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0a3641] to-[#028090] text-white flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                      <Download className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[#0a3641] group-hover:text-teal-700 leading-snug break-words flex items-center gap-1.5 font-black">
+                        <span>Baixar WebApp Oficial</span>
+                        <span className="text-[9px] bg-[#ea7a38] text-white px-1.5 py-0.2 rounded-full font-mono uppercase">Offline</span>
+                      </div>
+                      <div className="text-[11px] text-stone-600 font-normal leading-snug break-words">Acesso direto na tela inicial sem gastar internet</div>
+                    </div>
+                  </button>
+                )}
 
                 <button
                   type="button"

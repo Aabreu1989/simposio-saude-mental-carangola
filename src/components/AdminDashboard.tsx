@@ -87,6 +87,11 @@ import {
   sendBroadcastEmailToAttendees
 } from '../services/confirmationEmailService.ts';
 import {
+  persistRegistrationAndPermissionInDb,
+  isVerifiedAdminUser,
+  firestoreAuth
+} from '../services/firebaseDb.ts';
+import {
   formatNotificationWhatsAppMessage,
   formatRegistrationWhatsAppMessage,
   createWhatsAppChatUrl,
@@ -681,6 +686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const matchesSearch =
       attendeeSearch.trim() === '' ||
       reg.fullName.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
+      (reg.email && reg.email.toLowerCase().includes(attendeeSearch.toLowerCase())) ||
       reg.code.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
       reg.cpf.includes(attendeeSearch) ||
       reg.institution.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
@@ -1547,7 +1553,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setResendingEmailRegId(reg.id);
     try {
-      const res = await sendRegistrationConfirmationEmail(reg, INITIAL_SCHEDULE, config);
+      let res = await sendRegistrationConfirmationEmail(reg, INITIAL_SCHEDULE, config, { resend: true });
+
+      // Se a inscrição não for encontrada no Firestore institucional (ex: dados legados em cache ou importados),
+      // sincroniza no Firestore caso o gestor esteja autenticado e reexecuta o disparo
+      if (!res.actuallyDelivered && res.errorCode === 'REGISTRATION_NOT_FOUND') {
+        try {
+          if (isVerifiedAdminUser(firestoreAuth.currentUser)) {
+            await persistRegistrationAndPermissionInDb(reg);
+            res = await sendRegistrationConfirmationEmail(reg, INITIAL_SCHEDULE, config, { resend: true });
+          }
+        } catch {
+          // prossegue com o resultado existente se a sincronização falhar
+        }
+      }
+
       if (res.actuallyDelivered) {
         setEmailResendToast({
           success: true,
@@ -1556,9 +1576,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       } else {
         const payload = buildRegistrationConfirmationEmail(reg, INITIAL_SCHEDULE, config);
         const mailtoHref = `mailto:${encodeURIComponent(reg.email)}?subject=${encodeURIComponent(payload.subject)}&body=${encodeURIComponent(payload.bodyText.slice(0, 1800))}`;
+        const reason = res.deliveryDetail || (res.errorCode ? `Erro: ${res.errorCode}` : 'Falha no servidor');
         setEmailResendToast({
           success: false,
-          message: `E-mail de ${reg.fullName} (${reg.code}) preparado, mas o Gmail SMTP não está conectado no servidor (.env). Configure SMTP_USER e SMTP_PASS ou envie direto pelo seu cliente de e-mail:`,
+          message: `E-mail de ${reg.fullName} (${reg.code}) preparado, mas o envio automático não foi concluído (${reason}). Você pode enviar direto pelo seu cliente de e-mail:`,
           mailtoHref
         });
       }
@@ -3374,6 +3395,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </span>
                           )}
                         </div>
+                        {reg.email ? (
+                          <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-teal-900 font-mono break-all bg-teal-50 px-2 py-1 rounded-lg border border-teal-200/70" title={`E-mail cadastrado: ${reg.email}`}>
+                            <Mail className="w-3 h-3 text-teal-600 shrink-0" />
+                            <span className="font-semibold">{reg.email}</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-stone-400 italic mt-0.5 font-mono">(sem e-mail cadastrado)</div>
+                        )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -3546,7 +3575,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </span>
                               )}
                             </div>
-                            <div className={`text-[11px] font-mono ${theme.textMuted}`}>CPF: {reg.cpf}</div>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                              <span className={`text-[11px] font-mono ${theme.textMuted}`}>CPF: {reg.cpf}</span>
+                              {reg.email ? (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-mono text-teal-900 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200/80 font-medium" title={`E-mail oficial de cadastro: ${reg.email}`}>
+                                  <Mail className="w-2.5 h-2.5 text-teal-600 shrink-0" />
+                                  <span>{reg.email}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-stone-400 italic font-mono">(sem e-mail)</span>
+                              )}
+                            </div>
                             {/* Redes Sociais */}
                             {(reg.instagram || reg.linkedin || reg.otherSocial) && (
                               <div className="flex flex-wrap items-center gap-2 mt-1">

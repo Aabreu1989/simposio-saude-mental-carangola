@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, Mail, MapPin, LifeBuoy } from 'lucide-react';
+import { Phone, Mail, MapPin, LifeBuoy, Smartphone } from 'lucide-react';
 import { EventConfig } from '../types.ts';
 import { CarangolaWavesRibbon } from './VisualAssets.tsx';
 
@@ -8,10 +8,12 @@ interface FooterProps {
   onOpenAdmin?: () => void;
   onOpenCertificate?: () => void;
   onOpenRegister?: () => void;
+  onOpenInstallApp?: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
   config,
+  onOpenInstallApp,
 }) => {
   return (
     <footer className="relative bg-[#07242c] text-stone-300">
@@ -137,6 +139,18 @@ export const Footer: React.FC<FooterProps> = ({
               © 2026 Sistema Único de Saúde (SUS) · Prefeitura Municipal de Carangola - MG.
             </span>
           </div>
+
+          {onOpenInstallApp && (
+            <button
+              type="button"
+              onClick={onOpenInstallApp}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-teal-200 hover:text-white transition-colors cursor-pointer text-xs font-semibold border border-white/10"
+              title="Baixar ou instalar o WebApp no celular ou computador"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-teal-400" />
+              <span>Baixar WebApp (PWA)</span>
+            </button>
+          )}
         </div>
 
       </div>

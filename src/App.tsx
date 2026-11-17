@@ -96,6 +96,8 @@ import { AddToCalendarModal } from './components/AddToCalendarModal.tsx';
 import { ShareModal } from './components/ShareModal.tsx';
 import { EventLocationMap } from './components/EventLocationMap.tsx';
 import { AlertBanner } from './components/AlertBanner.tsx';
+import { InstallAppBanner } from './components/InstallAppBanner.tsx';
+import { InstallAppModal } from './components/InstallAppModal.tsx';
 
 const getInitialView = (): 'public' | 'admin' | 'inscricao' => {
   if (typeof window !== 'undefined') {
@@ -149,6 +151,8 @@ export default function App() {
   // Modals state
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isCertificateOpen, setIsCertificateOpen] = useState(false);
+  const [isInstallAppModalOpen, setIsInstallAppModalOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [deepLinkCertCode, setDeepLinkCertCode] = useState<string | null>(null);
   const [managerCertAttendee, setManagerCertAttendee] = useState<Registration | null>(null);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
@@ -653,12 +657,19 @@ export default function App() {
       setIsOnline(false);
     };
 
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
 
@@ -1240,10 +1251,25 @@ export default function App() {
         onShare={() => setIsShareOpen(true)}
         onOpenCalendar={() => setIsCalendarOpen(true)}
         onOpenCertificate={handleOpenCertificate}
+        onOpenInstallApp={() => setIsInstallAppModalOpen(true)}
         isMobileMenuOpen={isMobileMenuOpen}
         setIsMobileMenuOpen={setIsMobileMenuOpen}
         notifications={notifications}
       />
+
+      {/* PWA / WebApp Install Banner: Appears every time someone enters the platform */}
+      {currentView === 'public' && (
+        <InstallAppBanner
+          onOpenInstallModal={() => setIsInstallAppModalOpen(true)}
+          deferredPrompt={deferredPrompt}
+          onInstallSuccess={() => {
+            sendBrowserNotification(
+              'WebApp Instalado com Sucesso!',
+              'O Simpósio de Saúde Mental Carangola agora está disponível na tela inicial do seu aparelho.'
+            );
+          }}
+        />
+      )}
 
       {/* Live Alert & Notification Banner for Public Portal */}
       {currentView === 'public' && (
@@ -1505,6 +1531,7 @@ export default function App() {
         }}
         onOpenCertificate={handleOpenCertificate}
         onOpenRegister={handleOpenRegistration}
+        onOpenInstallApp={() => setIsInstallAppModalOpen(true)}
       />
 
       {/* Registration Modal */}
@@ -1550,6 +1577,19 @@ export default function App() {
         isOpen={isShareOpen}
         onClose={() => setIsShareOpen(false)}
         config={config}
+      />
+
+      {/* WebApp Download / Install Modal */}
+      <InstallAppModal
+        isOpen={isInstallAppModalOpen}
+        onClose={() => setIsInstallAppModalOpen(false)}
+        deferredPrompt={deferredPrompt}
+        onInstallSuccess={() => {
+          sendBrowserNotification(
+            'WebApp Instalado com Sucesso!',
+            'O Simpósio de Saúde Mental Carangola agora está disponível na tela inicial do seu aparelho.'
+          );
+        }}
       />
 
     </div>
