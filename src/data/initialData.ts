@@ -797,7 +797,10 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     photoUrl: 'https://lh3.googleusercontent.com/d/1qPmMioljImchVKsJXMxcdD2DtBR-F5ea',
     photoPosition: 'center 18%',
     bio: '',
-    socials: {}
+    socials: {
+      instagram: '@saudemental.carangola',
+      instagramUrl: 'https://www.instagram.com/saudemental.carangola'
+    }
   },
   {
     id: 'spk-patricia-amaral',
@@ -889,7 +892,10 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     photoUrl: 'https://lh3.googleusercontent.com/d/164x1fTpuX5ccozFhrOyIII3Dda-EutZo',
     photoPosition: 'center 18%',
     bio: 'Terapeuta Ocupacional. Especialista em Saúde Mental. Experto em dependências (UCM - Espanha). MBA Executivo em Saúde. Especialista em Gestão de Redes de Atenção à Saúde. Ex-diretora e Terapeuta do Centro Mineiro de Toxicomania/ FHEMIG. Supervisora Clínico Institucional.',
-    socials: {}
+    socials: {
+      instagram: '@capsad.carangola',
+      instagramUrl: 'https://www.instagram.com/capsad.carangola'
+    }
   },
   {
     id: 'spk-gisele-souza',
@@ -926,7 +932,10 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     photoUrl: 'https://lh3.googleusercontent.com/d/1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY',
     photoPosition: 'center 18%',
     bio: 'Supervisora clínico institucional da Rede de Atenção Psicossocial de Carangola, RAPS.\n\nGraduação em Artes Plásticas pela Universidade do Estado de Minas Gerais (UEMG), com especializações em Análise Institucional, Esquizoanálise e Esquizodrama; Assistência aos Usuários de Álcool e Outras Drogas; Políticas de Saúde Mental e Atenção Psicossocial; Arteterapia; e Pesquisa e Ensino no Campo das Artes Plásticas. Experiência no SUS desde 2000.',
-    socials: {}
+    socials: {
+      instagram: '@raps.carangola',
+      instagramUrl: 'https://www.instagram.com/raps.carangola'
+    }
   },
   {
     id: 'spk-cristiana-marina',
