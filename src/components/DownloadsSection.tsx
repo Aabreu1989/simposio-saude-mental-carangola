@@ -23,7 +23,7 @@ import {
   Layers
 } from 'lucide-react';
 import { DownloadMaterial } from '../types.ts';
-import { isCertificateAvailableForPublic, CERTIFICATE_RELEASE_LABEL, triggerMaterialDownload } from '../utils/helpers.ts';
+import { isCertificateAvailableForPublic, CERTIFICATE_RELEASE_LABEL, triggerMaterialDownload, isProhibitedPrivateMaterial } from '../utils/helpers.ts';
 import { DocumentPreviewModal, getFileFormatDetails } from './DocumentPreviewModal.tsx';
 
 interface DownloadsSectionProps {
@@ -52,9 +52,16 @@ export const DownloadsSection: React.FC<DownloadsSectionProps> = ({
 
   const categories = ['all', 'Fluxograma', 'Apostila', 'Legislação', 'Apresentação', 'Cartilha'];
 
+  // Ensure prohibited or private documents are never rendered under any circumstances
+  const safeMaterials = useMemo(() => {
+    return materials.filter(
+      (m) => m && m.id !== 'mat-5' && m.id !== 'mat-0' && !isProhibitedPrivateMaterial(m)
+    );
+  }, [materials]);
+
   // Sort materials so newly added documents (from admin panel or cloud) appear first, followed by baseline materials
   const sortedMaterials = useMemo(() => {
-    return [...materials].sort((a, b) => {
+    return [...safeMaterials].sort((a, b) => {
       const timeA = a.createdAt ? Date.parse(a.createdAt) : 0;
       const timeB = b.createdAt ? Date.parse(b.createdAt) : 0;
       if (timeA !== timeB) return timeB - timeA;
@@ -65,17 +72,17 @@ export const DownloadsSection: React.FC<DownloadsSectionProps> = ({
       if (!aIsCustom && bIsCustom) return 1;
       return a.id.localeCompare(b.id);
     });
-  }, [materials]);
+  }, [safeMaterials]);
 
   // Counts by format
   const formatCounts = useMemo(() => {
     return {
-      all: materials.length,
-      pdf: materials.filter((m) => (m.format || 'PDF').toUpperCase() === 'PDF').length,
-      docx: materials.filter((m) => (m.format || '').toUpperCase() === 'DOCX').length,
-      zip: materials.filter((m) => (m.format || '').toUpperCase() === 'ZIP').length
+      all: safeMaterials.length,
+      pdf: safeMaterials.filter((m) => (m.format || 'PDF').toUpperCase() === 'PDF').length,
+      docx: safeMaterials.filter((m) => (m.format || '').toUpperCase() === 'DOCX').length,
+      zip: safeMaterials.filter((m) => (m.format || '').toUpperCase() === 'ZIP').length
     };
-  }, [materials]);
+  }, [safeMaterials]);
 
   const filteredMaterials = useMemo(() => {
     return sortedMaterials.filter((mat) => {

@@ -20,12 +20,34 @@ const STORAGE_KEYS = {
   SPEAKERS: 'carangola_sm_speakers'
 };
 
+export const isProhibitedPrivateMaterial = (m?: Partial<DownloadMaterial> | null): boolean => {
+  if (!m) return false;
+  if (m.id === 'mat-5' || m.id === 'mat-0') return true;
+  const title = (m.title || '').toLowerCase();
+  const fileName = (m.fileName || '').toLowerCase();
+  const fileUrl = (m.fileUrl || '').toLowerCase();
+  const description = (m.description || '').toLowerCase();
+  return (
+    title.includes('cessão de uso') ||
+    title.includes('cessao de uso') ||
+    title.includes('termo de responsabilidade') ||
+    fileName.includes('termo-de-responsabilidade') ||
+    fileName.includes('cessao-de-uso') ||
+    fileUrl.includes('termo-responsabilidade') ||
+    description.includes('termo oficial de cessão') ||
+    description.includes('cessão e responsabilidade de uso do auditório')
+  );
+};
+
 export const getDeletedMaterialIds = (): Set<string> => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DELETED_MATERIALS);
-    return new Set(raw ? JSON.parse(raw) : []);
+    const set = new Set<string>(raw ? JSON.parse(raw) : []);
+    set.add('mat-0');
+    set.add('mat-5');
+    return set;
   } catch {
-    return new Set();
+    return new Set(['mat-0', 'mat-5']);
   }
 };
 
@@ -33,6 +55,8 @@ export const addDeletedMaterialId = (id: string): void => {
   try {
     const set = getDeletedMaterialIds();
     set.add(id);
+    set.add('mat-0');
+    set.add('mat-5');
     localStorage.setItem(STORAGE_KEYS.DELETED_MATERIALS, JSON.stringify(Array.from(set)));
     broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_MATERIALS);
   } catch (err) {
@@ -135,17 +159,52 @@ export const loadStoredData = () => {
 
   const deletedMatIds = getDeletedMaterialIds();
   deletedMatIds.add('mat-0');
+  deletedMatIds.add('mat-5');
 
-  const storedMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
+  const rawStoredMaterials = getItem<DownloadMaterial[]>(STORAGE_KEYS.MATERIALS, INITIAL_MATERIALS);
+  const storedMaterials = (rawStoredMaterials || []).filter(
+    (m) => m && !deletedMatIds.has(m.id) && !isProhibitedPrivateMaterial(m) && m.id !== 'mat-5' && m.id !== 'mat-0'
+  );
+
+  // If local storage contains mat-5 or any private prohibited material from a previous session, clean it out immediately
+  if (
+    typeof localStorage !== 'undefined' &&
+    (rawStoredMaterials || []).some((m) => m && (isProhibitedPrivateMaterial(m) || m.id === 'mat-5' || m.id === 'mat-0'))
+  ) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(storedMaterials));
+      const delSet = getDeletedMaterialIds();
+      delSet.add('mat-5');
+      delSet.add('mat-0');
+      localStorage.setItem(STORAGE_KEYS.DELETED_MATERIALS, JSON.stringify(Array.from(delSet)));
+    } catch {
+      // ignore
+    }
+  }
+
   const existingStoredMatIds = new Set((storedMaterials || []).map((m) => m?.id));
   const missingInitialMaterials = INITIAL_MATERIALS.filter(
-    (m) => m && !existingStoredMatIds.has(m.id) && !deletedMatIds.has(m.id)
+    (m) =>
+      m &&
+      !existingStoredMatIds.has(m.id) &&
+      !deletedMatIds.has(m.id) &&
+      !isProhibitedPrivateMaterial(m) &&
+      m.id !== 'mat-5' &&
+      m.id !== 'mat-0'
   );
   const combinedMaterials = [...missingInitialMaterials, ...(storedMaterials || [])];
   let hadHugeInlineBlobInStorage = false;
 
   const syncedMaterials = combinedMaterials
-    .filter((m) => m && !deletedMatIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#')
+    .filter(
+      (m) =>
+        m &&
+        !deletedMatIds.has(m.id) &&
+        !isProhibitedPrivateMaterial(m) &&
+        m.id !== 'mat-0' &&
+        m.id !== 'mat-5' &&
+        m.fileUrl !== '#'
+    )
     .map((m) => {
       if (m.fileUrl?.startsWith('data:') && m.fileUrl.length > 100000) {
         hadHugeInlineBlobInStorage = true;
@@ -288,8 +347,11 @@ export const saveToStorage = (key: string, data: unknown) => {
 };
 
 export const saveMaterialsToStorageSafe = (materials: DownloadMaterial[]): { savedFull: boolean; quotaFallback: boolean } => {
+  const safeMaterials = materials.filter(
+    (m) => m && !isProhibitedPrivateMaterial(m) && m.id !== 'mat-5' && m.id !== 'mat-0'
+  );
   // Never write multi-megabyte data: URLs to localStorage; cache them in memory so UI stays fast
-  const sanitized = materials.map((mat) => {
+  const sanitized = safeMaterials.map((mat) => {
     if (mat.fileUrl?.startsWith('data:') && mat.fileUrl.length > 100000) {
       inMemoryMaterialBlobs.set(mat.id, mat.fileUrl);
       return {

@@ -672,19 +672,6 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     pages: 252,
     downloadsCount: 0,
     fileUrl: '/assets/livro-mais-substancias-trabalho-saude-drogas.pdf'
-  },
-  {
-    id: 'mat-5',
-    title: 'Termo de Responsabilidade de Cessão de Uso de Espaço - Auditório UEMG Carangola',
-    category: 'Legislação',
-    author: 'Secretaria Municipal de Saúde de Carangola & UEMG - Unidade Carangola',
-    format: 'PDF',
-    size: '452 KB',
-    fileName: 'Termo-de-Responsabilidade-Cessao-de-Uso-UEMG-Carangola.pdf',
-    description: 'Termo oficial de cessão e responsabilidade de uso do Auditório da Universidade do Estado de Minas Gerais (UEMG - Unidade Carangola) para a realização do 1º Simpósio de Saúde Mental do SUS, formalizado em 08/12/2026.',
-    pages: 3,
-    downloadsCount: 0,
-    fileUrl: '/assets/termo-responsabilidade-cessao-espaco-uemg.pdf'
   }
 ];
 

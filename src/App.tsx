@@ -29,6 +29,7 @@ import {
   isCertificateAvailableForPublic,
   getDeletedMaterialIds,
   addDeletedMaterialId,
+  isProhibitedPrivateMaterial,
   getDeletedRegistrationIds,
   addDeletedRegistrationId,
   getDeletedPostIds,
@@ -190,16 +191,47 @@ export default function App() {
 
     const unsubMaterials = subscribeDownloadMaterials((remoteMaterials) => {
       const deletedIds = getDeletedMaterialIds();
-      const validRemote = remoteMaterials.filter((m) => !deletedIds.has(m.id) && !m.deleted && m.id !== 'mat-0' && m.fileUrl !== '#');
+      deletedIds.add('mat-0');
+      deletedIds.add('mat-5');
+
+      // Purge prohibited or private documents from Firestore if encountered
+      remoteMaterials.forEach((m) => {
+        if (m && (isProhibitedPrivateMaterial(m) || m.id === 'mat-5' || m.id === 'mat-0')) {
+          deleteDownloadMaterialInDb(m.id).catch(() => {});
+        }
+      });
+
+      const validRemote = remoteMaterials.filter(
+        (m) =>
+          !deletedIds.has(m.id) &&
+          !isProhibitedPrivateMaterial(m) &&
+          !m.deleted &&
+          m.id !== 'mat-0' &&
+          m.id !== 'mat-5' &&
+          m.fileUrl !== '#'
+      );
 
       setMaterials((prev) => {
         const remoteIds = new Set(validRemote.map((m) => m.id));
-        // Manter apenas materiais locais que NÃO estão no remote E NÃO foram deletados
-        const localOnly = prev.filter((m) => !remoteIds.has(m.id) && !deletedIds.has(m.id) && m.id !== 'mat-0' && m.fileUrl !== '#');
+        // Manter apenas materiais locais que NÃO estão no remote E NÃO foram deletados e NÃO são privados
+        const localOnly = prev.filter(
+          (m) =>
+            !remoteIds.has(m.id) &&
+            !deletedIds.has(m.id) &&
+            !isProhibitedPrivateMaterial(m) &&
+            m.id !== 'mat-0' &&
+            m.id !== 'mat-5' &&
+            m.fileUrl !== '#'
+        );
 
         // NUNCA re-adicionar INITIAL_MATERIALS — se foram deletados, ficam deletados para sempre
         const allList = [...validRemote, ...localOnly].filter(
-          (item) => !deletedIds.has(item.id) && item.id !== 'mat-0' && item.fileUrl !== '#'
+          (item) =>
+            !deletedIds.has(item.id) &&
+            !isProhibitedPrivateMaterial(item) &&
+            item.id !== 'mat-0' &&
+            item.id !== 'mat-5' &&
+            item.fileUrl !== '#'
         );
         const uniqueMap = new Map<string, DownloadMaterial>();
         allList.forEach((item) => {
@@ -1124,21 +1156,44 @@ export default function App() {
     // 1. Immediately record in permanent blacklist so it can never be resurrected by snapshots or reloads
     addDeletedMaterialId(materialId);
 
-    // 2. Optimistically update local React state
+    // 2. Direct hard purge from localStorage
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const raw = localStorage.getItem(STORAGE_KEYS.MATERIALS);
+        if (raw) {
+          const parsed = JSON.parse(raw) as DownloadMaterial[];
+          const cleaned = parsed.filter(
+            (m) => m && m.id !== materialId && !isProhibitedPrivateMaterial(m) && m.id !== 'mat-5' && m.id !== 'mat-0'
+          );
+          localStorage.setItem(STORAGE_KEYS.MATERIALS, JSON.stringify(cleaned));
+        }
+        const delSet = getDeletedMaterialIds();
+        delSet.add(materialId);
+        localStorage.setItem(STORAGE_KEYS.DELETED_MATERIALS, JSON.stringify(Array.from(delSet)));
+        broadcastRealtimeUpdate(STORAGE_KEYS.MATERIALS);
+        broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_MATERIALS);
+      }
+    } catch {
+      // ignore
+    }
+
+    // 3. Optimistically update local React state
     setMaterials((prev) => {
-      const updated = prev.filter((m) => m.id !== materialId);
+      const updated = prev.filter(
+        (m) => m.id !== materialId && !isProhibitedPrivateMaterial(m) && m.id !== 'mat-5' && m.id !== 'mat-0'
+      );
       saveMaterialsToStorageSafe(updated);
       return updated;
     });
 
-    // 3. Attempt Firestore cloud deletion (handles both chunked and direct documents)
+    // 4. Attempt Firestore cloud deletion (handles both chunked and direct documents)
     try {
       await deleteDownloadMaterialInDb(materialId);
     } catch (err) {
       console.warn('Aviso ao excluir material no Firestore:', err);
     }
 
-    // 4. Attempt Supabase cloud deletion if configured
+    // 5. Attempt Supabase cloud deletion if configured
     if (isSupabaseConfigured()) {
       try {
         await supabaseRestQuery('download_materials', {

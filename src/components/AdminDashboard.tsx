@@ -79,7 +79,8 @@ import {
   formatPhone,
   sendBrowserNotification,
   triggerMaterialDownload,
-  normalizeGoogleDriveImageUrl
+  normalizeGoogleDriveImageUrl,
+  isProhibitedPrivateMaterial
 } from '../utils/helpers.ts';
 import {
   sendRegistrationConfirmationEmail,
@@ -737,6 +738,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Filtered Materials for Materials Tab
   const filteredMaterials = materials.filter((mat) => {
+    if (!mat || mat.id === 'mat-5' || mat.id === 'mat-0' || isProhibitedPrivateMaterial(mat)) return false;
     const matchesCategory = materialCategoryFilter === 'all' || mat.category === materialCategoryFilter;
     const matchesSearch =
       materialSearch.trim() === '' ||

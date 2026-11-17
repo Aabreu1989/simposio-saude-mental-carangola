@@ -1208,14 +1208,29 @@ export const seedInitialDataIfNeeded = async (
     const matCheckSnap = await getDocs(collection(db, 'download_materials'));
     const remoteMatIds = new Set(matCheckSnap.docs.map((d) => d.id));
 
-    if (matCheckSnap.empty && localMaterials.length > 0) {
-      for (const mat of localMaterials) {
+    // Hard eradication of mat-5 or private documents if ever saved in remote Firestore
+    if (remoteMatIds.has('mat-5')) {
+      await deleteDownloadMaterialInDb('mat-5').catch(() => {});
+    }
+
+    const safeLocalMaterials = localMaterials.filter(
+      (m) =>
+        m &&
+        m.id !== 'mat-5' &&
+        m.id !== 'mat-0' &&
+        !m.title?.toLowerCase().includes('termo de responsabilidade') &&
+        !m.title?.toLowerCase().includes('cessão de uso') &&
+        !m.fileName?.toLowerCase().includes('termo-de-responsabilidade')
+    );
+
+    if (matCheckSnap.empty && safeLocalMaterials.length > 0) {
+      for (const mat of safeLocalMaterials) {
         await saveDownloadMaterialToDb(mat);
       }
       seededMaterials = true;
-    } else if (localMaterials.length > 0) {
+    } else if (safeLocalMaterials.length > 0) {
       // Sync any pending local uploads created while disconnected or before this upgrade
-      const pendingMats = localMaterials.filter(
+      const pendingMats = safeLocalMaterials.filter(
         (m) => !remoteMatIds.has(sanitizeId(m.id, 'mat')) && (m.pendingCloudSync || m.fileUrl?.startsWith('data:'))
       );
       for (const mat of pendingMats) {

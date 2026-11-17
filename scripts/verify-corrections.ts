@@ -818,9 +818,10 @@ async function runTests() {
     suite7
   );
 
-  // Simula utilizador com cache anterior de materiais em localStorage
+  // Simula utilizador com cache anterior de materiais em localStorage incluindo documento privado mat-5
   mockStorageMap.set('simposio_materials', JSON.stringify([
-    { id: 'mat-1', title: 'Guia Antigo', category: 'Cartilha', format: 'PDF', fileUrl: '/assets/antigo.pdf' }
+    { id: 'mat-1', title: 'Guia Antigo', category: 'Cartilha', format: 'PDF', fileUrl: '/assets/antigo.pdf' },
+    { id: 'mat-5', title: 'Termo de Responsabilidade de Cessão de Uso de Espaço - Auditório UEMG Carangola', category: 'Legislação', format: 'PDF', fileUrl: '/assets/termo.pdf' }
   ]));
   const reloadedWithCache = loadStoredData();
   const preservedNewDocs = expectedNewIds.every((docId) =>
@@ -829,6 +830,15 @@ async function runTests() {
   assert(
     preservedNewDocs,
     'loadStoredData mescla novos documentos oficiais mesmo para usuários com cache prévio em localStorage',
+    suite7
+  );
+
+  const mat5PermanentlyBlocked = reloadedWithCache.materials.every(
+    (m) => m.id !== 'mat-5' && !m.title?.toLowerCase().includes('cessão de uso')
+  );
+  assert(
+    mat5PermanentlyBlocked,
+    'Documento privado Termo de Cessão de Uso (mat-5) é estritamente expurgado do estado e nunca aparece na plataforma',
     suite7
   );
 
