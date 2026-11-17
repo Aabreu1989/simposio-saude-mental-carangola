@@ -1,12 +1,12 @@
 {
-  "projectId": "gen-lang-client-0461787389",
-  "appId": "1:515761211213:web:bae6ad1a8f327ba0b1d904",
-  "apiKey": "AIzaSyCXvPfrx74IQZpfTUT2nN6TjDI1EW6s6zs",
-  "authDomain": "gen-lang-client-0461787389.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-remixremixremixr-388dcae0-ebed-41c2-a845-2116ad689a34",
-  "storageBucket": "gen-lang-client-0461787389.firebasestorage.app",
-  "messagingSenderId": "515761211213",
+  "projectId": "simposio-carangola",
+  "appId": "1:784860398701:web:c2290794276ef9043aab64",
+  "apiKey": "AIzaSyAVFq_T8d2l4MQMRAytoEHJLg2iX58ni4w",
+  "authDomain": "simposio-carangola.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "simposio-carangola.firebasestorage.app",
+  "messagingSenderId": "784860398701",
   "measurementId": "",
-  "oAuthClientId": "515761211213-k58o4fhfcp6h73sart719h5b3suv3q00.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }

@@ -229,11 +229,12 @@ export const SocialWall: React.FC<SocialWallProps> = ({
       hashtags: finalHashtags,
       imageUrl: imagePreview || undefined,
       imageFileName: selectedImageFile?.name,
-      likes: 1,
-      hasLiked: true,
+      likes: 0,
+      hasLiked: false,
       createdAt: `${dateStr} às ${timeStr}`,
       timestamp: Date.now(),
-      status: 'approved'
+      status: 'pending',
+      pinned: false
     };
 
     onAddPost(newPost, selectedImageFile || undefined);
@@ -667,35 +668,9 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                     </div>
 
                     <div>
-                      <div className="text-xs font-bold text-[#0a3641] mb-1.5">
-                        2. Baixar ou Copiar Arte Oficial
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          onClick={handleDownloadCard}
-                          disabled={!generatedBlob || isGeneratingCard}
-                          className="py-2 px-3 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                        >
-                          <Download className="w-3.5 h-3.5 text-[#028090]" />
-                          <span>{shareFormat === 'story' ? 'Baixar Story 9:16' : 'Baixar Card PNG'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCopyImage}
-                          disabled={!generatedBlob || isGeneratingCard}
-                          className="py-2 px-3 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                        >
-                          <Copy className="w-3.5 h-3.5 text-[#d96522]" />
-                          <span>Copiar Imagem</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-bold text-[#0a3641]">
-                          3. Legenda + Hashtags do Evento
+                          2. Legenda + Hashtags do Evento
                         </span>
                         <button
                           type="button"

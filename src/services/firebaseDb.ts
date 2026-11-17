@@ -8,6 +8,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInAnonymously,
   signOut,
   onAuthStateChanged,
   User
@@ -23,6 +24,7 @@ import {
   collection,
   onSnapshot,
   writeBatch,
+  runTransaction,
   query,
   orderBy,
   limit,
@@ -301,6 +303,56 @@ const sanitizeId = (raw: string, fallbackPrefix = 'doc'): string => {
 const sanitizeCode = (raw: string): string => {
   const cleaned = (raw || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '-').slice(0, 32);
   return cleaned.length >= 3 ? cleaned : `CAR-${Date.now().toString().slice(-6)}`;
+};
+
+export const sha256Hex = async (message: string): Promise<string> => {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const msgUint8 = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  let hash1 = 0x55555555;
+  let hash2 = 0xaaaaaaaa;
+  for (let i = 0; i < message.length; i++) {
+    const code = message.charCodeAt(i);
+    hash1 = Math.imul(hash1 ^ code, 2654435761);
+    hash2 = Math.imul(hash2 ^ code, 1597334677);
+  }
+  const part1 = (hash1 >>> 0).toString(16).padStart(8, '0');
+  const part2 = (hash2 >>> 0).toString(16).padStart(8, '0');
+  return (part1 + part2).repeat(4).slice(0, 64);
+};
+
+export const generateSecureToken = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  const rand = () => Math.random().toString(36).substring(2);
+  return (rand() + rand() + rand() + rand()).padEnd(64, '0').slice(0, 64);
+};
+
+export const ensureAuthenticatedUser = async (): Promise<string> => {
+  if (firestoreAuth.currentUser) {
+    return firestoreAuth.currentUser.uid;
+  }
+  try {
+    const cred = await signInAnonymously(firestoreAuth);
+    return cred.user.uid;
+  } catch (err) {
+    console.warn('Aviso: Autenticação anônima temporariamente indisponível:', err);
+    if (typeof localStorage !== 'undefined') {
+      let localId = localStorage.getItem('sus_voter_id');
+      if (!localId) {
+        localId = 'voter-' + generateSecureToken().slice(0, 16);
+        localStorage.setItem('sus_voter_id', localId);
+      }
+      return localId;
+    }
+    return 'voter-' + generateSecureToken().slice(0, 16);
+  }
 };
 
 export interface CertificatePermissionRecord {
@@ -1347,8 +1399,8 @@ export interface NotificationsStorageAdapter {
 }
 
 export interface NewsletterStorageAdapter {
-  subscribe: (sub: NewsletterSubscriber) => Promise<{ isNew: boolean; subscriber: NewsletterSubscriber }>;
-  unsubscribe: (emailOrId: string) => Promise<void>;
+  subscribe: (sub: NewsletterSubscriber) => Promise<{ isNew: boolean; subscriber: NewsletterSubscriber; unsubscribeToken?: string }>;
+  unsubscribe: (emailOrId: string, tokenProof?: string) => Promise<void>;
   deleteSubscriber: (id: string) => Promise<void>;
 }
 
@@ -1393,11 +1445,29 @@ export const saveSocialPostToDb = async (
   post: SocialPost,
   rawImageFile?: File | Blob
 ): Promise<SocialPost> => {
+  const id = sanitizeId(post.id, 'post');
+  const nowIso = new Date().toISOString();
+  const isAdmin = isVerifiedAdminUser(firestoreAuth.currentUser);
+
+  // Regra de Moderação e Integridade do Social Wall:
+  // Publicações públicas nascem OBRIGATORIAMENTE com status pending, pinned false e likes 0.
+  // Somente administradores autorizados podem moderar, aprovar, rejeitar ou fixar.
+  const initialStatus = isAdmin ? (post.status || 'approved') : 'pending';
+  const initialPinned = isAdmin ? Boolean(post.pinned) : false;
+  const initialLikes = isAdmin ? Math.max(0, Math.round(Number(post.likes) || 0)) : 0;
+
+  const sanitizedPost: SocialPost = {
+    ...post,
+    id,
+    status: initialStatus as 'approved' | 'pending' | 'rejected',
+    pinned: initialPinned,
+    likes: initialLikes
+  };
+
   if (customSocialPostsAdapter) {
-    return customSocialPostsAdapter.savePost(post, rawImageFile);
+    return customSocialPostsAdapter.savePost(sanitizedPost, rawImageFile);
   }
 
-  const id = sanitizeId(post.id, 'post');
   let finalImageUrl = post.imageUrl;
   let storagePath: string | undefined = post.storagePath;
 
@@ -1408,6 +1478,9 @@ export const saveSocialPostToDb = async (
   }
 
   if (blobToUpload) {
+    if (blobToUpload.size === 0) {
+      throw new Error('O arquivo de imagem selecionado está vazio.');
+    }
     if (blobToUpload.size > 5 * 1024 * 1024) {
       throw new Error('A imagem selecionada excede o limite máximo permitido de 5MB.');
     }
@@ -1417,6 +1490,7 @@ export const saveSocialPostToDb = async (
     }
 
     try {
+      await ensureAuthenticatedUser();
       const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
       const cleanPath = `social_posts/${id}/${Date.now()}_img.${ext}`;
       const fileRef = storageRef(storage, cleanPath);
@@ -1432,7 +1506,6 @@ export const saveSocialPostToDb = async (
     }
   }
 
-  const nowIso = new Date().toISOString();
   const payload: Record<string, unknown> = {
     id,
     authorName: (post.authorName || 'Participante').trim().slice(0, 120),
@@ -1440,11 +1513,11 @@ export const saveSocialPostToDb = async (
     city: (post.city || 'Carangola').trim().slice(0, 100),
     content: (post.content || '').trim().slice(0, 1000),
     hashtags: (post.hashtags || '').trim().slice(0, 300),
-    likes: Math.max(0, Math.round(Number(post.likes) || 0)),
+    likes: initialLikes,
     createdAt: post.createdAt || nowIso,
     timestamp: Number(post.timestamp) || Date.now(),
-    status: post.status || 'approved',
-    pinned: Boolean(post.pinned),
+    status: initialStatus,
+    pinned: initialPinned,
     updatedAt: nowIso
   };
 
@@ -1457,6 +1530,9 @@ export const saveSocialPostToDb = async (
     return {
       ...post,
       id,
+      status: initialStatus as 'approved' | 'pending' | 'rejected',
+      pinned: initialPinned,
+      likes: initialLikes,
       imageUrl: finalImageUrl,
       storagePath
     };
@@ -1476,38 +1552,46 @@ export const likeSocialPostInDb = async (
   }
 
   const cleanPostId = sanitizeId(postId, 'post');
-  const cleanVoterId = sanitizeId(voterId, 'voter');
+  // Vincula a identidade do votante ao usuário autenticado ou ao identificador fornecido
+  const currentUid = firestoreAuth.currentUser?.uid;
+  const cleanVoterId = sanitizeId(currentUid || voterId, 'voter');
 
   try {
     const likeDocRef = doc(db, 'social_posts', cleanPostId, 'likes', cleanVoterId);
     const postDocRef = doc(db, 'social_posts', cleanPostId);
 
-    const [likeSnap, postSnap] = await Promise.all([
-      getDoc(likeDocRef),
-      getDoc(postDocRef)
-    ]);
+    // Transação Firestore atômica garantindo consistência sob concorrência e impedindo valores negativos
+    const result = await runTransaction(db, async (transaction) => {
+      const [likeSnap, postSnap] = await Promise.all([
+        transaction.get(likeDocRef),
+        transaction.get(postDocRef)
+      ]);
 
-    const currentLikes = postSnap.exists()
-      ? Math.max(0, Number(postSnap.data()?.likes) || 0)
-      : 0;
+      const currentLikes = postSnap.exists()
+        ? Math.max(0, Number(postSnap.data()?.likes) || 0)
+        : 0;
+      const nowIso = new Date().toISOString();
 
-    if (likeSnap.exists()) {
-      // Toggle off
-      const nextLikes = Math.max(0, currentLikes - 1);
-      const batch = writeBatch(db);
-      batch.delete(likeDocRef);
-      batch.update(postDocRef, { likes: nextLikes, updatedAt: new Date().toISOString() });
-      await batch.commit();
-      return { success: true, likes: nextLikes, hasLiked: false };
-    } else {
-      // Toggle on
-      const nextLikes = currentLikes + 1;
-      const batch = writeBatch(db);
-      batch.set(likeDocRef, { votedAt: new Date().toISOString(), postId: cleanPostId });
-      batch.update(postDocRef, { likes: nextLikes, updatedAt: new Date().toISOString() });
-      await batch.commit();
-      return { success: true, likes: nextLikes, hasLiked: true };
-    }
+      if (likeSnap.exists()) {
+        // Toggle OFF
+        const nextLikes = Math.max(0, currentLikes - 1);
+        transaction.delete(likeDocRef);
+        transaction.update(postDocRef, { likes: nextLikes, updatedAt: nowIso });
+        return { success: true, likes: nextLikes, hasLiked: false };
+      } else {
+        // Toggle ON
+        const nextLikes = currentLikes + 1;
+        transaction.set(likeDocRef, {
+          votedAt: nowIso,
+          postId: cleanPostId,
+          voterId: cleanVoterId
+        });
+        transaction.update(postDocRef, { likes: nextLikes, updatedAt: nowIso });
+        return { success: true, likes: nextLikes, hasLiked: true };
+      }
+    });
+
+    return result;
   } catch (error) {
     console.warn('Aviso: Falha ao sincronizar curtida no Firestore (modo offline/fallback ativo):', error);
     return { success: false, likes: 0, hasLiked: false };
@@ -1536,6 +1620,16 @@ export const deleteSocialPostInDb = async (postId: string): Promise<void> => {
         } catch {
           // ignore storage delete errors
         }
+      }
+      try {
+        const likesSnap = await getDocs(collection(db, 'social_posts', cleanId, 'likes'));
+        if (!likesSnap.empty) {
+          const batch = writeBatch(db);
+          likesSnap.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch {
+        // ignore likes cleanup error
       }
     }
     await deleteDoc(postRef);
@@ -1700,7 +1794,7 @@ export const subscribeNotifications = (onUpdate: (notifications: PushNotificatio
 
 export const subscribeNewsletterInDb = async (
   sub: NewsletterSubscriber
-): Promise<{ isNew: boolean; subscriber: NewsletterSubscriber }> => {
+): Promise<{ isNew: boolean; subscriber: NewsletterSubscriber; unsubscribeToken?: string }> => {
   if (customNewsletterAdapter) {
     return customNewsletterAdapter.subscribe(sub);
   }
@@ -1710,18 +1804,32 @@ export const subscribeNewsletterInDb = async (
     throw new Error('Endereço de e-mail inválido para inscrição na newsletter.');
   }
 
-  const docId = `sub-${cleanEmail.replace(/[^a-z0-9]/g, '_').slice(0, 80)}`;
+  // 1. Eliminar IDs derivados do e-mail.
+  // 2. Utilizar identificadores aleatórios não reversíveis e sem dados pessoais.
+  const emailHash = await sha256Hex(cleanEmail);
+  const randomSuffix = generateSecureToken().slice(0, 16);
+  const docId = `sub-${Date.now().toString(36)}-${randomSuffix}`;
   const nowIso = new Date().toISOString();
+
+  // 4. Implementar cancelamento com prova de titularidade através de token criptográfico opaco
+  const unsubscribeToken = generateSecureToken();
+  const unsubscribeTokenHash = await sha256Hex(unsubscribeToken);
+  const expiresAtMillis = Date.now() + 365 * 24 * 60 * 60 * 1000;
+  const tokenExpiresAt = new Date(expiresAtMillis).toISOString();
 
   const payload: Record<string, unknown> = {
     id: docId,
     email: cleanEmail,
+    emailHash,
     subscribedAt: sub.subscribedAt || nowIso.split('T')[0],
     receiveWhatsapp: Boolean(sub.receiveWhatsapp),
     receiveEmail: sub.receiveEmail !== false,
     status: 'active',
     origin: sub.origin || 'newsletter_form',
     consent: true,
+    unsubscribeTokenHash,
+    unsubscribeTokenExpiresAt: tokenExpiresAt,
+    unsubscribeTokenExpiresAtMillis: expiresAtMillis,
     updatedAt: nowIso
   };
 
@@ -1732,11 +1840,32 @@ export const subscribeNewsletterInDb = async (
   if (sub.institution) payload.institution = sub.institution.trim().slice(0, 180);
 
   try {
-    const docRef = doc(db, 'newsletter_subscribers', docId);
-    const existingSnap = await getDoc(docRef);
-    const isNew = !existingSnap.exists();
+    // 3. Prevenção de duplicações sem expor o e-mail em caminhos públicos de documentos
+    let isNew = true;
+    try {
+      const indexRef = doc(db, 'newsletter_indexes', emailHash);
+      const indexSnap = await getDoc(indexRef);
+      if (indexSnap.exists()) {
+        isNew = false;
+      } else {
+        await setDoc(indexRef, { subscriberId: docId, createdAt: nowIso });
+      }
+    } catch {
+      // Ignora erro no índice caso indisponível no cliente offline
+    }
 
+    const docRef = doc(db, 'newsletter_subscribers', docId);
     await setDoc(docRef, payload, { merge: true });
+
+    // Salva token seguro no dispositivo do participante para autorizar cancelamento futuro
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(`sm_unsub_token_${docId}`, unsubscribeToken);
+        localStorage.setItem(`sm_sub_id_${cleanEmail}`, docId);
+      } catch {
+        // ignore storage errors
+      }
+    }
 
     return {
       isNew,
@@ -1744,8 +1873,11 @@ export const subscribeNewsletterInDb = async (
         ...sub,
         id: docId,
         email: cleanEmail,
-        status: 'active'
-      }
+        emailHash,
+        status: 'active',
+        consent: true
+      },
+      unsubscribeToken
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${docId}`);
@@ -1753,26 +1885,58 @@ export const subscribeNewsletterInDb = async (
   }
 };
 
-export const unsubscribeNewsletterInDb = async (emailOrId: string): Promise<void> => {
+export const unsubscribeNewsletterInDb = async (
+  emailOrId: string,
+  rawToken?: string
+): Promise<void> => {
   if (customNewsletterAdapter) {
-    return customNewsletterAdapter.unsubscribe(emailOrId);
+    return customNewsletterAdapter.unsubscribe(emailOrId, rawToken);
   }
 
   const clean = (emailOrId || '').trim().toLowerCase();
-  const docId = clean.startsWith('sub-')
-    ? clean
-    : `sub-${clean.replace(/[^a-z0-9]/g, '_').slice(0, 80)}`;
+  let subscriberId = clean;
+
+  // Resolve subscriberId caso tenha sido fornecido e-mail e exista mapeamento local
+  if (clean.includes('@') && typeof localStorage !== 'undefined') {
+    const cachedId = localStorage.getItem(`sm_sub_id_${clean}`);
+    if (cachedId) {
+      subscriberId = cachedId;
+    }
+  }
+
+  // Busca o token de titularidade do parâmetro ou do armazenamento do cliente
+  let token = rawToken;
+  if (!token && typeof localStorage !== 'undefined') {
+    token = localStorage.getItem(`sm_unsub_token_${subscriberId}`) || undefined;
+  }
+
+  const user = firestoreAuth.currentUser;
+  const isAdmin = isVerifiedAdminUser(user);
+
+  if (!token && !isAdmin) {
+    throw new Error('TOKEN_PROOF_REQUIRED: O cancelamento da inscrição exige a apresentação do token criptográfico de titularidade.');
+  }
+
+  const tokenProof = token ? await sha256Hex(token) : undefined;
+  const nowIso = new Date().toISOString();
+
+  const updatePayload: Record<string, unknown> = {
+    status: 'unsubscribed',
+    receiveWhatsapp: false,
+    receiveEmail: false,
+    unsubscribeTokenHash: '',
+    unsubscribedAt: nowIso,
+    updatedAt: nowIso
+  };
+
+  if (tokenProof) {
+    updatePayload.tokenProof = tokenProof;
+  }
 
   try {
-    await updateDoc(doc(db, 'newsletter_subscribers', docId), {
-      status: 'unsubscribed',
-      receiveWhatsapp: false,
-      receiveEmail: false,
-      unsubscribedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
+    await updateDoc(doc(db, 'newsletter_subscribers', subscriberId), updatePayload);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${docId}`);
+    handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${subscriberId}`);
   }
 };
 

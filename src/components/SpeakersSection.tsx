@@ -260,9 +260,12 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                   {/* Social Links Footer */}
                   <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2 text-xs">
                     <div className="flex flex-wrap items-center gap-3">
-                      {speaker.socials.instagramUrl && (
+                      {(speaker.socials?.instagramUrl || speaker.socials?.instagram) && (
                         <a
-                          href={speaker.socials.instagramUrl}
+                          href={
+                            speaker.socials?.instagramUrl ||
+                            `https://www.instagram.com/${(speaker.socials?.instagram || '').replace(/^@/, '')}`
+                          }
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 text-stone-600 hover:text-[#c13584] font-semibold transition-colors"
@@ -270,13 +273,13 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                         >
                           <InstagramGlyph className="w-3.5 h-3.5 text-[#c13584]" />
                           <span className="truncate max-w-[140px]">
-                            {speaker.socials.instagram || 'Instagram'}
+                            {speaker.socials?.instagram || 'Instagram'}
                           </span>
                         </a>
                       )}
-                      {speaker.socials.linkedinUrl && (
+                      {(speaker.socials?.linkedinUrl || speaker.socials?.linkedin) && (
                         <a
-                          href={speaker.socials.linkedinUrl}
+                          href={speaker.socials?.linkedinUrl || 'https://www.linkedin.com/'}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1.5 text-stone-600 hover:text-[#0a66c2] font-semibold transition-colors"
@@ -286,7 +289,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
                           <span>LinkedIn</span>
                         </a>
                       )}
-                      {speaker.socials.lattesUrl && (
+                      {speaker.socials?.lattesUrl && (
                         <a
                           href={speaker.socials.lattesUrl}
                           target="_blank"

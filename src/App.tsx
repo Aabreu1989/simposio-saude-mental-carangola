@@ -64,6 +64,7 @@ import {
   likeSocialPostInDb,
   deleteSocialPostInDb,
   subscribeSocialPosts,
+  ensureAuthenticatedUser,
   saveNotificationToDb,
   deleteNotificationInDb,
   subscribeNotifications,
@@ -586,6 +587,7 @@ export default function App() {
       if (!changedKey || changedKey === STORAGE_KEYS.OFFLINE_QUEUE) setOfflineQueue(fresh.offlineQueue);
       if (!changedKey || changedKey === STORAGE_KEYS.LAST_REGISTERED) setLastRegistered(fresh.lastRegistered);
       if (!changedKey || changedKey === STORAGE_KEYS.CERT_DOWNLOADS) setCertificateDownloads(fresh.certificateDownloads);
+      if (!changedKey || changedKey === STORAGE_KEYS.SPEAKERS) setSpeakers(fresh.speakers);
     };
 
     const handleStorageEvent = (e: StorageEvent) => {
@@ -952,15 +954,7 @@ export default function App() {
   };
 
   const handleLikePost = async (postId: string) => {
-    let voterId = typeof localStorage !== 'undefined' ? localStorage.getItem('sus_voter_id') : null;
-    if (!voterId) {
-      voterId = 'voter-' + Math.random().toString(36).substring(2, 12);
-      try {
-        localStorage?.setItem('sus_voter_id', voterId);
-      } catch {
-        // ignore
-      }
-    }
+    let voterId = await ensureAuthenticatedUser();
 
     setPosts((prev) => {
       const updated = prev.map((p) => {

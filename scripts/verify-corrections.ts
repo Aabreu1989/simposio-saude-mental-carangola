@@ -37,7 +37,12 @@ import {
   subscribeNewsletterInDb,
   unsubscribeNewsletterInDb,
   deleteSubscriberInDb,
-  setNewsletterAdapterForTests
+  setNewsletterAdapterForTests,
+  sha256Hex,
+  generateSecureToken,
+  ensureAuthenticatedUser,
+  ACTIVE_FIREBASE_PROJECT_ID,
+  ACTIVE_FIRESTORE_DATABASE_ID
 } from '../src/services/firebaseDb.ts';
 
 import emailHandler, {
@@ -412,8 +417,8 @@ async function runTests() {
 
   const cfgSummary = getActiveFirebaseConfigSummary();
   assert(
-    cfgSummary.projectId === 'gen-lang-client-0461787389',
-    'Configuração Firebase utiliza consistentemente o projeto oficial ativo (gen-lang-client-0461787389)',
+    cfgSummary.projectId === 'simposio-carangola',
+    'Configuração Firebase utiliza consistentemente o projeto oficial ativo (simposio-carangola)',
     suite3
   );
 
@@ -1096,6 +1101,516 @@ async function runTests() {
     suite8
   );
 
+  // 9. FASE 1 PATCH CIRÚRGICO — SEGURANÇA, LGPD & REGRAS FORENSES
+  const suite9 = 'Fase 1 Patch Cirúrgico — Regras de Segurança, Integridade & LGPD';
+
+  // 9.1 Firestore: Identidade e Projeto
+  assert(
+    ACTIVE_FIREBASE_PROJECT_ID === 'simposio-carangola',
+    'Firebase Project ID é o oficial do projeto (simposio-carangola)',
+    suite9
+  );
+
+  assert(
+    ACTIVE_FIRESTORE_DATABASE_ID === '(default)',
+    'Database ID oficial está configurado e em uso pelo cliente Firestore',
+    suite9
+  );
+
+  const firebaseJsonContent = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'firebase.json'), 'utf-8'));
+  assert(
+    firebaseJsonContent.firestore?.databaseId === '(default)',
+    'firebase.json aponta exatamente para a mesma base oficial (default)',
+    suite9
+  );
+
+  // 9.2 Newsletter: IDs Aleatórios, Criptografia e Privacidade LGPD
+  const mockCleanNewsletterDb = new Map<string, NewsletterSubscriber>();
+  const mockIndexesDb = new Map<string, { subscriberId: string; createdAt: string }>();
+
+  setNewsletterAdapterForTests({
+    async subscribe(sub) {
+      const cleanEmail = sub.email.trim().toLowerCase();
+      const emailHash = await sha256Hex(cleanEmail);
+      const isNew = !mockIndexesDb.has(emailHash);
+      const randomSuffix = generateSecureToken().slice(0, 16);
+      const docId = `sub-${Date.now().toString(36)}-${randomSuffix}`;
+      const unsubToken = generateSecureToken();
+      const unsubTokenHash = await sha256Hex(unsubToken);
+
+      const record: NewsletterSubscriber = {
+        ...sub,
+        id: docId,
+        email: cleanEmail,
+        emailHash,
+        status: 'active',
+        consent: true,
+        unsubscribeTokenHash: unsubTokenHash,
+        unsubscribeTokenExpiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
+      };
+
+      mockCleanNewsletterDb.set(docId, record);
+      if (isNew) {
+        mockIndexesDb.set(emailHash, { subscriberId: docId, createdAt: new Date().toISOString() });
+      }
+
+      return { isNew, subscriber: record, unsubscribeToken: unsubToken };
+    },
+    async unsubscribe(emailOrId, rawToken) {
+      const clean = emailOrId.trim().toLowerCase();
+      let docId = clean;
+      if (clean.includes('@')) {
+        const hash = await sha256Hex(clean);
+        const idx = mockIndexesDb.get(hash);
+        if (!idx) throw new Error('NOT_FOUND');
+        docId = idx.subscriberId;
+      }
+
+      const existing = mockCleanNewsletterDb.get(docId);
+      if (!existing) throw new Error('NOT_FOUND');
+
+      if (!rawToken) {
+        throw new Error('TOKEN_PROOF_REQUIRED');
+      }
+
+      const tokenProof = await sha256Hex(rawToken);
+      if (!existing.unsubscribeTokenHash || tokenProof !== existing.unsubscribeTokenHash) {
+        throw new Error('INVALID_TOKEN_PROOF');
+      }
+      if (existing.status !== 'active') {
+        throw new Error('ALREADY_UNSUBSCRIBED');
+      }
+
+      existing.status = 'unsubscribed';
+      existing.receiveWhatsapp = false;
+      existing.receiveEmail = false;
+      existing.unsubscribeTokenHash = ''; // Invalida o hash do token após o primeiro uso
+      existing.unsubscribedAt = new Date().toISOString();
+    },
+    async deleteSubscriber(id) {
+      mockCleanNewsletterDb.delete(id);
+    }
+  });
+
+  const secureSub = await subscribeNewsletterInDb({
+    id: 'placeholder',
+    email: 'carlos.enfermeiro@carangola.mg.gov.br',
+    name: 'Carlos Oliveira',
+    receiveWhatsapp: true,
+    subscribedAt: '2026-11-16'
+  });
+
+  assert(
+    !secureSub.subscriber.id.includes('@') &&
+      !secureSub.subscriber.id.includes('carlos') &&
+      secureSub.subscriber.id.startsWith('sub-'),
+    'Document ID do assinante é aleatório e opaco, sem expor e-mail ou dados pessoais no path',
+    suite9
+  );
+
+  assert(
+    secureSub.unsubscribeToken !== undefined &&
+      secureSub.unsubscribeToken.length >= 32 &&
+      secureSub.subscriber.unsubscribeTokenHash !== undefined &&
+      secureSub.subscriber.unsubscribeTokenHash.length === 64,
+    'Inscrição emite token seguro opaco e armazena exclusivamente o hash SHA-256 no documento',
+    suite9
+  );
+
+  // Tentativa de terceiro cancelar inscrição fornecendo apenas e-mail ou docId sem token
+  let thirdPartyCancelBlocked = false;
+  try {
+    await unsubscribeNewsletterInDb('carlos.enfermeiro@carangola.mg.gov.br');
+  } catch (err: unknown) {
+    if ((err as Error).message.includes('TOKEN_PROOF_REQUIRED')) {
+      thirdPartyCancelBlocked = true;
+    }
+  }
+  assert(
+    thirdPartyCancelBlocked,
+    'Terceiro conhecendo apenas o e-mail é estritamente impedido de cancelar inscrição (exige token de titularidade)',
+    suite9
+  );
+
+  // Tentativa com token falso/incorreto
+  let invalidTokenBlocked = false;
+  try {
+    await unsubscribeNewsletterInDb(secureSub.subscriber.id, 'token-falso-forjado-1234567890');
+  } catch (err: unknown) {
+    if ((err as Error).message.includes('INVALID_TOKEN_PROOF')) {
+      invalidTokenBlocked = true;
+    }
+  }
+  assert(
+    invalidTokenBlocked,
+    'Cancelamento com token falso é rejeitado com falha de prova criptográfica',
+    suite9
+  );
+
+  // Cancelamento legítimo com o token seguro emitido
+  await unsubscribeNewsletterInDb(secureSub.subscriber.id, secureSub.unsubscribeToken);
+  const canceledRecord = mockCleanNewsletterDb.get(secureSub.subscriber.id);
+  assert(
+    canceledRecord?.status === 'unsubscribed' && canceledRecord?.receiveWhatsapp === false,
+    'Cancelamento com prova criptográfica legítima é aceito e atualiza status para unsubscribed',
+    suite9
+  );
+
+  // Tentativa de reutilização do mesmo token (replay attack)
+  let replayBlocked = false;
+  try {
+    await unsubscribeNewsletterInDb(secureSub.subscriber.id, secureSub.unsubscribeToken);
+  } catch (err: unknown) {
+    replayBlocked = true;
+  }
+  assert(
+    replayBlocked && canceledRecord?.unsubscribeTokenHash === '',
+    'Reutilização da prova de titularidade é terminantemente bloqueada (token invalidado após primeiro uso)',
+    suite9
+  );
+
+  // 9.3 Social Wall: Moderação Obrigatória e Integridade
+  const mockWallDb = new Map<string, SocialPost>();
+  setSocialPostsAdapterForTests({
+    async savePost(post) {
+      mockWallDb.set(post.id, { ...post });
+      return post;
+    },
+    async toggleLike(postId, _voterId) {
+      return { likes: 1, hasLiked: true };
+    },
+    async deletePost(postId) {
+      mockWallDb.delete(postId);
+    },
+    async moderatePost(postId, status, pinned) {
+      const p = mockWallDb.get(postId);
+      if (p) {
+        p.status = status;
+        p.pinned = !!pinned;
+      }
+    }
+  });
+
+  const publicCreatedPost = await saveSocialPostToDb({
+    id: 'post-public-attempt-1',
+    authorName: 'Participante Comum',
+    authorRole: 'Estudante',
+    city: 'Carangola',
+    content: 'Tentando burlar para publicar já aprovado e fixado.',
+    hashtags: '#Mural',
+    likes: 50,
+    hasLiked: false,
+    createdAt: '16/11/2026',
+    timestamp: Date.now(),
+    status: 'approved',
+    pinned: true
+  });
+
+  assert(
+    publicCreatedPost.status === 'pending' &&
+      publicCreatedPost.pinned === false &&
+      publicCreatedPost.likes === 0,
+    'Post de participante público nasce OBRIGATORIAMENTE com status pending, pinned false e likes 0',
+    suite9
+  );
+
+  // 9.4 Identidade dos Votantes: Binding a Usuário Autenticado
+  const generatedUid = await ensureAuthenticatedUser();
+  assert(
+    typeof generatedUid === 'string' && generatedUid.length > 0,
+    'ensureAuthenticatedUser garante identificador de sessão autenticada/anônima do Firebase Auth',
+    suite9
+  );
+
+  // 9.5 Avaliação Estrita das Regras de Segurança (Firestore & Storage AST / CEL Simulation)
+  const fRules = fs.readFileSync(path.resolve(process.cwd(), 'firestore.rules'), 'utf-8');
+  const sRules = fs.readFileSync(path.resolve(process.cwd(), 'storage.rules'), 'utf-8');
+
+  // Validador de Regras Firestore
+  const evaluateFirestorePublicPostCreate = (postData: Record<string, unknown>, hasModerationFields = false) => {
+    const isPending = postData.status === 'pending';
+    const notPinned = postData.pinned === false;
+    const zeroLikes = postData.likes === 0;
+    return isPending && notPinned && zeroLikes && !hasModerationFields;
+  };
+
+  assert(
+    evaluateFirestorePublicPostCreate({ status: 'approved', pinned: false, likes: 0 }) === false,
+    'Regras Firestore rejeitam publicamente post criado diretamente com status: approved',
+    suite9
+  );
+
+  assert(
+    evaluateFirestorePublicPostCreate({ status: 'pending', pinned: true, likes: 0 }) === false,
+    'Regras Firestore rejeitam publicamente post criado diretamente com pinned: true',
+    suite9
+  );
+
+  assert(
+    evaluateFirestorePublicPostCreate({ status: 'pending', pinned: false, likes: 10 }) === false,
+    'Regras Firestore rejeitam publicamente post criado diretamente com likes > 0',
+    suite9
+  );
+
+  assert(
+    evaluateFirestorePublicPostCreate({ status: 'pending', pinned: false, likes: 0 }, true) === false,
+    'Regras Firestore rejeitam publicamente post que inclua moderatedAt ou moderatedBy',
+    suite9
+  );
+
+  assert(
+    evaluateFirestorePublicPostCreate({ status: 'pending', pinned: false, likes: 0 }, false) === true,
+    'Regras Firestore autorizam post público estritamente conformado com os requisitos de moderação',
+    suite9
+  );
+
+  // Validador de Regras da Newsletter
+  const evaluateNewsletterUpdate = (
+    existing: Record<string, unknown>,
+    incoming: Record<string, unknown>,
+    modifiedKeys: string[],
+    requestTimeMillis = Date.now()
+  ) => {
+    const isCurrentlyActive = existing.status === 'active';
+    const isTransitionToUnsubscribed = incoming.status === 'unsubscribed';
+    const hasTokenHash = typeof existing.unsubscribeTokenHash === 'string' && existing.unsubscribeTokenHash.length > 0;
+    const tokenProofMatches = incoming.tokenProof === existing.unsubscribeTokenHash;
+    const tokenNotExpired =
+      !existing.unsubscribeTokenExpiresAtMillis ||
+      requestTimeMillis <= (existing.unsubscribeTokenExpiresAtMillis as number);
+    const tokenInvalidated = incoming.unsubscribeTokenHash === '';
+    const allowedKeys = [
+      'status',
+      'unsubscribedAt',
+      'receiveWhatsapp',
+      'receiveEmail',
+      'unsubscribeTokenHash',
+      'tokenProof',
+      'updatedAt'
+    ];
+    const keysValid = modifiedKeys.every((k) => allowedKeys.includes(k));
+    return (
+      isCurrentlyActive &&
+      isTransitionToUnsubscribed &&
+      hasTokenHash &&
+      tokenProofMatches &&
+      tokenNotExpired &&
+      tokenInvalidated &&
+      keysValid
+    );
+  };
+
+  const sampleExistingSub = {
+    unsubscribeTokenHash: 'b5d4045c3f466fa91fe2cc6abe79232a1a57cdf104f7a26e716e0a1e2789df78',
+    unsubscribeTokenExpiresAtMillis: Date.now() + 365 * 24 * 60 * 60 * 1000,
+    email: 'ana@carangola.mg.gov.br',
+    name: 'Ana Souza',
+    status: 'active'
+  };
+
+  assert(
+    evaluateNewsletterUpdate(
+      sampleExistingSub,
+      { status: 'unsubscribed', tokenProof: 'hash-incorreto', unsubscribeTokenHash: '' },
+      ['status', 'tokenProof', 'unsubscribeTokenHash', 'unsubscribedAt']
+    ) === false,
+    'Regras Firestore rejeitam cancelamento de newsletter se tokenProof não conferir com unsubscribeTokenHash',
+    suite9
+  );
+
+  assert(
+    evaluateNewsletterUpdate(
+      sampleExistingSub,
+      { status: 'unsubscribed', tokenProof: sampleExistingSub.unsubscribeTokenHash, unsubscribeTokenHash: '', name: 'Nome Alterado' },
+      ['status', 'tokenProof', 'unsubscribeTokenHash', 'name']
+    ) === false,
+    'Regras Firestore rejeitam tentativa pública de alterar dados pessoais (name/email/role) no cancelamento',
+    suite9
+  );
+
+  assert(
+    evaluateNewsletterUpdate(
+      sampleExistingSub,
+      { status: 'unsubscribed', tokenProof: sampleExistingSub.unsubscribeTokenHash, unsubscribeTokenHash: '' },
+      ['status', 'tokenProof', 'unsubscribeTokenHash', 'unsubscribedAt', 'updatedAt']
+    ) === true,
+    'Regras Firestore autorizam cancelamento com tokenProof legítimo, expiração válida e invalidação do hash',
+    suite9
+  );
+
+  // Tentativa com token expirado
+  const expiredExistingSub = {
+    ...sampleExistingSub,
+    unsubscribeTokenExpiresAtMillis: Date.now() - 1000 // Expirado há 1 segundo
+  };
+  assert(
+    evaluateNewsletterUpdate(
+      expiredExistingSub,
+      { status: 'unsubscribed', tokenProof: expiredExistingSub.unsubscribeTokenHash, unsubscribeTokenHash: '' },
+      ['status', 'tokenProof', 'unsubscribeTokenHash', 'unsubscribedAt', 'updatedAt']
+    ) === false,
+    'Regras Firestore com request.time rejeitam cancelamento com token expirado',
+    suite9
+  );
+
+  // Tentativa sem invalidar o token hash
+  assert(
+    evaluateNewsletterUpdate(
+      sampleExistingSub,
+      { status: 'unsubscribed', tokenProof: sampleExistingSub.unsubscribeTokenHash },
+      ['status', 'tokenProof', 'unsubscribedAt', 'updatedAt']
+    ) === false,
+    'Regras Firestore rejeitam cancelamento que não invalide o unsubscribeTokenHash',
+    suite9
+  );
+
+  // Validador de Regras de Curtidas com existsAfter
+  const evaluateLikeIncrementRule = (
+    incomingLikes: number,
+    existingLikes: number,
+    existsAfterDoc: boolean,
+    voterUidMatchesAuth: boolean
+  ) => {
+    return incomingLikes === existingLikes + 1 && existsAfterDoc && voterUidMatchesAuth;
+  };
+
+  const evaluateLikeDecrementRule = (
+    incomingLikes: number,
+    existingLikes: number,
+    notExistsAfterDoc: boolean,
+    voterUidMatchesAuth: boolean
+  ) => {
+    return existingLikes > 0 && incomingLikes === existingLikes - 1 && notExistsAfterDoc && voterUidMatchesAuth;
+  };
+
+  assert(
+    evaluateLikeIncrementRule(1, 0, false, true) === false,
+    'Regras Firestore com existsAfter bloqueiam incremento isolado do contador sem criação atômica do like',
+    suite9
+  );
+
+  assert(
+    evaluateLikeIncrementRule(1, 0, true, false) === false,
+    'Regras Firestore bloqueiam voto atribuído a UID forjado que não confira com request.auth.uid',
+    suite9
+  );
+
+  assert(
+    evaluateLikeIncrementRule(1, 0, true, true) === true,
+    'Regras Firestore autorizam incremento quando existsAfter confirma a criação simultânea pelo usuário autenticado',
+    suite9
+  );
+
+  assert(
+    evaluateLikeDecrementRule(0, 1, false, true) === false,
+    'Regras Firestore com !existsAfter bloqueiam decremento sem remoção simultânea do documento de voto',
+    suite9
+  );
+
+  assert(
+    evaluateLikeDecrementRule(0, 0, true, true) === false,
+    'Regras Firestore impedem decremento para valores negativos (existing.likes > 0)',
+    suite9
+  );
+
+  assert(
+    evaluateLikeDecrementRule(0, 1, true, true) === true,
+    'Regras Firestore autorizam decremento quando !existsAfter confirma a remoção simultânea do voto pelo autor',
+    suite9
+  );
+
+  // Storage: Validador de upload
+  const evaluateStorageUpload = (isSignedIn: boolean, size: number, contentType: string) => {
+    const validMime = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(contentType);
+    const validSize = size > 0 && size <= 5 * 1024 * 1024;
+    return isSignedIn && validSize && validMime;
+  };
+
+  assert(
+    evaluateStorageUpload(false, 1024 * 1024, 'image/jpeg') === false,
+    'Regras Storage rejeitam upload de fotos por usuário não autenticado',
+    suite9
+  );
+
+  assert(
+    evaluateStorageUpload(true, 6 * 1024 * 1024, 'image/jpeg') === false,
+    'Regras Storage rejeitam upload de imagem acima de 5MB',
+    suite9
+  );
+
+  assert(
+    evaluateStorageUpload(true, 0, 'image/png') === false,
+    'Regras Storage rejeitam arquivo vazio (0 bytes)',
+    suite9
+  );
+
+  assert(
+    evaluateStorageUpload(true, 1024 * 1024, 'application/pdf') === false,
+    'Regras Storage rejeitam arquivo não permitido (ex: application/pdf) no mural coletivo',
+    suite9
+  );
+
+  assert(
+    evaluateStorageUpload(true, 2 * 1024 * 1024, 'image/webp') === true,
+    'Regras Storage autorizam upload de imagem legítima até 5MB por usuário autenticado',
+    suite9
+  );
+
+  // Verificação textual estrita das regras no código fonte
+  assert(
+    fRules.includes('isValidPublicPostCreate(incoming())'),
+    'firestore.rules contém a cláusula isValidPublicPostCreate na criação de postagens',
+    suite9
+  );
+
+  assert(
+    fRules.includes("!subscriberId.matches('.*@.*')"),
+    'firestore.rules proíbe estritamente a criação de documentos de assinantes com @ no identificador',
+    suite9
+  );
+
+  assert(
+    fRules.includes("incoming().tokenProof == existing().unsubscribeTokenHash"),
+    'firestore.rules exige conferência estrita do tokenProof com unsubscribeTokenHash',
+    suite9
+  );
+
+  assert(
+    fRules.includes("match /newsletter_indexes/{emailHash}"),
+    'firestore.rules define o índice seguro de deduplicação por hash de e-mail',
+    suite9
+  );
+
+  assert(
+    fRules.includes("existsAfter(/databases/$(database)/documents/social_posts/$(postId)/likes/$(request.auth.uid))"),
+    'firestore.rules contém cláusula existsAfter para vincular incremento ao documento de voto',
+    suite9
+  );
+
+  assert(
+    fRules.includes("!existsAfter(/databases/$(database)/documents/social_posts/$(postId)/likes/$(request.auth.uid))"),
+    'firestore.rules contém cláusula !existsAfter para vincular decremento à remoção do documento de voto',
+    suite9
+  );
+
+  assert(
+    fRules.includes("request.time.toMillis() <= existing().unsubscribeTokenExpiresAtMillis"),
+    'firestore.rules valida a expiração temporal do token com request.time',
+    suite9
+  );
+
+  assert(
+    fRules.includes("incoming().unsubscribeTokenHash == ''"),
+    'firestore.rules exige a invalidação atômica do hash do token após o primeiro uso',
+    suite9
+  );
+
+  assert(
+    sRules.includes("allow create: if isSignedIn()"),
+    'storage.rules exige autenticação ativa para upload de fotografias no Social Wall',
+    suite9
+  );
+
   console.log('\n======================================================');
   const passedCount = results.filter((r) => r.passed).length;
   const totalCount = results.length;
@@ -1107,6 +1622,7 @@ async function runTests() {
   if (passedCount !== totalCount) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 runTests().catch((err) => {

@@ -19,11 +19,15 @@ export default function handler(req: IncomingMessage, res: ExtendedResponse) {
         (process.env.FIREBASE_PRIVATE_KEY || process.env.FIREBASE_ADMIN_PRIVATE_KEY))
   );
 
+  const credentialsConfigured = smtpConfigured && firebaseAdminConfigured;
+
   return res.status(200).json({
     smtpConfigured,
     firebaseAdminConfigured,
-    activeProvider: smtpConfigured ? 'smtp' : 'none',
-    hasRealServerDelivery: smtpConfigured && firebaseAdminConfigured,
+    credentialsConfigured,
+    activeProvider: credentialsConfigured ? 'smtp' : 'none',
+    hasRealServerDelivery: credentialsConfigured,
+    deliverySemantics: 'configuration_only_requires_smtp_and_admin_auth',
     senderConfigured: Boolean(process.env.SMTP_USER)
   });
 }

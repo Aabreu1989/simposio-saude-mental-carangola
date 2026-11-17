@@ -234,6 +234,15 @@ service cloud.firestore {
         isValidOptionalString(data, 'updatedAt', 40);
     }
 
+    function isValidPublicPostCreate(data) {
+      return isValidSocialPost(data) &&
+        data.status == 'pending' &&
+        data.pinned == false &&
+        data.likes == 0 &&
+        !('moderatedAt' in data) &&
+        !('moderatedBy' in data);
+    }
+
     function isValidNotification(data) {
       return data.keys().hasAll(['id', 'title', 'body', 'category', 'targetAudience', 'sentAt', 'readCount', 'totalSent']) &&
         data.keys().hasOnly([
@@ -257,14 +266,16 @@ service cloud.firestore {
     function isValidNewsletterSubscriber(data) {
       return data.keys().hasAll(['id', 'email', 'subscribedAt', 'receiveWhatsapp']) &&
         data.keys().hasOnly([
-          'id', 'email', 'name', 'phone', 'role', 'city', 'institution',
+          'id', 'email', 'emailHash', 'name', 'phone', 'role', 'city', 'institution',
           'subscribedAt', 'receiveWhatsapp', 'receiveEmail', 'origin',
-          'status', 'unsubscribedAt', 'consent', 'updatedAt'
+          'status', 'unsubscribedAt', 'consent', 'updatedAt',
+          'unsubscribeTokenHash', 'unsubscribeTokenExpiresAt', 'unsubscribeTokenExpiresAtMillis', 'tokenProof'
         ]) &&
         isValidId(data.id) &&
         data.email is string && data.email.size() >= 5 && data.email.size() <= 160 &&
         data.subscribedAt is string && data.subscribedAt.size() <= 40 &&
         data.receiveWhatsapp is bool &&
+        isValidOptionalString(data, 'emailHash', 64) &&
         isValidOptionalBool(data, 'receiveEmail') &&
         isValidOptionalString(data, 'name', 120) &&
         isValidOptionalString(data, 'phone', 32) &&
@@ -275,6 +286,10 @@ service cloud.firestore {
         isValidOptionalString(data, 'status', 20) &&
         isValidOptionalString(data, 'unsubscribedAt', 40) &&
         isValidOptionalBool(data, 'consent') &&
+        isValidOptionalString(data, 'unsubscribeTokenHash', 64) &&
+        isValidOptionalString(data, 'unsubscribeTokenExpiresAt', 40) &&
+        isValidOptionalNumber(data, 'unsubscribeTokenExpiresAtMillis') &&
+        isValidOptionalString(data, 'tokenProof', 64) &&
         isValidOptionalString(data, 'updatedAt', 40);
     }
 
@@ -412,30 +427,41 @@ service cloud.firestore {
     }
 
     match /social_posts/{postId} {
-      // Mural público comunitário: todos podem visualizar as postagens
+      // Mural público comunitário: todos podem visualizar as postagens aprovadas
       allow get: if isValidId(postId);
       allow list: if true;
 
-      // Criação de postagem por qualquer participante
+      // Criação de postagem: administrador ou participante autenticado (inclusive anônimo)
+      // Publicações públicas nascem OBRIGATORIAMENTE com status 'pending', pinned false e likes 0
       allow create: if isValidId(postId) &&
-        isValidSocialPost(incoming()) &&
         incoming().id == postId &&
         (
           isAdmin() ||
-          incoming().likes <= 1
+          (isSignedIn() && isValidPublicPostCreate(incoming()))
         );
 
-      // Atualização: Admin pode moderar/editar tudo; público pode apenas incrementar/decrementar curtidas de forma consistente
+      // Atualização: Administrador pode moderar/editar tudo; participante autenticado pode apenas registrar curtida atômica
+      // O incremento exige a criação simultânea do documento de voto vinculado ao request.auth.uid (existsAfter).
+      // O decremento exige a remoção simultânea do documento correspondente (!existsAfter).
+      // Alterações isoladas do contador são terminantemente bloqueadas.
       allow update: if isValidId(postId) &&
         isValidSocialPost(incoming()) &&
         incoming().id == existing().id &&
         (
           isAdmin() ||
           (
+            isSignedIn() &&
             incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'updatedAt']) &&
             (
-              incoming().likes == existing().likes + 1 ||
-              (existing().likes > 0 && incoming().likes == existing().likes - 1)
+              (
+                incoming().likes == existing().likes + 1 &&
+                existsAfter(/databases/$(database)/documents/social_posts/$(postId)/likes/$(request.auth.uid))
+              ) ||
+              (
+                existing().likes > 0 &&
+                incoming().likes == existing().likes - 1 &&
+                !existsAfter(/databases/$(database)/documents/social_posts/$(postId)/likes/$(request.auth.uid))
+              )
             )
           )
         );
@@ -443,14 +469,16 @@ service cloud.firestore {
       // Exclusão estritamente restrita a administradores autenticados
       allow delete: if isValidId(postId) && isAdmin();
 
-      // Subcoleção para controle atômico de curtidas por eleitor/dispositivo
+      // Subcoleção para controle atômico e verificado de curtidas por identidade autenticada
       match /likes/{voterId} {
-        allow get: if isValidId(voterId);
+        allow get: if isValidId(voterId) && (isAdmin() || (isSignedIn() && request.auth.uid == voterId));
         allow list: if isAdmin();
-        allow create: if isValidId(voterId) &&
-          request.resource.data.keys().hasOnly(['votedAt', 'postId']) &&
-          request.resource.data.postId == postId;
-        allow delete: if isValidId(voterId) && (isAdmin() || resource.data.postId == postId);
+        allow create: if isSignedIn() &&
+          voterId == request.auth.uid &&
+          request.resource.data.keys().hasOnly(['votedAt', 'postId', 'voterId']) &&
+          request.resource.data.postId == postId &&
+          request.resource.data.voterId == request.auth.uid;
+        allow delete: if isSignedIn() && (isAdmin() || voterId == request.auth.uid);
       }
     }
 
@@ -472,24 +500,51 @@ service cloud.firestore {
       // PROTEÇÃO DE DADOS PESSOAIS (LGPD): leitura e listagem restrita estritamente a administradores autenticados
       allow get, list: if isAdmin();
 
-      // Assinatura pública via portal ou modal de inscrição
+      // Assinatura pública com ID aleatório/opaco (sem e-mail no path do documento) e consentimento obrigatório
       allow create: if isValidId(subscriberId) &&
+        !subscriberId.matches('.*@.*') &&
         isValidNewsletterSubscriber(incoming()) &&
-        incoming().id == subscriberId;
+        incoming().id == subscriberId &&
+        (isAdmin() || (incoming().status == 'active' && incoming().consent == true));
 
-      // Atualização: Admin gerencia todos; assinante público pode atualizar apenas consentimento e status (cancelar inscrição)
+      // Cancelamento exige prova de titularidade:
+      // 1. Validar a expiração temporal com request.time.
+      // 2. Permitir somente a transição de 'active' para 'unsubscribed'.
+      // 3. Invalidar o hash do token após o primeiro uso (unsubscribeTokenHash == '') impedindo reutilização.
+      // 4. Terceiros sem o token opaco não podem cancelar inscrições nem modificar dados pessoais.
       allow update: if isValidId(subscriberId) &&
         isValidNewsletterSubscriber(incoming()) &&
         incoming().id == existing().id &&
         (
           isAdmin() ||
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'status', 'unsubscribedAt', 'receiveWhatsapp', 'receiveEmail', 'updatedAt'
-          ])
+          (
+            existing().status == 'active' &&
+            incoming().status == 'unsubscribed' &&
+            'unsubscribeTokenHash' in existing() &&
+            existing().unsubscribeTokenHash != '' &&
+            (
+              !( 'unsubscribeTokenExpiresAtMillis' in existing() ) ||
+              request.time.toMillis() <= existing().unsubscribeTokenExpiresAtMillis
+            ) &&
+            incoming().tokenProof == existing().unsubscribeTokenHash &&
+            incoming().unsubscribeTokenHash == '' &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'unsubscribedAt', 'receiveWhatsapp', 'receiveEmail', 'unsubscribeTokenHash', 'tokenProof', 'updatedAt'
+            ])
+          )
         );
 
       // Exclusão estritamente administrativa
       allow delete: if isValidId(subscriberId) && isAdmin();
+    }
+
+    match /newsletter_indexes/{emailHash} {
+      // Prevenção de duplicação sem expor emails em texto claro
+      allow get, list: if isAdmin();
+      allow create: if isValidId(emailHash) &&
+        request.resource.data.keys().hasOnly(['subscriberId', 'createdAt']) &&
+        isValidId(request.resource.data.subscriberId);
+      allow update, delete: if isAdmin();
     }
 
     match /speakers/{speakerId} {

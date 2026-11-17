@@ -264,6 +264,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleOpenEditSpeaker = (spk: SpeakerProfile) => {
     setEditingSpeaker(spk);
+    const currentIgUrl = spk.socials?.instagramUrl && spk.socials.instagramUrl !== 'https://www.instagram.com/'
+      ? spk.socials.instagramUrl
+      : spk.socials?.instagram || spk.socials?.instagramUrl || '';
+    const currentLiUrl = spk.socials?.linkedinUrl && spk.socials.linkedinUrl !== 'https://www.linkedin.com/'
+      ? spk.socials.linkedinUrl
+      : spk.socials?.linkedinUrl || '';
+    const currentLattesUrl = spk.socials?.lattesUrl && spk.socials.lattesUrl !== 'https://lattes.cnpq.br/'
+      ? spk.socials.lattesUrl
+      : spk.socials?.lattesUrl || '';
+
     setSpeakerFormData({
       id: spk.id,
       name: spk.name,
@@ -275,9 +285,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       photoUrl: spk.photoUrl || '',
       photoPosition: spk.photoPosition || 'center 18%',
       bio: spk.bio,
-      instagramUrl: spk.socials?.instagramUrl || '',
-      linkedinUrl: spk.socials?.linkedinUrl || '',
-      lattesUrl: spk.socials?.lattesUrl || ''
+      instagramUrl: currentIgUrl,
+      linkedinUrl: currentLiUrl,
+      lattesUrl: currentLattesUrl
     });
     setIsSpeakerModalOpen(true);
   };
@@ -288,6 +298,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSpeakerNotice({ type: 'warning', text: 'Por favor, informe ao menos o nome completo e a especialidade/cargo do palestrante.' });
       return;
     }
+
+    const rawIg = speakerFormData.instagramUrl.trim();
+    let finalIgHandle: string | undefined = undefined;
+    let finalIgUrl: string | undefined = undefined;
+    if (rawIg) {
+      if (rawIg.startsWith('@')) {
+        finalIgHandle = rawIg;
+        finalIgUrl = `https://www.instagram.com/${rawIg.slice(1)}`;
+      } else if (/^https?:\/\//i.test(rawIg)) {
+        finalIgUrl = rawIg;
+        const match = rawIg.match(/instagram\.com\/([^/?#]+)/i);
+        finalIgHandle = match && match[1] ? `@${match[1]}` : editingSpeaker?.socials?.instagram;
+      } else if (rawIg.includes('instagram.com/')) {
+        finalIgUrl = `https://${rawIg.replace(/^\/+/, '')}`;
+        const match = rawIg.match(/instagram\.com\/([^/?#]+)/i);
+        finalIgHandle = match && match[1] ? `@${match[1]}` : undefined;
+      } else {
+        finalIgHandle = `@${rawIg.replace(/^@/, '')}`;
+        finalIgUrl = `https://www.instagram.com/${rawIg.replace(/^@/, '')}`;
+      }
+    }
+
+    const rawLi = speakerFormData.linkedinUrl.trim();
+    let finalLiUrl: string | undefined = undefined;
+    let finalLiHandle: string | undefined = undefined;
+    if (rawLi) {
+      if (/^https?:\/\//i.test(rawLi)) {
+        finalLiUrl = rawLi;
+        const match = rawLi.match(/linkedin\.com\/(?:in|company)\/([^/?#]+)/i);
+        finalLiHandle = match && match[1] ? match[1] : (editingSpeaker?.socials?.linkedin || speakerFormData.name.trim());
+      } else if (rawLi.includes('linkedin.com')) {
+        finalLiUrl = `https://${rawLi.replace(/^\/+/, '')}`;
+        const match = rawLi.match(/linkedin\.com\/(?:in|company)\/([^/?#]+)/i);
+        finalLiHandle = match && match[1] ? match[1] : speakerFormData.name.trim();
+      } else {
+        finalLiHandle = rawLi;
+        finalLiUrl = `https://www.linkedin.com/in/${rawLi.replace(/^@/, '')}`;
+      }
+    }
+
+    const rawLattes = speakerFormData.lattesUrl.trim();
+    const finalLattesUrl = rawLattes
+      ? /^https?:\/\//i.test(rawLattes)
+        ? rawLattes
+        : `https://${rawLattes}`
+      : undefined;
 
     const speakerId = editingSpeaker?.id || (speakerFormData.id ? speakerFormData.id : `spk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
     const savedProfile: SpeakerProfile = {
@@ -302,9 +358,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       photoPosition: speakerFormData.photoPosition || 'center 18%',
       bio: speakerFormData.bio.trim(),
       socials: {
-        instagramUrl: speakerFormData.instagramUrl.trim() || undefined,
-        linkedinUrl: speakerFormData.linkedinUrl.trim() || undefined,
-        lattesUrl: speakerFormData.lattesUrl.trim() || undefined
+        instagram: finalIgHandle,
+        instagramUrl: finalIgUrl,
+        linkedin: finalLiHandle,
+        linkedinUrl: finalLiUrl,
+        lattesUrl: finalLattesUrl
       }
     };
 
@@ -3911,27 +3969,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="flex flex-wrap items-center gap-1.5">
                               {hasInstagram && (
                                 <a
-                                  href={spk.socials?.instagramUrl || `https://instagram.com/${spk.socials?.instagram}`}
+                                  href={spk.socials?.instagramUrl || `https://www.instagram.com/${(spk.socials?.instagram || '').replace(/^@/, '')}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-pink-700 bg-pink-50 hover:bg-pink-100 rounded-md border border-pink-200 transition-colors"
                                   title="Ver Instagram do palestrante"
                                 >
                                   <Instagram className="w-3 h-3 text-pink-600" />
-                                  <span>Instagram</span>
+                                  <span>{spk.socials?.instagram || 'Instagram'}</span>
                                   <ExternalLink className="w-2.5 h-2.5 opacity-60" />
                                 </a>
                               )}
                               {hasLinkedin && (
                                 <a
-                                  href={spk.socials?.linkedinUrl || `https://linkedin.com/in/${spk.socials?.linkedin}`}
+                                  href={spk.socials?.linkedinUrl || `https://www.linkedin.com/in/${(spk.socials?.linkedin || '').replace(/^@/, '')}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-md border border-sky-200 transition-colors"
                                   title="Ver LinkedIn do palestrante"
                                 >
                                   <Linkedin className="w-3 h-3 text-sky-600" />
-                                  <span>LinkedIn</span>
+                                  <span>{spk.socials?.linkedin || 'LinkedIn'}</span>
                                   <ExternalLink className="w-2.5 h-2.5 opacity-60" />
                                 </a>
                               )}
@@ -4379,11 +4437,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div>
                             <label className="block text-[11px] font-semibold text-stone-600 mb-1 flex items-center gap-1">
                               <Instagram className="w-3.5 h-3.5 text-pink-600" />
-                              <span>Link do Instagram</span>
+                              <span>Instagram (@arroba ou Link)</span>
                             </label>
                             <input
-                              type="url"
-                              placeholder="https://instagram.com/usuario"
+                              type="text"
+                              placeholder="@usuario ou https://instagram.com/..."
                               value={speakerFormData.instagramUrl}
                               onChange={(e) => setSpeakerFormData({ ...speakerFormData, instagramUrl: e.target.value })}
                               className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-stone-300 focus:outline-none bg-white"
@@ -4394,10 +4452,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div>
                             <label className="block text-[11px] font-semibold text-stone-600 mb-1 flex items-center gap-1">
                               <Linkedin className="w-3.5 h-3.5 text-sky-600" />
-                              <span>Link do LinkedIn</span>
+                              <span>LinkedIn (@arroba ou Link)</span>
                             </label>
                             <input
-                              type="url"
+                              type="text"
                               placeholder="https://linkedin.com/in/usuario"
                               value={speakerFormData.linkedinUrl}
                               onChange={(e) => setSpeakerFormData({ ...speakerFormData, linkedinUrl: e.target.value })}
@@ -4412,7 +4470,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <span>Currículo Lattes (CNPq)</span>
                             </label>
                             <input
-                              type="url"
+                              type="text"
                               placeholder="http://lattes.cnpq.br/..."
                               value={speakerFormData.lattesUrl}
                               onChange={(e) => setSpeakerFormData({ ...speakerFormData, lattesUrl: e.target.value })}

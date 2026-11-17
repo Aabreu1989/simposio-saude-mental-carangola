@@ -187,23 +187,23 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     cpf: '',
     email: '',
     phone: '',
-    city: 'Carangola',
+    city: '',
     customCity: '',
-    professionalRole: 'Psicólogo(a)',
+    professionalRole: '',
     customRole: '',
     institution: '',
-    axisInterest: 'Eixo 1: Fluxograma da RAPS',
-    accessibilityNeeds: 'Nenhuma',
+    axisInterest: '',
+    accessibilityNeeds: '',
 
     // Redes Sociais (Requisito 1)
     instagram: '',
     linkedin: '',
 
     // Métricas Estratégicas do Painel de Gestão (Requisito 2)
-    susCareLevel: 'Atenção Primária / Saúde da Família (ESF/UBS/eMulti/ACS)',
-    ageGroup: '30 a 39 anos',
-    educationLevel: 'Superior Completo',
-    referralSource: 'Grupo de WhatsApp do SUS / Trabalho',
+    susCareLevel: '',
+    ageGroup: '',
+    educationLevel: '',
+    referralSource: '',
 
     // Aceite de Novidades por E-mail e WhatsApp (Requisito 4)
     notifyWhatsapp: true,
@@ -228,14 +228,35 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
     if (!formData.phone.trim() || formData.phone.replace(/\D/g, '').length < 10) {
       errs.phone = 'Telefone/WhatsApp com DDD é obrigatório';
     }
+    if (!formData.city) {
+      errs.city = 'Selecione seu município';
+    }
+    if (!formData.professionalRole) {
+      errs.professionalRole = 'Selecione sua categoria profissional/ocupação';
+    }
     if (formData.professionalRole === 'Outros' && !formData.customRole.trim()) {
       errs.customRole = 'Por favor, especifique sua categoria profissional/ocupação';
     }
     if ((formData.city === 'Outros' || formData.city === 'Outro Município de MG') && !formData.customCity.trim()) {
       errs.customCity = 'Por favor, informe seu município';
     }
+    if (!formData.susCareLevel) {
+      errs.susCareLevel = 'Selecione seu nível de atenção no SUS / vínculo';
+    }
     if (!formData.institution.trim()) {
       errs.institution = 'Instituição ou local de trabalho é obrigatório';
+    }
+    if (!formData.ageGroup) {
+      errs.ageGroup = 'Selecione sua faixa etária';
+    }
+    if (!formData.educationLevel) {
+      errs.educationLevel = 'Selecione sua escolaridade';
+    }
+    if (!formData.referralSource) {
+      errs.referralSource = 'Selecione como tomou conhecimento do simpósio';
+    }
+    if (!formData.axisInterest) {
+      errs.axisInterest = 'Selecione o eixo temático de maior interesse';
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -280,7 +301,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
       professionalRole: resolvedRole,
       institution: formData.institution.trim(),
       axisInterest: formData.axisInterest,
-      accessibilityNeeds: formData.accessibilityNeeds,
+      accessibilityNeeds: formData.accessibilityNeeds || 'Nenhuma',
       status: 'confirmada',
       registeredAt: new Date().toISOString(),
       certificateIssued: false,
@@ -580,237 +601,16 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                   )}
                 </div>
 
-                {/* QR Code graphic representation */}
-                <div className="pt-3 border-t border-stone-200 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-stone-100 rounded-lg border border-stone-200">
-                      <QrCode className="w-12 h-12 text-[#0a3641]" />
-                    </div>
-                    <div className="text-[11px] text-stone-500 leading-tight">
-                      Apresente na portaria para leitura ótica rápida no credenciamento.
-                    </div>
-                  </div>
+                {/* Rodapé do comprovante */}
+                <div className="pt-3 border-t border-stone-200 flex items-center justify-end">
                   <div className="text-right text-[11px] font-mono text-stone-400">
                     SUS Carangola · 2026
                   </div>
                 </div>
               </div>
 
-              {/* Confirmação de Envio do E-mail Oficial com Programa Completo e Número de Participante */}
-              {(() => {
-                const actuallyDelivered = Boolean(confirmationEmailResult?.actuallyDelivered);
-                const emailStatus = confirmationEmailResult?.emailStatus;
-                const isFailed = !isSendingEmail && emailStatus === 'failed';
-                const cardClasses = isSendingEmail
-                  ? 'from-teal-50 via-stone-50 to-teal-50 border-teal-300'
-                  : actuallyDelivered
-                  ? 'from-emerald-50 via-teal-50 to-emerald-50 border-emerald-300'
-                  : isFailed
-                  ? 'from-rose-50 via-amber-50 to-rose-50 border-rose-300'
-                  : 'from-amber-50 via-stone-50 to-amber-50 border-amber-300';
-                const iconBg = isSendingEmail
-                  ? 'bg-[#028090]'
-                  : actuallyDelivered
-                  ? 'bg-emerald-600'
-                  : isFailed
-                  ? 'bg-rose-600'
-                  : 'bg-[#d96522]';
-                const providerLabel =
-                  actuallyDelivered
-                    ? 'Gmail SMTP · Aceito'
-                    : isQueuedOffline
-                    ? 'Sincronização Pendente'
-                    : emailStatus === 'pending_config'
-                    ? 'Gmail SMTP Pendente'
-                    : 'Falha no Envio SMTP';
-
-                return (
-                  <div className={`p-4 sm:p-5 rounded-2xl bg-gradient-to-r ${cardClasses} border-2 shadow-sm space-y-3`}>
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <div className={`w-9 h-9 rounded-xl ${iconBg} text-white flex items-center justify-center shrink-0 shadow-2xs`}>
-                          {isSendingEmail ? (
-                            <RefreshCw className="w-5 h-5 text-white animate-spin" />
-                          ) : (
-                            <Mail className="w-5 h-5 text-white" />
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`text-xs font-mono font-bold uppercase tracking-wider ${
-                              isSendingEmail
-                                ? 'text-[#0a3641]'
-                                : actuallyDelivered
-                                ? 'text-emerald-800'
-                                : isFailed
-                                ? 'text-rose-900'
-                                : 'text-amber-900'
-                            }`}>
-                              {isQueuedOffline
-                                ? 'Envio de E-mail Aguardando Sincronização da Inscrição'
-                                : isSendingEmail
-                                ? 'Solicitando Envio no Servidor Gmail SMTP...'
-                                : actuallyDelivered
-                                ? 'E-mail Aceito pelo Servidor Gmail SMTP'
-                                : emailStatus === 'pending_config'
-                                ? 'Inscrição Confirmada · E-mail Pendente de Configuração SMTP'
-                                : 'Inscrição Confirmada · Falha no Envio do E-mail'}
-                            </span>
-                            {!isSendingEmail && (confirmationEmailResult || isQueuedOffline) && (
-                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                actuallyDelivered
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                  : isFailed
-                                  ? 'bg-rose-100 text-rose-900 border-rose-300'
-                                  : 'bg-amber-100 text-amber-900 border-amber-300'
-                              }`}>
-                                {providerLabel}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm font-extrabold text-[#0a3641] break-all mt-0.5">
-                            Destinatário registado: <span className={actuallyDelivered ? 'text-emerald-700 underline' : 'text-[#0a3641] underline'}>{submittedVoucher.email}</span>
-                          </div>
-                          {!isSendingEmail && actuallyDelivered && (
-                            <p className="text-[11px] text-emerald-900 mt-1 leading-relaxed">
-                              O servidor Gmail SMTP aceitou o envio para o endereço registado. A entrega final na caixa de entrada depende do provedor de e-mail (verifique também a caixa de spam).
-                            </p>
-                          )}
-                          {!isSendingEmail && !actuallyDelivered && (
-                            <p className="text-[11px] text-amber-900 mt-1 leading-relaxed">
-                              {confirmationEmailResult?.deliveryDetail ||
-                                `O conteúdo completo (Programa do Evento + Número de Participante ${submittedVoucher.code}) está disponível abaixo. Você pode reenviar ou salvar agora mesmo sem recriar sua inscrição.`}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <span className={`self-start inline-flex px-2.5 py-1 rounded-full text-[11px] font-bold border shrink-0 ${
-                        actuallyDelivered
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                          : 'bg-white text-stone-700 border-stone-300'
-                      }`}>
-                        {actuallyDelivered ? 'SMTP · Aceito' : 'E-mail Pendente'}
-                      </span>
-                    </div>
-
-                    <div className="bg-white/95 p-3.5 rounded-xl border border-stone-200 text-xs text-stone-700 space-y-2.5">
-                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-stone-100">
-                        <div className="flex items-center gap-2 font-bold text-[#0a3641]">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>
-                            Nº de Participante: <span className="font-mono text-sm font-black text-[#d96522]">{submittedVoucher.code}</span>
-                          </span>
-                        </div>
-                        <span className="text-[11px] font-bold text-[#028090] bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-md">
-                          Mesmo código para baixar o certificado
-                        </span>
-                      </div>
-                      <p className="text-stone-600 leading-relaxed text-[11px] sm:text-xs">
-                        Este comprovante reúne o <strong>Programa Completo do Evento (07h30 às 16h30)</strong>, o seu <strong>Número de Participante ({submittedVoucher.code})</strong> — exatamente o mesmo número usado para consultar e baixar o seu certificado oficial de 8 horas — e os links diretos do simpósio.
-                      </p>
-
-                      {/* Links diretos solicitados pelo usuário */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                        <a
-                          href="#programacao"
-                          onClick={() => onClose()}
-                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-[#028090]/10 hover:bg-[#028090]/20 text-[#028090] border border-[#028090]/30 transition-colors"
-                        >
-                          <span>📅 Ver Programa Completo</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                        {isCertificateAvailableForPublic() ? (
-                          <a
-                            href={`#certificado?code=${encodeURIComponent(submittedVoucher.code)}`}
-                            onClick={() => onClose()}
-                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-[#d96522]/10 hover:bg-[#d96522]/20 text-[#d96522] border border-[#d96522]/30 transition-colors"
-                          >
-                            <span>🎓 Baixar Certificado</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        ) : (
-                          <span
-                            title={`O botão para baixar o certificado ficará disponível somente após o encerramento do evento (${CERTIFICATE_RELEASE_LABEL}).`}
-                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-stone-100 text-stone-500 border border-stone-200 cursor-not-allowed text-center"
-                          >
-                            <Lock className="w-3 h-3 text-stone-400 shrink-0" />
-                            <span>Certificado após o evento ({CERTIFICATE_RELEASE_LABEL})</span>
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Ações do E-mail */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setIsEmailPreviewOpen(true)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0a3641] hover:bg-[#028090] text-white shadow-2xs transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-[#ea7a38]" />
-                        <span>Visualizar E-mail (Programa + Nº)</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleResendEmail}
-                        disabled={isResendingEmail || isSendingEmail}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 transition-colors cursor-pointer disabled:opacity-60"
-                      >
-                        <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isResendingEmail ? 'animate-spin' : ''}`} />
-                        <span>{isResendingEmail ? 'Enviando...' : emailResentSuccess ? 'Tentativa Concluída' : 'Reenviar E-mail'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCopyEmailText}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-stone-100 text-stone-700 border border-stone-300 transition-colors cursor-pointer"
-                      >
-                        {copiedEmail ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-stone-500" />}
-                        <span>{copiedEmail ? 'Copiado!' : 'Copiar Texto Completo'}</span>
-                      </button>
-                      {(() => {
-                        const emailPayload = buildRegistrationConfirmationEmail(submittedVoucher, INITIAL_SCHEDULE, config);
-                        const mailtoHref = `mailto:${encodeURIComponent(submittedVoucher.email)}?subject=${encodeURIComponent(emailPayload.subject)}&body=${encodeURIComponent(emailPayload.bodyText.slice(0, 1800))}`;
-                        return (
-                          <a
-                            href={mailtoHref}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-stone-100 text-[#0a3641] border border-stone-300 transition-colors"
-                          >
-                            <Mail className="w-3.5 h-3.5 text-[#ea7a38]" />
-                            <span>Abrir no App de E-mail</span>
-                          </a>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Call-to-action cards: WhatsApp, Calendar & Sharing */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                {/* Salvar Comprovante no WhatsApp */}
-                <a
-                  href={createWhatsAppChatUrl(
-                    submittedVoucher.phone,
-                    formatRegistrationWhatsAppMessage(submittedVoucher, config)
-                  )}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-50/70 hover:bg-emerald-100/80 transition-colors flex items-center gap-3 text-left cursor-pointer group"
-                  title="Abrir no WhatsApp e salvar comprovante oficial"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-[#25D366] text-white flex items-center justify-center shrink-0 shadow-2xs">
-                    <MessageSquare className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-emerald-950 group-hover:text-emerald-700">
-                      Salvar no WhatsApp
-                    </div>
-                    <div className="text-[11px] text-emerald-800/80">
-                      Comprovante no seu celular
-                    </div>
-                  </div>
-                </a>
-
+              {/* Call-to-action cards: Calendar & Sharing */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 {/* Adicionar ao Calendário (Requisito 3) */}
                 <button
                   type="button"
@@ -1037,14 +837,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                       Município de Atuação / Residência *
                     </label>
                     <select
+                      required
                       value={formData.city}
                       onChange={(e) => setFormData({ ...formData, city: e.target.value })}
                       className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                     >
+                      <option value="">Selecione seu município...</option>
                       {REGIONAL_CITIES.map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
+                    {errors.city && <p className="text-xs text-red-600 mt-1">{errors.city}</p>}
                   </div>
 
                   <div>
@@ -1052,14 +855,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                       Categoria Profissional / Ocupação *
                     </label>
                     <select
+                      required
                       value={formData.professionalRole}
                       onChange={(e) => setFormData({ ...formData, professionalRole: e.target.value })}
                       className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                     >
+                      <option value="">Selecione sua categoria profissional...</option>
                       {PROFESSIONAL_ROLES.map((role) => (
                         <option key={role} value={role}>{role}</option>
                       ))}
                     </select>
+                    {errors.professionalRole && <p className="text-xs text-red-600 mt-1">{errors.professionalRole}</p>}
                   </div>
 
                   {(formData.city === 'Outros' || formData.city === 'Outro Município de MG') && (
@@ -1103,14 +909,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     Nível de Atenção no SUS / Vínculo Institucional *
                   </label>
                   <select
+                    required
                     value={formData.susCareLevel}
                     onChange={(e) => setFormData({ ...formData, susCareLevel: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                   >
+                    <option value="">Selecione o nível de atenção / vínculo...</option>
                     {SUS_CARE_LEVELS.map((lvl) => (
                       <option key={lvl} value={lvl}>{lvl}</option>
                     ))}
                   </select>
+                  {errors.susCareLevel && <p className="text-xs text-red-600 mt-1">{errors.susCareLevel}</p>}
                 </div>
 
                 {/* Instituição / Lotação */}
@@ -1136,14 +945,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                       Faixa Etária *
                     </label>
                     <select
+                      required
                       value={formData.ageGroup}
                       onChange={(e) => setFormData({ ...formData, ageGroup: e.target.value })}
                       className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                     >
+                      <option value="">Selecione sua faixa etária...</option>
                       {AGE_GROUPS.map((grp) => (
                         <option key={grp} value={grp}>{grp}</option>
                       ))}
                     </select>
+                    {errors.ageGroup && <p className="text-xs text-red-600 mt-1">{errors.ageGroup}</p>}
                   </div>
 
                   <div>
@@ -1151,14 +963,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                       Escolaridade / Nível de Formação *
                     </label>
                     <select
+                      required
                       value={formData.educationLevel}
                       onChange={(e) => setFormData({ ...formData, educationLevel: e.target.value })}
                       className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                     >
+                      <option value="">Selecione sua escolaridade...</option>
                       {EDUCATION_LEVELS.map((ed) => (
                         <option key={ed} value={ed}>{ed}</option>
                       ))}
                     </select>
+                    {errors.educationLevel && <p className="text-xs text-red-600 mt-1">{errors.educationLevel}</p>}
                   </div>
                 </div>
 
@@ -1168,14 +983,17 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     Como tomou conhecimento do Simpósio? *
                   </label>
                   <select
+                    required
                     value={formData.referralSource}
                     onChange={(e) => setFormData({ ...formData, referralSource: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                   >
+                    <option value="">Selecione como soube do simpósio...</option>
                     {REFERRAL_SOURCES.map((src) => (
                       <option key={src} value={src}>{src}</option>
                     ))}
                   </select>
+                  {errors.referralSource && <p className="text-xs text-red-600 mt-1">{errors.referralSource}</p>}
                 </div>
               </div>
 
@@ -1191,15 +1009,18 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     Eixo Temático de Maior Interesse *
                   </label>
                   <select
+                    required
                     value={formData.axisInterest}
                     onChange={(e) => setFormData({ ...formData, axisInterest: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                   >
+                    <option value="">Selecione o eixo temático de interesse...</option>
                     <option value="Eixo 1: Fluxograma da RAPS">Eixo 1: Fluxograma da RAPS</option>
                     <option value="Eixo 2: Hospital Geral & Leitos de Retaguarda">Eixo 2: Hospital Geral & Leitos de Retaguarda</option>
                     <option value="Eixo 3: Judicialização & Cuidado em Liberdade">Eixo 3: Judicialização & Cuidado em Liberdade</option>
                     <option value="Todos os Eixos (Interesse Geral)">Todos os Eixos (Interesse Geral)</option>
                   </select>
+                  {errors.axisInterest && <p className="text-xs text-red-600 mt-1">{errors.axisInterest}</p>}
                 </div>
 
                 {/* Acessibilidade */}
@@ -1212,6 +1033,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
                     onChange={(e) => setFormData({ ...formData, accessibilityNeeds: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
                   >
+                    <option value="">Selecione se houver necessidade (opcional)...</option>
                     <option value="Nenhuma">Nenhuma necessidade específica</option>
                     <option value="Intérprete de Libras">Intérprete de Libras</option>
                     <option value="Acesso para Cadeira de Rodas / Mobilidade">Acesso para Cadeira de Rodas / Mobilidade Reduzida</option>

@@ -207,6 +207,11 @@ export interface NewsletterSubscriber {
   status?: 'active' | 'unsubscribed';
   unsubscribedAt?: string;
   consent?: boolean;
+  emailHash?: string;
+  unsubscribeTokenHash?: string;
+  unsubscribeTokenExpiresAt?: string;
+  unsubscribeTokenExpiresAtMillis?: number;
+  tokenProof?: string;
   updatedAt?: string;
 }
 

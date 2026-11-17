@@ -22,8 +22,10 @@ service firebase.storage {
       // Leitura pública das fotos do mural
       allow read: if true;
 
-      // Criação de foto: imagem válida (jpeg, png, webp) até 5MB
-      allow create: if request.resource.size <= 5 * 1024 * 1024 &&
+      // Criação de foto: imagem válida (jpeg, png, webp) até 5MB, requer autenticação (inclusive anônima)
+      allow create: if isSignedIn() &&
+        request.resource.size > 0 &&
+        request.resource.size <= 5 * 1024 * 1024 &&
         request.resource.contentType.matches('image/(jpeg|jpg|png|webp)') &&
         postId.size() >= 1 && postId.size() <= 128 &&
         fileName.size() >= 1 && fileName.size() <= 160;

@@ -247,12 +247,23 @@ async function getGoogleAdminAccessToken(): Promise<string | null> {
   return cachedAdminToken.token;
 }
 
-const DEFAULT_FIREBASE_PROJECT_ID = 'gen-lang-client-0461787389';
-const DEFAULT_FIRESTORE_DB_ID = 'ai-studio-remixremixremixr-388dcae0-ebed-41c2-a845-2116ad689a34';
+const DEFAULT_FIREBASE_PROJECT_ID = 'simposio-carangola';
+const DEFAULT_FIRESTORE_DB_ID = '(default)';
 
 function readFirestoreString(fields: Record<string, any> | undefined, key: string, fallback = ''): string {
   const val = fields?.[key]?.stringValue;
   return typeof val === 'string' ? val : fallback;
+}
+
+const STRICT_SINGLE_EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+export function isValidSingleRecipientEmail(email: string): boolean {
+  if (!email || typeof email !== 'string') return false;
+  const trimmed = email.trim();
+  if (trimmed.length > 160) return false;
+  if (/[\s,;<>()]/.test(trimmed)) return false;
+  if ((trimmed.match(/@/g) || []).length !== 1) return false;
+  return STRICT_SINGLE_EMAIL_REGEX.test(trimmed);
 }
 
 const defaultFirestoreLookup: RegistrationLookupFn = async (
@@ -263,10 +274,39 @@ const defaultFirestoreLookup: RegistrationLookupFn = async (
   const databaseId = process.env.FIRESTORE_DATABASE_ID || DEFAULT_FIRESTORE_DB_ID;
   const baseDocsUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(databaseId)}/documents`;
 
-  // 1. Validate existence of registration permission document in Firestore
+  // 1. Obtain admin credentials first for authoritative Firestore access
+  let adminToken: string | null = null;
+  try {
+    adminToken = await getGoogleAdminAccessToken();
+  } catch (err: any) {
+    return {
+      ok: false,
+      httpStatus: 502,
+      errorCode: 'FIRESTORE_LOOKUP_ERROR',
+      error: `Erro ao autenticar credenciais administrativas do Firebase: ${err?.message || String(err)}`
+    };
+  }
+
+  if (!adminToken) {
+    return {
+      ok: false,
+      httpStatus: 503,
+      errorCode: 'FIREBASE_ADMIN_NOT_CONFIGURED',
+      error:
+        'Credenciais privadas Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON) não configuradas no servidor para recuperar o endereço de e-mail registado com segurança.'
+    };
+  }
+
+  const adminHeaders = {
+    Authorization: `Bearer ${adminToken}`
+  };
+
+  // 2. Validate existence of registration permission document in Firestore
   let permFields: Record<string, any>;
   try {
-    const permRes = await fetch(`${baseDocsUrl}/certificate_permissions/${encodeURIComponent(code)}`);
+    const permRes = await fetch(`${baseDocsUrl}/certificate_permissions/${encodeURIComponent(code)}`, {
+      headers: adminHeaders
+    });
     if (permRes.status === 404) {
       return {
         ok: false,
@@ -328,34 +368,10 @@ const defaultFirestoreLookup: RegistrationLookupFn = async (
     };
   }
 
-  // 2. Retrieve PII registration record (containing the participant's authoritative email) using Admin credentials
-  let adminToken: string | null = null;
-  try {
-    adminToken = await getGoogleAdminAccessToken();
-  } catch (err: any) {
-    return {
-      ok: false,
-      httpStatus: 502,
-      errorCode: 'FIRESTORE_LOOKUP_ERROR',
-      error: `Erro ao autenticar credenciais administrativas do Firebase: ${err?.message || String(err)}`
-    };
-  }
-
-  if (!adminToken) {
-    return {
-      ok: false,
-      httpStatus: 503,
-      errorCode: 'FIREBASE_ADMIN_NOT_CONFIGURED',
-      error:
-        'Credenciais privadas Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON) não configuradas no servidor para recuperar o endereço de e-mail registado com segurança.'
-    };
-  }
-
+  // 3. Retrieve PII registration record using Admin credentials
   try {
     const regRes = await fetch(`${baseDocsUrl}/registrations/${encodeURIComponent(targetRegId)}`, {
-      headers: {
-        Authorization: `Bearer ${adminToken}`
-      }
+      headers: adminHeaders
     });
 
     if (regRes.status === 404) {
@@ -381,12 +397,12 @@ const defaultFirestoreLookup: RegistrationLookupFn = async (
     const email = readFirestoreString(regFields, 'email').trim().toLowerCase();
     const regCode = readFirestoreString(regFields, 'code', code).trim().toUpperCase();
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!isValidSingleRecipientEmail(email)) {
       return {
         ok: false,
         httpStatus: 422,
         errorCode: 'FIRESTORE_LOOKUP_ERROR',
-        error: 'A inscrição encontrada no Firestore não possui um endereço de e-mail válido.'
+        error: 'A inscrição encontrada no Firestore não possui um endereço de e-mail único e válido.'
       };
     }
 
@@ -592,7 +608,8 @@ const FORBIDDEN_CLIENT_KEYS = [
   'replyTo',
   'from',
   'cc',
-  'bcc'
+  'bcc',
+  'axisInterest'
 ] as const;
 
 export default async function handler(req: ExtendedRequest, res: ExtendedResponse) {
@@ -717,6 +734,15 @@ export default async function handler(req: ExtendedRequest, res: ExtendedRespons
   }
 
   const trustedRecord = lookupResult.record;
+  if (!isValidSingleRecipientEmail(trustedRecord.email)) {
+    return res.status(422).json({
+      success: false,
+      actuallySent: false,
+      emailStatus: 'failed',
+      errorCode: 'FIRESTORE_LOOKUP_ERROR',
+      error: 'A inscrição encontrada no Firestore não possui um endereço de e-mail único e válido.'
+    });
+  }
   const ledgerKey = `sent:${trustedRecord.code}`;
   const state = loadLedgerState();
   const existingSent = state.sentRecords[ledgerKey];

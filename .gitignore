@@ -9,6 +9,7 @@ coverage/
 .vercel/
 .antigravity/
 .gmp_cache/
+scratch/
 
 
 .vercel

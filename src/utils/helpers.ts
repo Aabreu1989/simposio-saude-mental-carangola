@@ -263,7 +263,18 @@ export const broadcastRealtimeUpdate = (key: string) => {
 export const saveSpeakersToStorage = (speakers: SpeakerProfile[]): void => {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(STORAGE_KEYS.SPEAKERS, JSON.stringify(speakers));
+    try {
+      localStorage.setItem(STORAGE_KEYS.SPEAKERS, JSON.stringify(speakers));
+    } catch {
+      const compact = speakers.map((spk) => {
+        if (spk.photoUrl && spk.photoUrl.startsWith('data:') && spk.photoUrl.length > 80000) {
+          const initialMatch = SPEAKERS_PROFILES.find((p) => p.id === spk.id);
+          return { ...spk, photoUrl: initialMatch?.photoUrl || '' };
+        }
+        return spk;
+      });
+      localStorage.setItem(STORAGE_KEYS.SPEAKERS, JSON.stringify(compact));
+    }
     broadcastRealtimeUpdate(STORAGE_KEYS.SPEAKERS);
   } catch (err) {
     console.warn('Aviso ao gravar palestrantes em localStorage:', err);
