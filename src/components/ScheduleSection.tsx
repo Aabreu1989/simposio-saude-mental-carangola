@@ -154,7 +154,7 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
             </div>
             <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
               <span className="text-emerald-400 font-bold block">13:00 – 16:30</span>
-              <span className="text-white font-sans font-semibold">Mesas 2 e 3, Cultural & Encerramento</span>
+              <span className="text-white font-sans font-semibold">Cultural, Mesas 2 e 3, Debate & Encerramento</span>
             </div>
           </div>
         </div>

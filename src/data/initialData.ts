@@ -212,7 +212,7 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
         institution: 'CAPS ad'
       },
       {
-        name: 'Amanda Souza Lopes dos Santos',
+        name: 'Amanda de Souza Lopes',
         role: 'Debatedora',
         institution: 'CECO'
       }
@@ -231,13 +231,22 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
   {
     id: 'sch-7',
     timeStart: '13:00',
+    timeEnd: '13:30',
+    title: 'Apresentaçao Centro de Convivência',
+    type: 'plenaria',
+    location: 'Auditório UEMG Carangola',
+    description: 'Poemas que encantam: palavras que abraçam, provocam e fazem pensar.\nMomento cultural e de sensibilização.'
+  },
+  {
+    id: 'sch-8',
+    timeStart: '13:30',
     timeEnd: '14:30',
     title: 'Mesa 2 Palavras que cuidam, histórias que transformam',
     type: 'mesa',
     axisId: 'eixo-2',
     location: 'Auditório UEMG Carangola',
     mediator: {
-      name: 'Raquel Martins Pinheiro',
+      name: 'Raquel Pinheiro',
       role: 'Mediadora',
       institution: 'Mesa 2 · O hospital geral, leitos de retaguarda e pronto socorro'
     },
@@ -256,30 +265,21 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     description: 'Tema: O hospital geral, leitos de retaguarda e pronto socorro.'
   },
   {
-    id: 'sch-8',
-    timeStart: '14:30',
-    timeEnd: '14:45',
-    title: 'Apresentaçao Centro de Convivência',
-    type: 'plenaria',
-    location: 'Auditório UEMG Carangola',
-    description: 'Poemas que encantam: palavras que abraçam, provocam e fazem pensar.\nMomento cultural e de sensibilização.'
-  },
-  {
     id: 'sch-9',
-    timeStart: '14:45',
-    timeEnd: '16:00',
+    timeStart: '14:30',
+    timeEnd: '15:30',
     title: 'Mesa 3 Redes que se encontram, cuidados que se constroem',
     type: 'mesa',
     axisId: 'eixo-3',
     location: 'Auditório UEMG Carangola',
     mediator: {
-      name: 'Christine Vianna Algarves Magalhães',
+      name: 'Christine Vianna',
       role: 'Mediadora',
-      institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade'
+      institution: 'Mesa 3 · A judiciarização da saúde mental e o cuidado em liberdade'
     },
     speakers: [
       {
-        name: 'Cristiana Marina de Souza',
+        name: 'Cristiana Marina Souza',
         role: 'Debatedora',
         institution: 'Mesa 3'
       },
@@ -289,15 +289,24 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
         institution: 'Mesa 3'
       },
       {
-        name: 'Dr. Ricardo Luiz Narciso Moebus',
+        name: 'Ricardo Moebus',
         role: 'Médico Psiquiatra · Professor e Pesquisador',
         institution: 'Escola de Medicina UFOP · CAPS Infância e Juventude Ouro Preto'
       }
     ],
-    description: 'Tema: A judicialização da saúde mental e o cuidado em liberdade'
+    description: 'Tema:  A judiciarização da saúde mental e o cuidado em liberdade'
   },
   {
     id: 'sch-10',
+    timeStart: '15:30',
+    timeEnd: '16:00',
+    title: 'Debate do dia',
+    type: 'plenaria',
+    location: 'Auditório UEMG Carangola',
+    description: 'Debate do dia'
+  },
+  {
+    id: 'sch-11',
     timeStart: '16:00',
     timeEnd: '16:30',
     title: 'Encerramento',
@@ -847,7 +856,7 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   },
   {
     id: 'spk-amanda',
-    name: 'Amanda Souza Lopes dos Santos',
+    name: 'Amanda de Souza Lopes',
     role: 'Debatedora',
     institution: 'CECO',
     sessionGroup: 'mesa-1',
@@ -871,12 +880,12 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   },
   {
     id: 'spk-raquel-pinheiro',
-    name: 'Raquel Martins Pinheiro',
+    name: 'Raquel Pinheiro',
     role: 'Mediadora',
     institution: 'Mesa 2 · O hospital geral, leitos de retaguarda e pronto socorro',
     sessionGroup: 'mesa-2',
     sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
-    sessionTime: '13:00 – 14:30',
+    sessionTime: '13:30 – 14:30',
     photoUrl: 'https://lh3.googleusercontent.com/d/164x1fTpuX5ccozFhrOyIII3Dda-EutZo',
     photoPosition: 'center 18%',
     bio: 'Terapeuta Ocupacional. Especialista em Saúde Mental. Experto em dependências (UCM - Espanha). MBA Executivo em Saúde. Especialista em Gestão de Redes de Atenção à Saúde. Ex-diretora e Terapeuta do Centro Mineiro de Toxicomania/ FHEMIG. Supervisora Clínico Institucional.',
@@ -889,7 +898,7 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     institution: 'UFJF · CAPS I Carangola',
     sessionGroup: 'mesa-2',
     sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
-    sessionTime: '13:00 – 14:30',
+    sessionTime: '13:30 – 14:30',
     photoUrl: 'https://lh3.googleusercontent.com/d/1oTUz3LV55E7_oFaiJuonOk4UzpcFfZ-1',
     photoPosition: 'center 18%',
     bio: 'Assistente Social, graduada pela Universidade Federal de Juiz de Fora (UFJF), especialista em Saúde Mental pela mesma instituição. Possui formação em Terapia Familiar e Psicanálise, além de participação no curso Nós na Rede, da Fundação Oswaldo Cruz (Fiocruz). Atua na área da Saúde Mental desde sua formação acadêmica, período em que participou de pesquisa nos hospitais psiquiátricos de Juiz de Fora. Possui experiência profissional em clínica psiquiátrica, tendo atuado também na construção da rede de atenção psicossocial de Carangola, integrando a primeira equipe do CAPS I do município.',
@@ -902,18 +911,18 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     institution: 'GRS',
     sessionGroup: 'mesa-2',
     sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
-    sessionTime: '13:00 – 14:30',
+    sessionTime: '13:30 – 14:30',
     bio: '',
     socials: {}
   },
   {
     id: 'spk-christine-vianna',
-    name: 'Christine Vianna Algarves Magalhães',
+    name: 'Christine Vianna',
     role: 'Mediadora',
-    institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade',
+    institution: 'Mesa 3 · A judiciarização da saúde mental e o cuidado em liberdade',
     sessionGroup: 'mesa-3',
     sessionLabel: 'Mesa 3 · Judicialização e Direitos',
-    sessionTime: '14:45 – 16:00',
+    sessionTime: '14:30 – 15:30',
     photoUrl: 'https://lh3.googleusercontent.com/d/1ECDp9a7CYDobMLRnRHKdKkJ1H8QlAsoY',
     photoPosition: 'center 18%',
     bio: 'Supervisora clínico institucional da Rede de Atenção Psicossocial de Carangola, RAPS.\n\nGraduação em Artes Plásticas pela Universidade do Estado de Minas Gerais (UEMG), com especializações em Análise Institucional, Esquizoanálise e Esquizodrama; Assistência aos Usuários de Álcool e Outras Drogas; Políticas de Saúde Mental e Atenção Psicossocial; Arteterapia; e Pesquisa e Ensino no Campo das Artes Plásticas. Experiência no SUS desde 2000.',
@@ -921,12 +930,12 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   },
   {
     id: 'spk-cristiana-marina',
-    name: 'Cristiana Marina de Souza',
+    name: 'Cristiana Marina Souza',
     role: 'Debatedora',
-    institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade',
+    institution: 'Mesa 3 · A judiciarização da saúde mental e o cuidado em liberdade',
     sessionGroup: 'mesa-3',
     sessionLabel: 'Mesa 3 · Judicialização e Direitos',
-    sessionTime: '14:45 – 16:00',
+    sessionTime: '14:30 – 15:30',
     bio: '',
     socials: {}
   },
@@ -934,10 +943,10 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     id: 'spk-marcos-alexandre',
     name: 'Marcos Alexandre',
     role: 'Debatedor',
-    institution: 'Mesa 3 · A judicialização da saúde mental e o cuidado em liberdade',
+    institution: 'Mesa 3 · A judiciarização da saúde mental e o cuidado em liberdade',
     sessionGroup: 'mesa-3',
     sessionLabel: 'Mesa 3 · Judicialização e Direitos',
-    sessionTime: '14:45 – 16:00',
+    sessionTime: '14:30 – 15:30',
     bio: '',
     socials: {}
   },
@@ -948,7 +957,7 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     institution: 'Escola de Medicina UFOP · CAPS Infância e Juventude Ouro Preto',
     sessionGroup: 'mesa-3',
     sessionLabel: 'Mesa 3 · Judicialização e Direitos',
-    sessionTime: '14:45 – 16:00',
+    sessionTime: '14:30 – 15:30',
     photoUrl: 'https://lh3.googleusercontent.com/d/1xllBR5PaSr5y39gBITmcxU-tvRVTAv5U',
     photoPosition: 'center 18%',
     bio: 'Médico psiquiatra, professor e pesquisador brasileiro.\n\nFormação Acadêmica:\n• Medicina: Universidade Federal de Minas Gerais (UFMG), formado em 1994.\n• Especialização: Psiquiatria e Psiquiatria da Infância e Adolescência pela Fundação Hospitalar do Estado de Minas Gerais (FHEMIG).\n• Mestrado e Doutorado: Medicina pela Universidade Federal do Rio de Janeiro (UFRJ).\n• Pós-doutorado: Racionalidades da Saúde pela Universidade Federal Fluminense (UFF).\n\nAtuação Profissional:\n• Docência: Professor associado do Departamento de Medicina de Família, Saúde Mental e Coletiva da Escola de Medicina da Universidade Federal de Ouro Preto (UFOP).\n• Saúde Pública: Atua como psiquiatra no CAPS Infância e Juventude em Ouro Preto, além de desenvolver pesquisas em áreas como saúde coletiva, dependências químicas.',
