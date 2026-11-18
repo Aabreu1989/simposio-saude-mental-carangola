@@ -33,7 +33,10 @@ import {
   getDeletedRegistrationIds,
   addDeletedRegistrationId,
   getDeletedPostIds,
-  addDeletedPostId
+  addDeletedPostId,
+  broadcastRealtimeUpdate,
+  mergeSpeakersWithDefaults,
+  INVENTED_POST_IDS
 } from './utils/helpers.ts';
 import { isSupabaseConfigured, supabaseRestQuery } from './services/supabaseClient.ts';
 import {
@@ -258,18 +261,35 @@ export default function App() {
 
     const unsubSpeakers = subscribeSpeakers((remoteSpeakers) => {
       if (remoteSpeakers && remoteSpeakers.length > 0) {
-        setSpeakers(remoteSpeakers);
-        saveSpeakersToStorage(remoteSpeakers);
+        setSpeakers((currentSpeakers) => {
+          const merged = mergeSpeakersWithDefaults(remoteSpeakers, currentSpeakers);
+          saveSpeakersToStorage(merged);
+          return merged;
+        });
       }
     });
 
     const unsubPosts = subscribeSocialPosts((remotePosts) => {
       const deletedIds = getDeletedPostIds();
-      const validRemote = remotePosts.filter((p) => !deletedIds.has(p.id));
+      remotePosts.forEach((p) => {
+        if (p && INVENTED_POST_IDS.has(p.id)) {
+          deleteSocialPostInDb(p.id).catch(() => {});
+        }
+      });
+      const validRemote = remotePosts.filter((p) => !deletedIds.has(p.id) && !INVENTED_POST_IDS.has(p.id));
       setPosts((prev) => {
-        const remoteIds = new Set(validRemote.map((p) => p.id));
-        const localOnly = prev.filter((p) => !remoteIds.has(p.id) && !deletedIds.has(p.id));
-        const combined = [...validRemote, ...localOnly].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const prevMap = new Map(prev.map((p) => [p.id, p]));
+        const enrichedRemote = validRemote.map((rp) => {
+          const localCopy = prevMap.get(rp.id);
+          return {
+            ...rp,
+            imageUrl: rp.imageUrl || localCopy?.imageUrl,
+            hasLiked: rp.hasLiked ?? localCopy?.hasLiked
+          };
+        });
+        const remoteIds = new Set(enrichedRemote.map((p) => p.id));
+        const localOnly = prev.filter((p) => !remoteIds.has(p.id) && !deletedIds.has(p.id) && !INVENTED_POST_IDS.has(p.id));
+        const combined = [...enrichedRemote, ...localOnly].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         saveToStorage(STORAGE_KEYS.POSTS, combined);
         return combined;
       });

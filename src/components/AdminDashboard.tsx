@@ -324,6 +324,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         finalIgHandle = `@${rawIg.replace(/^@/, '')}`;
         finalIgUrl = `https://www.instagram.com/${rawIg.replace(/^@/, '')}`;
       }
+    } else if (editingSpeaker?.socials?.instagram) {
+      finalIgHandle = editingSpeaker.socials.instagram;
+      finalIgUrl = editingSpeaker.socials.instagramUrl || `https://www.instagram.com/${editingSpeaker.socials.instagram.replace(/^@/, '')}`;
     }
 
     const rawLi = speakerFormData.linkedinUrl.trim();
@@ -342,6 +345,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         finalLiHandle = rawLi;
         finalLiUrl = `https://www.linkedin.com/in/${rawLi.replace(/^@/, '')}`;
       }
+    } else if (editingSpeaker?.socials?.linkedin) {
+      finalLiHandle = editingSpeaker.socials.linkedin;
+      finalLiUrl = editingSpeaker.socials.linkedinUrl;
     }
 
     const rawLattes = speakerFormData.lattesUrl.trim();
@@ -349,7 +355,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       ? /^https?:\/\//i.test(rawLattes)
         ? rawLattes
         : `https://${rawLattes}`
-      : undefined;
+      : editingSpeaker?.socials?.lattesUrl;
 
     const speakerId = editingSpeaker?.id || (speakerFormData.id ? speakerFormData.id : `spk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
     const savedProfile: SpeakerProfile = {

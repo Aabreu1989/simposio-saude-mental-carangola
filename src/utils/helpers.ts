@@ -84,12 +84,24 @@ export const addDeletedRegistrationId = (id: string): void => {
   }
 };
 
+export const INVENTED_POST_IDS = new Set<string>([
+  'post-1',
+  'post-2',
+  'post-3',
+  'post-4',
+  'post-5',
+  'post-6',
+  'post-8'
+]);
+
 export const getDeletedPostIds = (): Set<string> => {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DELETED_POSTS);
-    return new Set(raw ? JSON.parse(raw) : []);
+    const set = new Set<string>(raw ? JSON.parse(raw) : []);
+    INVENTED_POST_IDS.forEach((id) => set.add(id));
+    return set;
   } catch {
-    return new Set();
+    return new Set<string>(INVENTED_POST_IDS);
   }
 };
 
@@ -234,14 +246,23 @@ export const loadStoredData = () => {
     }
   }
 
+  const INVENTED_POST_IDS = new Set([
+    'post-1',
+    'post-2',
+    'post-3',
+    'post-4',
+    'post-5',
+    'post-6',
+    'post-8'
+  ]);
   const deletedPostIds = getDeletedPostIds();
   const storedPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, INITIAL_SOCIAL_POSTS) || [];
   const storedIds = new Set(storedPosts.map((p) => p.id));
   const missingInitialPosts = INITIAL_SOCIAL_POSTS.filter(
-    (sp) => !storedIds.has(sp.id) && !deletedPostIds.has(sp.id)
+    (sp) => !storedIds.has(sp.id) && !deletedPostIds.has(sp.id) && !INVENTED_POST_IDS.has(sp.id)
   );
   const rawPosts = [...storedPosts, ...missingInitialPosts].filter(
-    (p) => p && !deletedPostIds.has(p.id)
+    (p) => p && !deletedPostIds.has(p.id) && !INVENTED_POST_IDS.has(p.id)
   );
   const mergedPosts: SocialPost[] = rawPosts
     .map((post, index) => ({
@@ -273,23 +294,7 @@ export const loadStoredData = () => {
   ).filter((n) => n && !LEGACY_NOTIF_IDS.has(n.id));
 
   const rawStoredSpeakers = getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES);
-  const officialIds = new Set(SPEAKERS_PROFILES.map((s) => s.id));
-  const customStoredSpeakers = (rawStoredSpeakers || []).filter((s) => s && !officialIds.has(s.id));
-  const syncedSpeakers = [
-    ...SPEAKERS_PROFILES.map((initialMatch) => {
-      const stored = (rawStoredSpeakers || []).find((s) => s.id === initialMatch.id);
-      return {
-        ...initialMatch,
-        photoUrl: stored?.photoUrl || initialMatch.photoUrl,
-        photoPosition: stored?.photoPosition || initialMatch.photoPosition,
-        socials: {
-          ...initialMatch.socials,
-          ...(stored?.socials || {})
-        }
-      };
-    }),
-    ...customStoredSpeakers
-  ];
+  const syncedSpeakers = mergeSpeakersWithDefaults(rawStoredSpeakers);
 
   return {
     config: loadedConfig,
@@ -318,6 +323,151 @@ export const broadcastRealtimeUpdate = (key: string) => {
   } catch {
     // ignore BroadcastChannel errors in restricted contexts
   }
+};
+
+export const mergeSpeakersWithDefaults = (
+  incomingList: SpeakerProfile[],
+  currentList: SpeakerProfile[] = []
+): SpeakerProfile[] => {
+  const currentMap = new Map<string, SpeakerProfile>();
+  (currentList || []).forEach((s) => {
+    if (s && s.id) currentMap.set(s.id, s);
+  });
+
+  const incomingMap = new Map<string, SpeakerProfile>();
+  (incomingList || []).forEach((s) => {
+    if (s && s.id) incomingMap.set(s.id, s);
+  });
+
+  const mergedOfficials = SPEAKERS_PROFILES.map((official) => {
+    const current = currentMap.get(official.id);
+    const incoming = incomingMap.get(official.id);
+
+    const instagram = (incoming?.socials?.instagram && incoming.socials.instagram.trim() !== '')
+      ? incoming.socials.instagram.trim()
+      : ((current?.socials?.instagram && current.socials.instagram.trim() !== '')
+          ? current.socials.instagram.trim()
+          : (official.socials?.instagram || ''));
+
+    const instagramUrl = (incoming?.socials?.instagramUrl && incoming.socials.instagramUrl.trim() !== '' && incoming.socials.instagramUrl !== 'https://www.instagram.com/')
+      ? incoming.socials.instagramUrl.trim()
+      : ((current?.socials?.instagramUrl && current.socials.instagramUrl.trim() !== '' && current.socials.instagramUrl !== 'https://www.instagram.com/')
+          ? current.socials.instagramUrl.trim()
+          : (official.socials?.instagramUrl || (instagram ? `https://www.instagram.com/${instagram.replace(/^@/, '')}` : '')));
+
+    const linkedin = (incoming?.socials?.linkedin && incoming.socials.linkedin.trim() !== '')
+      ? incoming.socials.linkedin.trim()
+      : ((current?.socials?.linkedin && current.socials.linkedin.trim() !== '')
+          ? current.socials.linkedin.trim()
+          : (official.socials?.linkedin || ''));
+
+    const linkedinUrl = (incoming?.socials?.linkedinUrl && incoming.socials.linkedinUrl.trim() !== '' && incoming.socials.linkedinUrl !== 'https://www.linkedin.com/')
+      ? incoming.socials.linkedinUrl.trim()
+      : ((current?.socials?.linkedinUrl && current.socials.linkedinUrl.trim() !== '' && current.socials.linkedinUrl !== 'https://www.linkedin.com/')
+          ? current.socials.linkedinUrl.trim()
+          : (official.socials?.linkedinUrl || ''));
+
+    const lattesUrl = (incoming?.socials?.lattesUrl && incoming.socials.lattesUrl.trim() !== '' && incoming.socials.lattesUrl !== 'https://lattes.cnpq.br/')
+      ? incoming.socials.lattesUrl.trim()
+      : ((current?.socials?.lattesUrl && current.socials.lattesUrl.trim() !== '' && current.socials.lattesUrl !== 'https://lattes.cnpq.br/')
+          ? current.socials.lattesUrl.trim()
+          : (official.socials?.lattesUrl || ''));
+
+    const photoUrl = (incoming?.photoUrl && incoming.photoUrl.trim() !== '')
+      ? incoming.photoUrl.trim()
+      : ((current?.photoUrl && current.photoUrl.trim() !== '')
+          ? current.photoUrl.trim()
+          : official.photoUrl);
+
+    const photoPosition = incoming?.photoPosition || current?.photoPosition || official.photoPosition || 'center 18%';
+
+    const bio = (incoming?.bio && incoming.bio.trim() !== '')
+      ? incoming.bio
+      : ((current?.bio && current.bio.trim() !== '')
+          ? current.bio
+          : official.bio);
+
+    const isLegacyCristiana = official.id === 'spk-cristiana-marina' && (
+      !incoming?.name || incoming.name === 'Cristiana Marina Souza'
+    );
+    const name = isLegacyCristiana ? official.name : (incoming?.name || current?.name || official.name);
+    const role = isLegacyCristiana ? official.role : (incoming?.role || current?.role || official.role);
+    const institution = isLegacyCristiana ? official.institution : (incoming?.institution || current?.institution || official.institution);
+    const sessionGroup = incoming?.sessionGroup || current?.sessionGroup || official.sessionGroup;
+    const sessionLabel = incoming?.sessionLabel || current?.sessionLabel || official.sessionLabel;
+    const sessionTime = incoming?.sessionTime || current?.sessionTime || official.sessionTime;
+
+    return {
+      ...official,
+      name,
+      role,
+      institution,
+      sessionGroup,
+      sessionLabel,
+      sessionTime,
+      photoUrl,
+      photoPosition,
+      bio,
+      socials: {
+        ...(instagram ? { instagram, instagramUrl } : {}),
+        ...(linkedin ? { linkedin } : {}),
+        ...(linkedinUrl ? { linkedinUrl } : {}),
+        ...(lattesUrl ? { lattesUrl } : {})
+      }
+    };
+  });
+
+  const officialIdSet = new Set(SPEAKERS_PROFILES.map((s) => s.id));
+  const customMap = new Map<string, SpeakerProfile>();
+
+  (currentList || []).forEach((s) => {
+    if (s && s.id && !officialIdSet.has(s.id)) {
+      customMap.set(s.id, s);
+    }
+  });
+
+  (incomingList || []).forEach((incoming) => {
+    if (incoming && incoming.id && !officialIdSet.has(incoming.id)) {
+      const current = customMap.get(incoming.id);
+      if (!current) {
+        customMap.set(incoming.id, incoming);
+      } else {
+        const instagram = (incoming.socials?.instagram && incoming.socials.instagram.trim() !== '')
+          ? incoming.socials.instagram.trim()
+          : (current.socials?.instagram || '');
+        const instagramUrl = (incoming.socials?.instagramUrl && incoming.socials.instagramUrl.trim() !== '')
+          ? incoming.socials.instagramUrl.trim()
+          : (current.socials?.instagramUrl || '');
+        const linkedin = (incoming.socials?.linkedin && incoming.socials.linkedin.trim() !== '')
+          ? incoming.socials.linkedin.trim()
+          : (current.socials?.linkedin || '');
+        const linkedinUrl = (incoming.socials?.linkedinUrl && incoming.socials.linkedinUrl.trim() !== '')
+          ? incoming.socials.linkedinUrl.trim()
+          : (current.socials?.linkedinUrl || '');
+        const lattesUrl = (incoming.socials?.lattesUrl && incoming.socials.lattesUrl.trim() !== '')
+          ? incoming.socials.lattesUrl.trim()
+          : (current.socials?.lattesUrl || '');
+
+        customMap.set(incoming.id, {
+          ...current,
+          ...incoming,
+          name: incoming.name || current.name,
+          role: incoming.role || current.role,
+          institution: incoming.institution || current.institution,
+          photoUrl: incoming.photoUrl || current.photoUrl,
+          bio: incoming.bio || current.bio,
+          socials: {
+            ...(instagram ? { instagram, instagramUrl } : {}),
+            ...(linkedin ? { linkedin } : {}),
+            ...(linkedinUrl ? { linkedinUrl } : {}),
+            ...(lattesUrl ? { lattesUrl } : {})
+          }
+        });
+      }
+    }
+  });
+
+  return [...mergedOfficials, ...Array.from(customMap.values())];
 };
 
 export const saveSpeakersToStorage = (speakers: SpeakerProfile[]): void => {

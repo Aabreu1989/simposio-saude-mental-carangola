@@ -8,7 +8,9 @@ import {
   Building2,
   Scale,
   Share2,
-  CalendarPlus
+  CalendarPlus,
+  Play,
+  Pause
 } from 'lucide-react';
 import { EventConfig } from '../types.ts';
 
@@ -27,6 +29,74 @@ export const Hero: React.FC<HeroProps> = ({
   onShare,
   onOpenCalendar
 }) => {
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [isPlaying, setIsPlaying] = React.useState(true);
+  const [isVideoLoaded, setIsVideoLoaded] = React.useState(false);
+  const [hasError, setHasError] = React.useState(false);
+  const [shouldLoadVideo, setShouldLoadVideo] = React.useState(false);
+
+  // 1. Carregamento deferido: aguarda o primeiro paint crítico da página para não competir com fontes, CSS e bundles JS
+  React.useEffect(() => {
+    // Respeita acessibilidade de movimento reduzido ou economia de dados móveis
+    const prefersReducedMotion = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    const isSaveData = typeof navigator !== 'undefined' && (navigator as unknown as { connection?: { saveData?: boolean } })?.connection?.saveData;
+
+    if (prefersReducedMotion || isSaveData) {
+      return; // Mantém a imagem estática de alta performance
+    }
+
+    // Aciona a montagem do vídeo de forma assíncrona após a thread principal estar desimpedida
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const handle = (window as unknown as { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(() => {
+        setShouldLoadVideo(true);
+      });
+      return () => {
+        if ('cancelIdleCallback' in window) {
+          (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(handle);
+        }
+      };
+    } else {
+      const timer = setTimeout(() => setShouldLoadVideo(true), 120);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // 2. IntersectionObserver: Pausa o vídeo automaticamente ao rolar a página para economizar CPU, GPU e bateria
+  React.useEffect(() => {
+    if (!containerRef.current || !videoRef.current || !shouldLoadVideo) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        const video = videoRef.current;
+        if (!video) return;
+
+        if (entry.isIntersecting) {
+          if (isPlaying) {
+            video.play().catch(() => {});
+          }
+        } else {
+          video.pause();
+        }
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [shouldLoadVideo, isPlaying]);
+
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      video.play().then(() => setIsPlaying(true)).catch(() => {});
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  };
   return (
     <section className="relative overflow-hidden pt-6 pb-0 bg-gradient-to-b from-[#faf5ee] via-[#faf7f2] to-[#f4eee4]">
       {/* High-Tech Background Synapse Ambient Glows */}
@@ -60,15 +130,71 @@ export const Hero: React.FC<HeroProps> = ({
             </div>
           </div>
 
-          {/* Banner Oficial com a Identidade Visual do Simpósio */}
-          <div className="w-full">
-            <div className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-sm border border-stone-200/90 bg-white">
-              <img
-                src={config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'}
-                alt="1º Simpósio de Saúde Mental da Microrregião de Carangola"
-                className="w-full h-auto block object-contain"
-                loading="eager"
-              />
+          {/* Banner Oficial em Motion Design com Fallback Estático e Carregamento Ultraleve */}
+          <div className="w-full" ref={containerRef}>
+            <div className="relative aspect-[1024/428] w-full rounded-2xl sm:rounded-3xl overflow-hidden shadow-sm border border-stone-200/90 bg-white group">
+              {/* Poster instantâneo de carregamento prioritário (LCP imediato sem Cumulative Layout Shift) */}
+              {(!isVideoLoaded || hasError || !shouldLoadVideo) && (
+                <img
+                  src={config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'}
+                  alt="1º Simpósio de Saúde Mental da Microrregião de Carangola"
+                  className="w-full h-full object-cover object-center block"
+                  loading="eager"
+                  fetchPriority="high"
+                />
+              )}
+
+              {/* Elemento de Vídeo HTML5 assíncrono e leve */}
+              {shouldLoadVideo && !hasError && (
+                <video
+                  ref={videoRef}
+                  src="/assets/simposio-banner-animated.mp4"
+                  poster={config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  disablePictureInPicture
+                  controls={false}
+                  preload="metadata"
+                  onLoadedData={() => setIsVideoLoaded(true)}
+                  onError={() => setHasError(true)}
+                  className={`w-full h-full object-cover object-center scale-[1.015] transition-opacity duration-500 ${
+                    isVideoLoaded ? 'opacity-100' : 'opacity-0 absolute inset-0'
+                  }`}
+                  aria-label="Animação visual oficial do 1º Simpósio de Saúde Mental de Carangola"
+                >
+                  <source src="/assets/simposio-banner-animated.mp4" type="video/mp4" />
+                  <img
+                    src={config.bannerImage || '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'}
+                    alt="1º Simpósio de Saúde Mental da Microrregião de Carangola"
+                    className="w-full h-full object-cover object-center block"
+                  />
+                </video>
+              )}
+
+              {/* Controles discretos e elegantes para pausar/reproduzir animação */}
+              {isVideoLoaded && !hasError && (
+                <div className="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 z-20 flex items-center gap-2 pointer-events-auto">
+                  <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-stone-900/60 backdrop-blur-md text-white text-[11px] font-medium border border-white/10 shadow-xs pointer-events-none">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#ea7a38] animate-pulse" />
+                    Motion Design Oficial
+                  </span>
+                  <button
+                    type="button"
+                    onClick={togglePlay}
+                    className="p-2 sm:p-2.5 rounded-full bg-stone-900/70 hover:bg-stone-900/90 backdrop-blur-md text-white border border-white/20 shadow-md transition-all active:scale-95 cursor-pointer"
+                    aria-label={isPlaying ? 'Pausar animação do banner' : 'Reproduzir animação do banner'}
+                    title={isPlaying ? 'Pausar animação' : 'Reproduzir animação'}
+                  >
+                    {isPlaying ? (
+                      <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
+                    ) : (
+                      <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white fill-white ml-0.5" />
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

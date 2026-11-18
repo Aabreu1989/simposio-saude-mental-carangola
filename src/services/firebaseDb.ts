@@ -48,6 +48,7 @@ import {
   PushNotificationItem,
   NewsletterSubscriber
 } from '../types.ts';
+import { SPEAKERS_PROFILES } from '../data/initialData.ts';
 import {
   generateRegistrationCode,
   buildRegistrationId
@@ -334,25 +335,49 @@ export const generateSecureToken = (): string => {
   return (rand() + rand() + rand() + rand()).padEnd(64, '0').slice(0, 64);
 };
 
+let pendingAnonAuthPromise: Promise<string> | null = null;
+let ensureAuthObserverForTests: ((uid: string) => void) | null = null;
+
+export const setEnsureAuthObserverForTests = (observer: ((uid: string) => void) | null): void => {
+  ensureAuthObserverForTests = observer;
+};
+
 export const ensureAuthenticatedUser = async (): Promise<string> => {
   if (firestoreAuth.currentUser) {
-    return firestoreAuth.currentUser.uid;
+    const uid = firestoreAuth.currentUser.uid;
+    ensureAuthObserverForTests?.(uid);
+    return uid;
   }
-  try {
-    const cred = await signInAnonymously(firestoreAuth);
-    return cred.user.uid;
-  } catch (err) {
-    console.warn('Aviso: Autenticação anônima temporariamente indisponível:', err);
-    if (typeof localStorage !== 'undefined') {
-      let localId = localStorage.getItem('sus_voter_id');
-      if (!localId) {
-        localId = 'voter-' + generateSecureToken().slice(0, 16);
-        localStorage.setItem('sus_voter_id', localId);
+  if (pendingAnonAuthPromise) {
+    return pendingAnonAuthPromise;
+  }
+
+  pendingAnonAuthPromise = (async () => {
+    try {
+      const cred = await signInAnonymously(firestoreAuth);
+      ensureAuthObserverForTests?.(cred.user.uid);
+      return cred.user.uid;
+    } catch (err) {
+      console.warn('Aviso: Autenticação anônima temporariamente indisponível:', err);
+      let fallbackId: string;
+      if (typeof localStorage !== 'undefined') {
+        let localId = localStorage.getItem('sus_voter_id');
+        if (!localId) {
+          localId = 'voter-' + generateSecureToken().slice(0, 16);
+          localStorage.setItem('sus_voter_id', localId);
+        }
+        fallbackId = localId;
+      } else {
+        fallbackId = 'voter-' + generateSecureToken().slice(0, 16);
       }
-      return localId;
+      ensureAuthObserverForTests?.(fallbackId);
+      return fallbackId;
+    } finally {
+      pendingAnonAuthPromise = null;
     }
-    return 'voter-' + generateSecureToken().slice(0, 16);
-  }
+  })();
+
+  return pendingAnonAuthPromise;
 };
 
 export interface CertificatePermissionRecord {
@@ -1316,23 +1341,40 @@ export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> =>
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
   const speakerId = sanitizeId(speaker.id, 'spk');
+  const baseline = SPEAKERS_PROFILES.find((p) => p.id === speaker.id);
+  const instagram = speaker.socials?.instagram && speaker.socials.instagram.trim() !== ''
+    ? speaker.socials.instagram.trim().slice(0, 100)
+    : (baseline?.socials?.instagram || '');
+  const instagramUrl = speaker.socials?.instagramUrl && speaker.socials.instagramUrl.trim() !== '' && speaker.socials.instagramUrl !== 'https://www.instagram.com/'
+    ? speaker.socials.instagramUrl.trim().slice(0, 300)
+    : (baseline?.socials?.instagramUrl || (instagram ? `https://www.instagram.com/${instagram.replace(/^@/, '')}` : ''));
+  const linkedin = speaker.socials?.linkedin && speaker.socials.linkedin.trim() !== ''
+    ? speaker.socials.linkedin.trim().slice(0, 100)
+    : (baseline?.socials?.linkedin || '');
+  const linkedinUrl = speaker.socials?.linkedinUrl && speaker.socials.linkedinUrl.trim() !== '' && speaker.socials.linkedinUrl !== 'https://www.linkedin.com/'
+    ? speaker.socials.linkedinUrl.trim().slice(0, 300)
+    : (baseline?.socials?.linkedinUrl || '');
+  const lattesUrl = speaker.socials?.lattesUrl && speaker.socials.lattesUrl.trim() !== '' && speaker.socials.lattesUrl !== 'https://lattes.cnpq.br/'
+    ? speaker.socials.lattesUrl.trim().slice(0, 300)
+    : (baseline?.socials?.lattesUrl || '');
+
   const payload = stripUndefined({
     id: speakerId,
-    name: (speaker.name || '').trim().slice(0, 160),
-    role: (speaker.role || '').trim().slice(0, 160),
-    institution: (speaker.institution || '').trim().slice(0, 200),
-    sessionGroup: speaker.sessionGroup || 'abertura',
-    sessionLabel: (speaker.sessionLabel || '').trim().slice(0, 200),
-    sessionTime: (speaker.sessionTime || '').trim().slice(0, 80),
-    photoUrl: speaker.photoUrl ? speaker.photoUrl.trim().slice(0, 500000) : '',
-    photoPosition: (speaker.photoPosition || 'center 18%').trim().slice(0, 50),
-    bio: (speaker.bio || '').trim().slice(0, 3000),
+    name: (speaker.name || baseline?.name || '').trim().slice(0, 160),
+    role: (speaker.role || baseline?.role || '').trim().slice(0, 160),
+    institution: (speaker.institution || baseline?.institution || '').trim().slice(0, 200),
+    sessionGroup: speaker.sessionGroup || baseline?.sessionGroup || 'abertura',
+    sessionLabel: (speaker.sessionLabel || baseline?.sessionLabel || '').trim().slice(0, 200),
+    sessionTime: (speaker.sessionTime || baseline?.sessionTime || '').trim().slice(0, 80),
+    photoUrl: speaker.photoUrl ? speaker.photoUrl.trim().slice(0, 500000) : (baseline?.photoUrl || ''),
+    photoPosition: (speaker.photoPosition || baseline?.photoPosition || 'center 18%').trim().slice(0, 50),
+    bio: (speaker.bio !== undefined && speaker.bio !== null ? speaker.bio : (baseline?.bio || '')).trim().slice(0, 3000),
     socials: {
-      instagram: speaker.socials?.instagram ? speaker.socials.instagram.trim().slice(0, 100) : '',
-      instagramUrl: speaker.socials?.instagramUrl ? speaker.socials.instagramUrl.trim().slice(0, 300) : '',
-      linkedin: speaker.socials?.linkedin ? speaker.socials.linkedin.trim().slice(0, 100) : '',
-      linkedinUrl: speaker.socials?.linkedinUrl ? speaker.socials.linkedinUrl.trim().slice(0, 300) : '',
-      lattesUrl: speaker.socials?.lattesUrl ? speaker.socials.lattesUrl.trim().slice(0, 300) : ''
+      instagram,
+      instagramUrl,
+      linkedin,
+      linkedinUrl,
+      lattesUrl
     },
     updatedAt: new Date().toISOString()
   });
@@ -1460,6 +1502,8 @@ export const saveSocialPostToDb = async (
   post: SocialPost,
   rawImageFile?: File | Blob
 ): Promise<SocialPost> => {
+  await ensureAuthenticatedUser();
+
   const id = sanitizeId(post.id, 'post');
   const nowIso = new Date().toISOString();
   const isAdmin = isVerifiedAdminUser(firestoreAuth.currentUser);
@@ -1505,7 +1549,6 @@ export const saveSocialPostToDb = async (
     }
 
     try {
-      await ensureAuthenticatedUser();
       const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
       const cleanPath = `social_posts/${id}/${Date.now()}_img.${ext}`;
       const fileRef = storageRef(storage, cleanPath);
@@ -1536,7 +1579,7 @@ export const saveSocialPostToDb = async (
     updatedAt: nowIso
   };
 
-  if (finalImageUrl) payload.imageUrl = finalImageUrl;
+  if (finalImageUrl && !finalImageUrl.startsWith('data:')) payload.imageUrl = finalImageUrl;
   if (storagePath) payload.storagePath = storagePath;
   if (post.imageFileName) payload.imageFileName = post.imageFileName.slice(0, 160);
 
@@ -1548,7 +1591,7 @@ export const saveSocialPostToDb = async (
       status: initialStatus as 'approved' | 'pending' | 'rejected',
       pinned: initialPinned,
       likes: initialLikes,
-      imageUrl: finalImageUrl,
+      imageUrl: finalImageUrl || post.imageUrl,
       storagePath
     };
   } catch (error) {
@@ -1561,6 +1604,8 @@ export const likeSocialPostInDb = async (
   postId: string,
   voterId: string
 ): Promise<{ success: boolean; likes: number; hasLiked: boolean }> => {
+  const ensuredUid = await ensureAuthenticatedUser();
+
   if (customSocialPostsAdapter) {
     const res = await customSocialPostsAdapter.toggleLike(postId, voterId);
     return { success: true, ...res };
@@ -1568,7 +1613,7 @@ export const likeSocialPostInDb = async (
 
   const cleanPostId = sanitizeId(postId, 'post');
   // Vincula a identidade do votante ao usuário autenticado ou ao identificador fornecido
-  const currentUid = firestoreAuth.currentUser?.uid;
+  const currentUid = firestoreAuth.currentUser?.uid || ensuredUid;
   const cleanVoterId = sanitizeId(currentUid || voterId, 'voter');
 
   try {

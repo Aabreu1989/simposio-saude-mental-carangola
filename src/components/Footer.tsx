@@ -1,5 +1,5 @@
 import React from 'react';
-import { Phone, Mail, MapPin, LifeBuoy, Smartphone } from 'lucide-react';
+import { MapPin, LifeBuoy, Smartphone } from 'lucide-react';
 import { EventConfig } from '../types.ts';
 import { CarangolaWavesRibbon } from './VisualAssets.tsx';
 
@@ -119,17 +119,53 @@ export const Footer: React.FC<FooterProps> = ({
                 <MapPin className="w-3.5 h-3.5 text-[#d96522] shrink-0 mt-0.5" />
                 <span className="leading-snug">{config.locationAddress}</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-[#d96522] shrink-0" />
-                <span className="font-mono text-[11px] truncate">{config.contactEmail}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-[#d96522] shrink-0" />
-                <span className="font-mono text-[11px]">{config.contactPhone}</span>
-              </div>
             </div>
           </div>
 
+        </div>
+
+        {/* Logos dos Serviços da RAPS de Carangola */}
+        <div className="mt-6 pt-5 border-t border-stone-800/80">
+          <h4 className="text-[11px] font-bold uppercase tracking-wider text-stone-300 font-mono mb-3 text-center sm:text-left">
+            Serviços da Rede de Atenção Psicossocial (RAPS) · Carangola
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <div className="bg-[#07242c] rounded-xl p-2.5 border border-white/10 flex flex-col items-center justify-center gap-1.5">
+              <img
+                src="/assets/logo-caps-1.jpg"
+                alt="CAPS 1 - Centro de Atenção Psicossocial I Livre Mente"
+                loading="lazy"
+                className="h-16 sm:h-20 w-auto max-w-full object-contain rounded-lg"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                CAPS 1
+              </span>
+            </div>
+
+            <div className="bg-[#07242c] rounded-xl p-2.5 border border-white/10 flex flex-col items-center justify-center gap-1.5">
+              <img
+                src="/assets/logo-ceco-carangola.png"
+                alt="Centro de Convivência e Cultura de Carangola"
+                loading="lazy"
+                className="h-16 sm:h-20 w-auto max-w-full object-contain rounded-lg"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                Centro de Convivência e Cultura de Carangola
+              </span>
+            </div>
+
+            <div className="bg-[#07242c] rounded-xl p-2.5 border border-white/10 flex flex-col items-center justify-center gap-1.5">
+              <img
+                src="/assets/logo-caps-ij.png"
+                alt="CAPS Infanto Juvenil Tucurupi"
+                loading="lazy"
+                className="h-16 sm:h-20 w-auto max-w-full object-contain rounded-lg"
+              />
+              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                CAPS Infanto Juvenil
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Bottom Bar */}
@@ -138,7 +174,7 @@ export const Footer: React.FC<FooterProps> = ({
             <img
               src="/assets/aistudio/Logotipo_Municipal_de_Carangola_em_Branco_564e127a.png"
               alt="Prefeitura de Carangola"
-              className="h-8 w-auto object-contain mix-blend-screen opacity-90 hover:opacity-100 transition-opacity"
+              className="h-14 sm:h-16 md:h-20 w-auto object-contain mix-blend-screen opacity-100 hover:scale-105 transition-transform shrink-0"
             />
             <span>
               © 2026 Sistema Único de Saúde (SUS) · Prefeitura Municipal de Carangola - MG.

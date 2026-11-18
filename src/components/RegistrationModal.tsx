@@ -90,6 +90,77 @@ export const REFERRAL_SOURCES = [
   'Outro Canal'
 ];
 
+export interface RegistrationValidationInput {
+  fullName: string;
+  cpf: string;
+  email: string;
+  phone: string;
+  city: string;
+  customCity?: string;
+  professionalRole: string;
+  customRole?: string;
+  susCareLevel: string;
+  institution: string;
+  ageGroup: string;
+  educationLevel: string;
+  referralSource: string;
+  axisInterest: string;
+}
+
+const VALID_EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+export const validateRegistrationFormData = (
+  data: RegistrationValidationInput
+): Record<string, string> => {
+  const errs: Record<string, string> = {};
+  if (!data.fullName || data.fullName.trim().length < 2) {
+    errs.fullName = 'Nome completo é obrigatório (mínimo de 2 caracteres)';
+  }
+  const cpfDigits = (data.cpf || '').replace(/\D/g, '');
+  if (cpfDigits.length !== 11 || /^(\d)\1{10}$/.test(cpfDigits)) {
+    errs.cpf = 'CPF válido com 11 dígitos é obrigatório para emissão do certificado';
+  }
+  const cleanEmail = (data.email || '').trim();
+  if (!cleanEmail || !VALID_EMAIL_REGEX.test(cleanEmail)) {
+    errs.email = 'E-mail válido é obrigatório';
+  }
+  const phoneDigits = (data.phone || '').replace(/\D/g, '');
+  if (phoneDigits.length < 10) {
+    errs.phone = 'Telefone/WhatsApp com DDD é obrigatório';
+  }
+  if (!data.city) {
+    errs.city = 'Selecione seu município';
+  }
+  if (!data.professionalRole) {
+    errs.professionalRole = 'Selecione sua categoria profissional/ocupação';
+  }
+  if (data.professionalRole === 'Outros' && !(data.customRole || '').trim()) {
+    errs.customRole = 'Por favor, especifique sua categoria profissional/ocupação';
+  }
+  if ((data.city === 'Outros' || data.city === 'Outro Município de MG') && !(data.customCity || '').trim()) {
+    errs.customCity = 'Por favor, informe seu município';
+  }
+  if (!data.susCareLevel) {
+    errs.susCareLevel = 'Selecione seu nível de atenção no SUS / vínculo';
+  }
+  if (!data.institution || !data.institution.trim()) {
+    errs.institution = 'Instituição ou local de trabalho é obrigatório';
+  }
+  if (!data.ageGroup) {
+    errs.ageGroup = 'Selecione sua faixa etária';
+  }
+  if (!data.educationLevel) {
+    errs.educationLevel = 'Selecione sua escolaridade';
+  }
+  if (!data.referralSource) {
+    errs.referralSource = 'Selecione como tomou conhecimento do simpósio';
+  }
+  if (!data.axisInterest) {
+    errs.axisInterest = 'Selecione o eixo temático de maior interesse';
+  }
+  return errs;
+};
+
 interface RegistrationModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -215,47 +286,7 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   if (!isOpen && !isStandalone) return null;
 
   const validate = () => {
-    const errs: Record<string, string> = {};
-    if (!formData.fullName.trim()) errs.fullName = 'Nome completo é obrigatório';
-    if (!formData.cpf.trim() || formData.cpf.replace(/\D/g, '').length < 11) {
-      errs.cpf = 'CPF válido com 11 dígitos é obrigatório para emissão do certificado';
-    }
-    if (!formData.email.trim() || !formData.email.includes('@')) {
-      errs.email = 'E-mail válido é obrigatório';
-    }
-    if (!formData.phone.trim() || formData.phone.replace(/\D/g, '').length < 10) {
-      errs.phone = 'Telefone/WhatsApp com DDD é obrigatório';
-    }
-    if (!formData.city) {
-      errs.city = 'Selecione seu município';
-    }
-    if (!formData.professionalRole) {
-      errs.professionalRole = 'Selecione sua categoria profissional/ocupação';
-    }
-    if (formData.professionalRole === 'Outros' && !formData.customRole.trim()) {
-      errs.customRole = 'Por favor, especifique sua categoria profissional/ocupação';
-    }
-    if ((formData.city === 'Outros' || formData.city === 'Outro Município de MG') && !formData.customCity.trim()) {
-      errs.customCity = 'Por favor, informe seu município';
-    }
-    if (!formData.susCareLevel) {
-      errs.susCareLevel = 'Selecione seu nível de atenção no SUS / vínculo';
-    }
-    if (!formData.institution.trim()) {
-      errs.institution = 'Instituição ou local de trabalho é obrigatório';
-    }
-    if (!formData.ageGroup) {
-      errs.ageGroup = 'Selecione sua faixa etária';
-    }
-    if (!formData.educationLevel) {
-      errs.educationLevel = 'Selecione sua escolaridade';
-    }
-    if (!formData.referralSource) {
-      errs.referralSource = 'Selecione como tomou conhecimento do simpósio';
-    }
-    if (!formData.axisInterest) {
-      errs.axisInterest = 'Selecione o eixo temático de maior interesse';
-    }
+    const errs = validateRegistrationFormData(formData);
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };

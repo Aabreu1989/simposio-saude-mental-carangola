@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { Shield, Lock, User, KeyRound, Eye, EyeOff, ArrowLeft, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { sha256Hex } from '../services/firebaseDb.ts';
+
+const ADMIN_PASSWORD_SHA256 = '949919aadc7d9deec65baee3b8062415c26508f5a705aa420e534ebe1cd23c0f';
 
 interface AdminLoginProps {
   onLoginSuccess: (rememberMe: boolean) => void;
@@ -20,7 +23,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -35,14 +38,14 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
       cleanUsername === 'SIMPOSIOCARANGOLA' ||
       rawInput.toLowerCase() === 'farmaciademinas.marketing@gmail.com';
 
-    const isMatchPass = password === 'SUS2026%';
-
     if (!rawInput || !password) {
       setErrorMessage('Por favor, informe o usuário e a senha de gestor.');
       return;
     }
 
     setIsLoading(true);
+    const passHash = await sha256Hex(password);
+    const isMatchPass = passHash === ADMIN_PASSWORD_SHA256;
 
     setTimeout(() => {
       if (isMatchUser && isMatchPass) {

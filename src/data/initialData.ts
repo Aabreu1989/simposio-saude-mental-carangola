@@ -279,9 +279,9 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     },
     speakers: [
       {
-        name: 'Cristiana Marina Souza',
-        role: 'Debatedora',
-        institution: 'Mesa 3'
+        name: 'Cristiana Marina Barros de Souza',
+        role: 'Coordenação Pedagógica Nós na Rede (MS/Fiocruz)',
+        institution: 'Nós na Rede · Ministério da Saúde / Fiocruz'
       },
       {
         name: 'Marcos Alexandre',
@@ -686,19 +686,6 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
 
 export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
   {
-    id: 'post-8',
-    authorName: 'Coordenação RAPS Carangola',
-    authorRole: 'Comissão Organizadora',
-    city: 'Carangola',
-    content: 'Tudo pronto no auditório da UEMG Carangola para receber profissionais, gestores e lideranças dos municípios da nossa microrregião! A saúde mental é construída em rede e com afeto.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    imageUrl: '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_260a5969.jpeg',
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 10 minutos',
-    timestamp: 1796727600000
-  },
-  {
     id: 'post-7',
     authorName: 'Amanda Abreu',
     authorRole: 'Psicóloga do CAPS',
@@ -709,79 +696,6 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     hasLiked: true,
     createdAt: 'Há 35 minutos',
     timestamp: 1796726100000
-  },
-  {
-    id: 'post-6',
-    authorName: 'Equipe ESF Rural',
-    authorRole: 'Atenção Básica',
-    city: 'Espera Feliz',
-    content: 'Presença confirmada da delegação de Espera Feliz! Viemos em peso para alinhar o fluxograma da RAPS e aproximar o CAPS do nosso posto de saúde.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 1 hora',
-    timestamp: 1796724000000
-  },
-  {
-    id: 'post-5',
-    authorName: 'Marina Pimentel',
-    authorRole: 'Assistência Social',
-    city: 'Tombos',
-    content: 'Intersetorialidade na prática: Saúde Mental, CRAS e Justiça dialogando no mesmo auditório. Parabéns aos organizadores pelo tema certeiro.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 2 horas',
-    timestamp: 1796720400000
-  },
-  {
-    id: 'post-4',
-    authorName: 'Equipe CAPS AD Carangola',
-    authorRole: 'Redução de Danos & Cuidado',
-    city: 'Carangola',
-    content: 'Compartilhando nossos projetos terapêuticos singulares construídos no território. Cada história acolhida fortalece a clínica ampliada do SUS.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    imageUrl: '/assets/aistudio/WhatsApp_Image_2026-11-04_at_4.18.58_PM_96fea5bf.jpeg',
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 3 horas',
-    timestamp: 1796716800000
-  },
-  {
-    id: 'post-3',
-    authorName: 'Dr. Lucas Resende',
-    authorRole: 'Enfermeiro ESF',
-    city: 'Fervedouro',
-    content: 'Expectativa alta para os debates sobre leitos de retaguarda no hospital geral e o fluxo ágil com o SAMU 192 na nossa microrregião.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 4 horas',
-    timestamp: 1796713200000
-  },
-  {
-    id: 'post-2',
-    authorName: 'Comitê Intersetorial RAPS',
-    authorRole: 'Gestão Municipal',
-    city: 'Divino',
-    content: 'Delegação de Divino já organizada para o Simpósio! Vamos construir juntos protocolos integrados entre Educação, Saúde e Assistência Social.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 5 horas',
-    timestamp: 1796709600000
-  },
-  {
-    id: 'post-1',
-    authorName: 'Núcleo de Educação Permanente',
-    authorRole: 'Apoio Institucional SUS',
-    city: 'Pedra Dourada',
-    content: 'Os materiais de apoio na Área de Downloads já estão servindo de base para nossas rodas de conversa pré-simpósio com os Agentes Comunitários.',
-    hashtags: DEFAULT_EVENT_HASHTAGS,
-    likes: 0,
-    hasLiked: false,
-    createdAt: 'Há 6 horas',
-    timestamp: 1796706000000
   }
 ];
 
@@ -939,13 +853,15 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   },
   {
     id: 'spk-cristiana-marina',
-    name: 'Cristiana Marina Souza',
-    role: 'Debatedora',
-    institution: 'Mesa 3 · A judiciarização da saúde mental e o cuidado em liberdade',
+    name: 'Cristiana Marina Barros de Souza',
+    role: 'Psicóloga · Coordenação Pedagógica Nós na Rede (MS/Fiocruz)',
+    institution: 'Nós na Rede · Ministério da Saúde / Fiocruz',
     sessionGroup: 'mesa-3',
     sessionLabel: 'Mesa 3 · Judicialização e Direitos',
     sessionTime: '14:30 – 15:30',
-    bio: '',
+    photoUrl: '/assets/cristiana-marina.jpg',
+    photoPosition: 'center 35%',
+    bio: 'Psicóloga pela PUC Minas, com pós-graduação em Saúde Mental pela PUC Minas e Mestrado em Promoção da Saúde e Prevenção da Violência na UFMG (Departamento de Saúde Coletiva).\n\nPossui 18 anos de experiência na RAPS de Belo Horizonte. Professora universitária das disciplinas de internato de saúde mental e pós-graduação da PUC Minas, psicopatologia e saúde coletiva do curso de psicologia da Faculdade Anhanguera. Foi supervisora clínica institucional do CAPSIJ dos municípios de Ribeirão das Neves e Ouro Preto. Atualmente atua na coordenação pedagógica e como apoiadora educacional do projeto Nós na Rede da FIOCRUZ / Ministério da Saúde.',
     socials: {}
   },
   {

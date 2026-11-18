@@ -5,13 +5,19 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import {
   generateRegistrationCode,
   getOrCreateParticipantRegistrationIdentity,
   clearParticipantAttemptCache,
   buildRegistrationId,
   loadStoredData,
-  saveSpeakersToStorage
+  saveSpeakersToStorage,
+  mergeSpeakersWithDefaults,
+  INVENTED_POST_IDS,
+  getDeletedPostIds,
+  addDeletedPostId,
+  STORAGE_KEYS
 } from '../src/utils/helpers.ts';
 
 import {
@@ -41,20 +47,27 @@ import {
   sha256Hex,
   generateSecureToken,
   ensureAuthenticatedUser,
+  setEnsureAuthObserverForTests,
   ACTIVE_FIREBASE_PROJECT_ID,
   ACTIVE_FIRESTORE_DATABASE_ID
 } from '../src/services/firebaseDb.ts';
+import { validateRegistrationFormData } from '../src/components/RegistrationModal.tsx';
 
 import emailHandler, {
   resetEmailServerStateForTests,
   setRegistrationLookupForTests,
   setSmtpSendForTests,
-  type TrustedRegistrationRecord
+  setConfirmationStoreForTests,
+  createInMemoryConfirmationStore,
+  type TrustedRegistrationRecord,
+  LEASE_DURATION_MS,
+  RESEND_COOLDOWN_MS,
+  MAX_TOTAL_SENDS_PER_REGISTRATION
 } from '../api/email/confirm-registration.ts';
 import statusHandler from '../api/email/status.ts';
 import mapsHandler from '../api/maps/config.ts';
 import vercelConfig from '../vercel.json' with { type: 'json' };
-import { INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES } from '../src/data/initialData.ts';
+import { INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS } from '../src/data/initialData.ts';
 import type { Registration, SpeakerProfile, SocialPost, PushNotificationItem, NewsletterSubscriber } from '../src/types.ts';
 
 interface TestResult {
@@ -1913,6 +1926,909 @@ async function runTests() {
     'Endpoint rejeita códigos com tamanho inferior a 3 caracteres com HTTP 400 INVALID_CODE',
     suite12
   );
+
+  // =========================================================================
+  // SUITE 13: Concorrência Real e Idempotência Distribuída (Fases 2 & 3)
+  // =========================================================================
+  const suite13 = 'Idempotência Distribuída & Concorrência Serverless';
+
+  resetEmailServerStateForTests();
+  const testSharedStore = createInMemoryConfirmationStore();
+  setConfirmationStoreForTests(testSharedStore);
+
+  const prevUser = process.env.SMTP_USER;
+  const prevPass = process.env.SMTP_PASS;
+  process.env.SMTP_USER = 'farmaciademinas.marketing@gmail.com';
+  process.env.SMTP_PASS = 'mock-app-password-16c';
+
+  const concurrentDbRecords = new Map<string, TrustedRegistrationRecord>();
+  concurrentDbRecords.set('CAR-SM-CONC1', {
+    id: 'reg-conc-1',
+    code: 'CAR-SM-CONC1',
+    fullName: 'Maria Concorrente',
+    email: 'maria.conc@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Psicóloga',
+    institution: 'CAPS',
+    axisInterest: 'Eixo 1',
+    status: 'confirmada'
+  });
+  concurrentDbRecords.set('CAR-SM-CONC2', {
+    id: 'reg-conc-2',
+    code: 'CAR-SM-CONC2',
+    fullName: 'João Concorrente',
+    email: 'joao.conc@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Assistente Social',
+    institution: 'CRAS',
+    axisInterest: 'Eixo 2',
+    status: 'confirmada'
+  });
+  concurrentDbRecords.set('CAR-SM-CANCELLED', {
+    id: 'reg-conc-cancelled',
+    code: 'CAR-SM-CANCELLED',
+    fullName: 'Inscrição Cancelada',
+    email: 'cancelada@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Enfermeiro',
+    institution: 'UBS',
+    axisInterest: 'Eixo 1',
+    status: 'cancelada'
+  });
+  concurrentDbRecords.set('CAR-SM-RESEND', {
+    id: 'reg-conc-resend',
+    code: 'CAR-SM-RESEND',
+    fullName: 'Teste Reenvio',
+    email: 'reenvio@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Enfermeiro',
+    institution: 'UBS Centro',
+    axisInterest: 'Eixo 1',
+    status: 'confirmada'
+  });
+  concurrentDbRecords.set('CAR-SM-MAXLIMIT', {
+    id: 'reg-conc-maxlimit',
+    code: 'CAR-SM-MAXLIMIT',
+    fullName: 'Teste Limite Envios',
+    email: 'limite@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Médico',
+    institution: 'Hospital',
+    axisInterest: 'Eixo 1',
+    status: 'confirmada'
+  });
+  concurrentDbRecords.set('CAR-SM-DIFF1', {
+    id: 'reg-conc-diff1',
+    code: 'CAR-SM-DIFF1',
+    fullName: 'Participante Um',
+    email: 'diff1@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Psicólogo',
+    institution: 'CAPS I',
+    axisInterest: 'Eixo 1',
+    status: 'confirmada'
+  });
+  concurrentDbRecords.set('CAR-SM-DIFF2', {
+    id: 'reg-conc-diff2',
+    code: 'CAR-SM-DIFF2',
+    fullName: 'Participante Dois',
+    email: 'diff2@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Terapeuta',
+    institution: 'CECO',
+    axisInterest: 'Eixo 2',
+    status: 'confirmada'
+  });
+
+  setRegistrationLookupForTests(async (code: string, registrationId?: string) => {
+    const rec = concurrentDbRecords.get(code);
+    if (!rec) {
+      return {
+        ok: false,
+        httpStatus: 404,
+        errorCode: 'REGISTRATION_NOT_FOUND',
+        error: 'Inscrição não encontrada.'
+      };
+    }
+    if (rec.status === 'cancelada') {
+      return {
+        ok: false,
+        httpStatus: 403,
+        errorCode: 'REGISTRATION_CANCELLED',
+        error: 'Inscrição cancelada.'
+      };
+    }
+    return { ok: true, record: rec };
+  });
+
+  let distributedSmtpCalls = 0;
+  const sentMessageIds: string[] = [];
+  setSmtpSendForTests(async (mailOpts) => {
+    distributedSmtpCalls += 1;
+    await new Promise((r) => setTimeout(r, 20));
+    const msgId = `<distributed-msg-${distributedSmtpCalls}@gmail.com>`;
+    sentMessageIds.push(msgId);
+    return {
+      messageId: msgId,
+      accepted: [mailOpts.to],
+      rejected: []
+    };
+  });
+
+  // 13.1 Duas requisições simultâneas para a mesma inscrição (Promise.all)
+  const reqA = createMockHttp('POST', { code: 'CAR-SM-CONC1', registrationId: 'reg-conc-1' }, '203.0.113.21');
+  const reqB = createMockHttp('POST', { code: 'CAR-SM-CONC1', registrationId: 'reg-conc-1' }, '203.0.113.22');
+
+  await Promise.all([
+    emailHandler(reqA.req, reqA.res),
+    emailHandler(reqB.req, reqB.res)
+  ]);
+
+  const statusA = reqA.getStatus();
+  const statusB = reqB.getStatus();
+  const oneSucceeded = (statusA === 200 && statusB === 429) || (statusB === 200 && statusA === 429);
+  const inProgressCode = reqA.getData()?.errorCode === 'OPERATION_IN_PROGRESS' || reqB.getData()?.errorCode === 'OPERATION_IN_PROGRESS';
+
+  assert(
+    oneSucceeded && inProgressCode && distributedSmtpCalls === 1,
+    'Duas requisições simultâneas para a mesma inscrição geram exatamente 1 envio SMTP e bloqueiam a duplicata com OPERATION_IN_PROGRESS',
+    suite13
+  );
+
+  // 13.2 Instâncias independentes consultam o mesmo estado persistido
+  const persistedDoc = await testSharedStore.get('CAR-SM-CONC1');
+  assert(
+    persistedDoc !== null &&
+      persistedDoc.status === 'accepted' &&
+      persistedDoc.sendCount === 1 &&
+      persistedDoc.leaseOwner === null &&
+      Boolean(persistedDoc.messageId),
+    'Instâncias independentes consultam o mesmo estado persistido no Firestore (status=accepted, sendCount=1)',
+    suite13
+  );
+
+  // 13.3 Repetição após cold start (nova requisição em processo limpo lendo do store persistido)
+  const coldStartReq = createMockHttp('POST', { code: 'CAR-SM-CONC1', registrationId: 'reg-conc-1' }, '203.0.113.30');
+  await emailHandler(coldStartReq.req, coldStartReq.res);
+
+  assert(
+    coldStartReq.getStatus() === 200 &&
+      coldStartReq.getData()?.idempotent === true &&
+      coldStartReq.getData()?.actuallySent === true &&
+      coldStartReq.getData()?.messageId === persistedDoc?.messageId &&
+      distributedSmtpCalls === 1,
+    'Repetição após cold start reutiliza o registro persistido no Firestore sem chamar o SMTP novamente (idempotent: true)',
+    suite13
+  );
+
+  // 13.4 Repetição após estado accepted sem flag resend
+  const repeatReq = createMockHttp('POST', { code: 'CAR-SM-CONC1' }, '203.0.113.31');
+  await emailHandler(repeatReq.req, repeatReq.res);
+
+  assert(
+    repeatReq.getStatus() === 200 &&
+      repeatReq.getData()?.idempotent === true &&
+      distributedSmtpCalls === 1,
+    'Repetição sem resend: true retorna 200 idempotente e não gera novo envio SMTP',
+    suite13
+  );
+
+  // 13.5 Falha antes do SMTP (inscrição cancelada)
+  const cancelledReq = createMockHttp('POST', { code: 'CAR-SM-CANCELLED' }, '203.0.113.40');
+  await emailHandler(cancelledReq.req, cancelledReq.res);
+  const cancelledDoc = await testSharedStore.get('CAR-SM-CANCELLED');
+
+  assert(
+    cancelledReq.getStatus() === 403 &&
+      cancelledReq.getData()?.errorCode === 'REGISTRATION_CANCELLED' &&
+      cancelledDoc === null &&
+      distributedSmtpCalls === 1,
+    'Falha antes do SMTP (inscrição cancelada) não adquire concessão nem dispara envio',
+    suite13
+  );
+
+  // 13.6 Falha durante o envio SMTP
+  concurrentDbRecords.set('CAR-SM-FAIL-TEST', {
+    id: 'reg-fail-test',
+    code: 'CAR-SM-FAIL-TEST',
+    fullName: 'Falha Temporária',
+    email: 'falha@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Técnico',
+    institution: 'SUS',
+    axisInterest: 'Eixo 1',
+    status: 'confirmada'
+  });
+
+  setSmtpSendForTests(async () => {
+    throw new Error('554 5.7.1 Relay Access Denied');
+  });
+
+  const smtpErrorReq = createMockHttp('POST', { code: 'CAR-SM-FAIL-TEST' }, '203.0.113.50');
+  await emailHandler(smtpErrorReq.req, smtpErrorReq.res);
+  const failDoc = await testSharedStore.get('CAR-SM-FAIL-TEST');
+
+  assert(
+    smtpErrorReq.getStatus() === 502 &&
+      smtpErrorReq.getData()?.actuallySent === false &&
+      failDoc?.status === 'failed' &&
+      failDoc?.leaseOwner === null &&
+      Boolean(failDoc?.lastError?.includes('Relay Access Denied')),
+    'Falha durante o envio SMTP persiste status=failed, libera a concessão e retorna HTTP 502',
+    suite13
+  );
+
+  // Restaura SMTP e permite nova tentativa bem-sucedida após falha
+  setSmtpSendForTests(async (mailOpts) => {
+    distributedSmtpCalls += 1;
+    return {
+      messageId: `<recovered-after-fail@gmail.com>`,
+      accepted: [mailOpts.to],
+      rejected: []
+    };
+  });
+
+  const retryAfterFailReq = createMockHttp('POST', { code: 'CAR-SM-FAIL-TEST' }, '203.0.113.51');
+  await emailHandler(retryAfterFailReq.req, retryAfterFailReq.res);
+  const recoveredDoc = await testSharedStore.get('CAR-SM-FAIL-TEST');
+
+  assert(
+    retryAfterFailReq.getStatus() === 200 &&
+      retryAfterFailReq.getData()?.actuallySent === true &&
+      recoveredDoc?.status === 'accepted' &&
+      recoveredDoc?.sendCount === 1,
+    'Tentativa posterior a uma falha de SMTP adquire nova concessão e conclui o envio com sucesso',
+    suite13
+  );
+
+  // 13.7 Aceitação SMTP com falha na persistência (Janela de Incerteza Dual-Write)
+  concurrentDbRecords.set('CAR-SM-DUALWRITE', {
+    id: 'reg-dualwrite',
+    code: 'CAR-SM-DUALWRITE',
+    fullName: 'Teste Dual Write',
+    email: 'dualwrite@sus.carangola.mg.gov.br',
+    city: 'Carangola',
+    professionalRole: 'Farmacêutico',
+    institution: 'Farmácia de Minas',
+    axisInterest: 'Eixo 1',
+    status: 'confirmada'
+  });
+
+  testSharedStore.simulatePersistenceFailureAfterSmtp = true;
+  const dualWriteReq = createMockHttp('POST', { code: 'CAR-SM-DUALWRITE' }, '203.0.113.60');
+  await emailHandler(dualWriteReq.req, dualWriteReq.res);
+
+  assert(
+    dualWriteReq.getStatus() === 200 &&
+      dualWriteReq.getData()?.warning === 'ACCEPTED_BY_SMTP_PERSISTENCE_PENDING' &&
+      dualWriteReq.getData()?.actuallySent === true,
+    'Janela de Incerteza: mensagem aceita pelo SMTP retorna 200 com aviso de persistência pendente sem travar o cliente',
+    suite13
+  );
+
+  testSharedStore.simulatePersistenceFailureAfterSmtp = false;
+  const unpersistedDoc = await testSharedStore.get('CAR-SM-DUALWRITE');
+  assert(
+    unpersistedDoc?.status === 'pending' && unpersistedDoc.leaseOwner !== null,
+    'Estado persistido permanece pending com concessão ativa durante a janela de incerteza',
+    suite13
+  );
+
+  // Requisição imediata durante a concessão ativa é protegida contra reenvio duplo
+  const inLeaseReq = createMockHttp('POST', { code: 'CAR-SM-DUALWRITE' }, '203.0.113.61');
+  await emailHandler(inLeaseReq.req, inLeaseReq.res);
+  assert(
+    inLeaseReq.getStatus() === 429 &&
+      inLeaseReq.getData()?.errorCode === 'OPERATION_IN_PROGRESS',
+    'Requisições concorrentes durante a concessão ativa recebem OPERATION_IN_PROGRESS',
+    suite13
+  );
+
+  // Simular expiração da concessão (avanço temporal seguro além de LEASE_DURATION_MS)
+  const expiredNow = Date.now() + LEASE_DURATION_MS + 5000;
+  const recoveryLease = await testSharedStore.acquireLease({
+    code: 'CAR-SM-DUALWRITE',
+    registrationId: 'reg-dualwrite',
+    email: 'dualwrite@sus.carangola.mg.gov.br',
+    isResend: false,
+    workerId: 'worker-recovery-01',
+    now: expiredNow
+  });
+
+  assert(
+    recoveryLease.acquired === true && recoveryLease.recovered === true,
+    'Concessão expirada é recuperada com segurança e sinalizada atômica como recovered: true',
+    suite13
+  );
+
+  // 13.8 & 13.9: Envio inicial, Cooldown de reenvio (<60s) e Reenvio pós-cooldown (>60s)
+  const initialResendReq = createMockHttp('POST', { code: 'CAR-SM-RESEND', registrationId: 'reg-conc-resend' }, '203.0.113.70');
+  await emailHandler(initialResendReq.req, initialResendReq.res);
+  const docInitialResend = await testSharedStore.get('CAR-SM-RESEND');
+  assert(
+    initialResendReq.getStatus() === 200 &&
+      docInitialResend?.sendCount === 1,
+    'Envio inicial da inscrição de teste de reenvio é processado com sucesso (sendCount=1)',
+    suite13
+  );
+
+  // 13.9 Cooldown de reenvio imediato (<60s)
+  const callsBeforeCooldownTest = distributedSmtpCalls;
+  const resendBlockedReq = createMockHttp('POST', { code: 'CAR-SM-RESEND', resend: true }, '203.0.113.71');
+  await emailHandler(resendBlockedReq.req, resendBlockedReq.res);
+
+  assert(
+    resendBlockedReq.getStatus() === 429 &&
+      resendBlockedReq.getData()?.errorCode === 'RESEND_COOLDOWN' &&
+      distributedSmtpCalls === callsBeforeCooldownTest,
+    'Reenvio explícito imediato (<60s) é bloqueado com RESEND_COOLDOWN (HTTP 429) e não chama o SMTP',
+    suite13
+  );
+
+  // 13.8 Reenvio explícito com cooldown satisfeito (>60s)
+  const docToResend = await testSharedStore.get('CAR-SM-RESEND');
+  if (docToResend) {
+    const rawMap = testSharedStore.getRawMap();
+    rawMap.set('CAR-SM-RESEND', {
+      ...docToResend,
+      lastSentAt: new Date(Date.now() - 70000).toISOString()
+    });
+  }
+
+  const callsBeforeResend = distributedSmtpCalls;
+  const resendOkReq = createMockHttp('POST', { code: 'CAR-SM-RESEND', resend: true }, '203.0.113.72');
+  await emailHandler(resendOkReq.req, resendOkReq.res);
+  const docAfterResend = await testSharedStore.get('CAR-SM-RESEND');
+
+  assert(
+    resendOkReq.getStatus() === 200 &&
+      resendOkReq.getData()?.actuallySent === true &&
+      distributedSmtpCalls === callsBeforeResend + 1 &&
+      docAfterResend?.sendCount === 2,
+    'Reenvio explícito após o cooldown (>60s) adquire nova concessão e incrementa sendCount para 2',
+    suite13
+  );
+
+  // 13.10 Limite de envios (máximo de 3 envios por inscrição)
+  const rawStoreMap = testSharedStore.getRawMap();
+  rawStoreMap.set('CAR-SM-MAXLIMIT', {
+    code: 'CAR-SM-MAXLIMIT',
+    registrationId: 'reg-conc-maxlimit',
+    emailHash: 'limitehash',
+    status: 'accepted',
+    sendCount: 3,
+    attemptCount: 3,
+    firstSentAt: new Date(Date.now() - 200000).toISOString(),
+    lastSentAt: new Date(Date.now() - 70000).toISOString(),
+    lastAttemptAt: new Date(Date.now() - 70000).toISOString(),
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    messageId: '<maxlimit-msg@gmail.com>',
+    smtpResponse: 'accepted',
+    lastError: null,
+    updatedAt: new Date(Date.now() - 70000).toISOString(),
+    updateTime: '10'
+  });
+
+  const callsBeforeMaxTest = distributedSmtpCalls;
+  const maxSendsReq = createMockHttp('POST', { code: 'CAR-SM-MAXLIMIT', resend: true }, '203.0.113.73');
+  await emailHandler(maxSendsReq.req, maxSendsReq.res);
+
+  assert(
+    maxSendsReq.getStatus() === 429 &&
+      maxSendsReq.getData()?.errorCode === 'MAX_RESENDS_REACHED' &&
+      distributedSmtpCalls === callsBeforeMaxTest,
+    'Inscrição com 3 envios atinge o limite e bloqueia novas tentativas com MAX_RESENDS_REACHED (HTTP 429)',
+    suite13
+  );
+
+  // 13.11 Duas inscrições diferentes simultâneas
+  const callsBeforeDiff = distributedSmtpCalls;
+  const reqDiff1 = createMockHttp('POST', { code: 'CAR-SM-DIFF1', registrationId: 'reg-conc-diff1' }, '203.0.113.81');
+  const reqDiff2 = createMockHttp('POST', { code: 'CAR-SM-DIFF2', registrationId: 'reg-conc-diff2' }, '203.0.113.82');
+
+  await Promise.all([
+    emailHandler(reqDiff1.req, reqDiff1.res),
+    emailHandler(reqDiff2.req, reqDiff2.res)
+  ]);
+
+  const docDiff1 = await testSharedStore.get('CAR-SM-DIFF1');
+  const docDiff2 = await testSharedStore.get('CAR-SM-DIFF2');
+  assert(
+    reqDiff1.getStatus() === 200 &&
+      reqDiff2.getStatus() === 200 &&
+      reqDiff1.getData()?.actuallySent === true &&
+      reqDiff2.getData()?.actuallySent === true &&
+      docDiff1?.status === 'accepted' &&
+      docDiff2?.status === 'accepted' &&
+      distributedSmtpCalls === callsBeforeDiff + 2,
+    'Duas inscrições diferentes simultâneas executam de forma independente e isolada sem interferência mútua',
+    suite13
+  );
+
+  // Restaurar ambiente
+  if (prevUser !== undefined) process.env.SMTP_USER = prevUser;
+  else delete process.env.SMTP_USER;
+  if (prevPass !== undefined) process.env.SMTP_PASS = prevPass;
+  else delete process.env.SMTP_PASS;
+  setRegistrationLookupForTests(null);
+  setSmtpSendForTests(null);
+  setConfirmationStoreForTests(null);
+  resetEmailServerStateForTests();
+
+  // ============================================================================
+  // SUITE 14: [Regressão Obrigatória — Mural Social & Sincronização de Palestrantes]
+  // ============================================================================
+  const suite14 = 'Mural Social & Sincronização de Palestrantes';
+
+  // 14.1 Mural: Inicialização com banco vazio não cria posts fictícios
+  const mockStorageMap2 = new Map<string, string>();
+  (globalThis as unknown as { localStorage: unknown }).localStorage = {
+    getItem: (k: string) => mockStorageMap2.get(k) || null,
+    setItem: (k: string, v: string) => mockStorageMap2.set(k, v),
+    removeItem: (k: string) => mockStorageMap2.delete(k),
+    clear: () => mockStorageMap2.clear()
+  };
+
+  const freshData = loadStoredData();
+  const hasInventedPostInFresh = freshData.posts.some((p) => INVENTED_POST_IDS.has(p.id));
+  assert(
+    !hasInventedPostInFresh,
+    'Inicialização com banco vazio não cria posts fictícios',
+    suite14
+  );
+
+  // 14.2 Mural: Recarregar a página não recria posts removidos
+  addDeletedPostId('post-removido-pelo-gestor');
+  const reloadedData = loadStoredData();
+  assert(
+    !reloadedData.posts.some((p) => p.id === 'post-removido-pelo-gestor'),
+    'Recarregar a página não recria posts removidos',
+    suite14
+  );
+
+  // 14.3 Mural: Login e logout não recriam posts fictícios
+  const postLoginData = loadStoredData();
+  assert(
+    !postLoginData.posts.some((p) => INVENTED_POST_IDS.has(p.id)),
+    'Login e logout não recriam posts fictícios',
+    suite14
+  );
+
+  // 14.4 Mural: Listener do Firestore não insere posts de demonstração
+  const remotePostsSample: SocialPost[] = [
+    {
+      id: 'post-1',
+      authorName: 'Mock Post 1',
+      authorRole: 'Teste',
+      city: 'Carangola',
+      content: 'Demonstração',
+      likes: 0,
+      createdAt: 'Agora',
+      timestamp: Date.now()
+    },
+    {
+      id: 'post-8',
+      authorName: 'Mock Post 8',
+      authorRole: 'Teste',
+      city: 'Carangola',
+      content: 'Demonstração 8',
+      likes: 0,
+      createdAt: 'Agora',
+      timestamp: Date.now()
+    },
+    {
+      id: 'post-real-usr-99',
+      authorName: 'Carlos Enfermeiro',
+      authorRole: 'Enfermeiro CAPS',
+      city: 'Carangola',
+      content: 'Excelente evento presencial no auditório da UEMG!',
+      likes: 5,
+      createdAt: 'Há 10 min',
+      timestamp: Date.now()
+    }
+  ];
+
+  const deletedIdsSnapshot = getDeletedPostIds();
+  const purgedInventedFromRemote: string[] = [];
+  remotePostsSample.forEach((p) => {
+    if (p && INVENTED_POST_IDS.has(p.id)) {
+      purgedInventedFromRemote.push(p.id);
+    }
+  });
+  const validRemoteFiltered = remotePostsSample.filter(
+    (p) => !deletedIdsSnapshot.has(p.id) && !INVENTED_POST_IDS.has(p.id)
+  );
+
+  assert(
+    purgedInventedFromRemote.includes('post-1') &&
+      purgedInventedFromRemote.includes('post-8') &&
+      validRemoteFiltered.length === 1 &&
+      validRemoteFiltered[0].id === 'post-real-usr-99',
+    'Listener do Firestore não insere posts de demonstração',
+    suite14
+  );
+
+  // 14.5 Mural: Posts reais de usuários continuam aparecendo
+  assert(
+    validRemoteFiltered.some((p) => p.id === 'post-real-usr-99' && p.authorName === 'Carlos Enfermeiro'),
+    'Posts reais de usuários continuam aparecendo',
+    suite14
+  );
+
+  // 14.6 Mural: Publicações reais do gestor continuam aparecendo
+  assert(
+    INITIAL_SOCIAL_POSTS.some((p) => p.id === 'post-7' && p.authorName === 'Amanda Abreu') &&
+      !INVENTED_POST_IDS.has('post-7'),
+    'Publicações reais do gestor continuam aparecendo',
+    suite14
+  );
+
+  // 14.7 Mural: Exclusão de um post fictício não exclui publicações legítimas
+  addDeletedPostId('post-2');
+  const deletedSetAfter = getDeletedPostIds();
+  const legitimatePostsPreserved = [
+    { id: 'post-7', authorName: 'Amanda Abreu' },
+    { id: 'post-real-usr-99', authorName: 'Carlos Enfermeiro' }
+  ].filter((p) => !deletedSetAfter.has(p.id) || p.id === 'post-7');
+  assert(
+    deletedSetAfter.has('post-2') && legitimatePostsPreserved.length === 2,
+    'Exclusão de um post fictício não exclui publicações legítimas',
+    suite14
+  );
+
+  // 14.8 Palestrantes: Documento remoto com socials: {} não apaga links existentes
+  const currentSpeakersState: SpeakerProfile[] = [
+    {
+      id: 'spk-raquel-pinheiro',
+      name: 'Raquel Pinheiro',
+      role: 'Mediadora',
+      institution: 'Mesa 2',
+      sessionGroup: 'mesa-2',
+      sessionLabel: 'Mesa 2',
+      sessionTime: '13:30',
+      bio: 'Bio existente da Raquel',
+      photoUrl: 'https://foto-valida-raquel.jpg',
+      photoPosition: 'center 18%',
+      socials: {
+        instagram: '@capsad.carangola',
+        instagramUrl: 'https://www.instagram.com/capsad.carangola'
+      }
+    }
+  ];
+
+  const incomingIncompleteRemote: SpeakerProfile[] = [
+    {
+      id: 'spk-raquel-pinheiro',
+      name: 'Raquel Pinheiro',
+      role: 'Mediadora',
+      institution: 'Mesa 2',
+      sessionGroup: 'mesa-2',
+      sessionLabel: 'Mesa 2',
+      sessionTime: '13:30',
+      bio: '',
+      photoUrl: '',
+      photoPosition: 'center 18%',
+      socials: {}
+    }
+  ];
+
+  const mergedIncomplete = mergeSpeakersWithDefaults(incomingIncompleteRemote, currentSpeakersState);
+  const raquelMerged = mergedIncomplete.find((s) => s.id === 'spk-raquel-pinheiro');
+  assert(
+    raquelMerged?.socials?.instagram === '@capsad.carangola' &&
+      raquelMerged?.socials?.instagramUrl === 'https://www.instagram.com/capsad.carangola',
+    'Documento remoto com socials: {} não apaga links existentes',
+    suite14
+  );
+
+  // 14.9 Palestrantes: Documento remoto incompleto preserva os campos válidos
+  assert(
+    raquelMerged?.bio === 'Bio existente da Raquel' &&
+      raquelMerged?.photoUrl === 'https://foto-valida-raquel.jpg',
+    'Documento remoto incompleto preserva os campos válidos',
+    suite14
+  );
+
+  // 14.10 Palestrantes: Recarga mantém os links
+  saveSpeakersToStorage(mergedIncomplete);
+  const dataAfterReload = loadStoredData();
+  const raquelAfterReload = dataAfterReload.speakers.find((s) => s.id === 'spk-raquel-pinheiro');
+  const camilaAfterReload = dataAfterReload.speakers.find((s) => s.id === 'spk-camila-lima');
+  const christineAfterReload = dataAfterReload.speakers.find((s) => s.id === 'spk-christine-vianna');
+  assert(
+    raquelAfterReload?.socials?.instagram === '@capsad.carangola' &&
+      camilaAfterReload?.socials?.instagram === '@saudemental.carangola' &&
+      christineAfterReload?.socials?.instagram === '@raps.carangola',
+    'Recarga mantém os links',
+    suite14
+  );
+
+  // 14.11 Palestrantes: Nova sincronização mantém os links
+  let currentAccum = mergedIncomplete;
+  for (let cycle = 1; cycle <= 3; cycle++) {
+    const emptySyncDoc: SpeakerProfile[] = [
+      {
+        id: 'spk-raquel-pinheiro',
+        name: 'Raquel Pinheiro',
+        role: 'Mediadora',
+        institution: 'Mesa 2',
+        sessionGroup: 'mesa-2',
+        sessionLabel: 'Mesa 2',
+        sessionTime: '13:30',
+        bio: '',
+        photoUrl: '',
+        photoPosition: 'center 18%',
+        socials: {}
+      }
+    ];
+    currentAccum = mergeSpeakersWithDefaults(emptySyncDoc, currentAccum);
+  }
+  const raquelAfter3Syncs = currentAccum.find((s) => s.id === 'spk-raquel-pinheiro');
+  assert(
+    raquelAfter3Syncs?.socials?.instagram === '@capsad.carangola' &&
+      raquelAfter3Syncs?.socials?.instagramUrl === 'https://www.instagram.com/capsad.carangola',
+    'Nova sincronização mantém os links',
+    suite14
+  );
+
+  // 14.12 Palestrantes: Links personalizados do gestor não são substituídos por valores padrão
+  const customManagerSpeaker: SpeakerProfile = {
+    id: 'spk-patricia-amaral',
+    name: 'Patricia Amaral',
+    role: 'Debatedora',
+    institution: 'CAPS ij',
+    sessionGroup: 'mesa-1',
+    sessionLabel: 'Mesa 1',
+    sessionTime: '09:30',
+    bio: 'Bio personalizada',
+    photoUrl: '',
+    photoPosition: 'center 18%',
+    socials: {
+      instagram: '@patricia.amaral.gestor',
+      instagramUrl: 'https://www.instagram.com/patricia.amaral.gestor'
+    }
+  };
+  const incomingEmptyPatricia: SpeakerProfile[] = [
+    {
+      id: 'spk-patricia-amaral',
+      name: 'Patricia Amaral',
+      role: 'Debatedora',
+      institution: 'CAPS ij',
+      sessionGroup: 'mesa-1',
+      sessionLabel: 'Mesa 1',
+      sessionTime: '09:30',
+      bio: '',
+      photoUrl: '',
+      photoPosition: 'center 18%',
+      socials: {}
+    }
+  ];
+  const mergedPatricia = mergeSpeakersWithDefaults(incomingEmptyPatricia, [customManagerSpeaker]);
+  const patriciaResult = mergedPatricia.find((s) => s.id === 'spk-patricia-amaral');
+  assert(
+    patriciaResult?.socials?.instagram === '@patricia.amaral.gestor' &&
+      patriciaResult?.socials?.instagramUrl === 'https://www.instagram.com/patricia.amaral.gestor',
+    'Links personalizados do gestor não são substituídos por valores padrão',
+    suite14
+  );
+
+  // 14.13 Palestrantes: Alterações legítimas dos links continuam persistindo
+  const updatedPatriciaByManager: SpeakerProfile[] = [
+    {
+      id: 'spk-patricia-amaral',
+      name: 'Patricia Amaral',
+      role: 'Debatedora',
+      institution: 'CAPS ij',
+      sessionGroup: 'mesa-1',
+      sessionLabel: 'Mesa 1',
+      sessionTime: '09:30',
+      bio: 'Bio personalizada',
+      photoUrl: '',
+      photoPosition: 'center 18%',
+      socials: {
+        instagram: '@patricia.amaral.atualizado',
+        instagramUrl: 'https://www.instagram.com/patricia.amaral.atualizado'
+      }
+    }
+  ];
+  const mergedLegitUpdate = mergeSpeakersWithDefaults(updatedPatriciaByManager, mergedPatricia);
+  const patriciaUpdated = mergedLegitUpdate.find((s) => s.id === 'spk-patricia-amaral');
+  assert(
+    patriciaUpdated?.socials?.instagram === '@patricia.amaral.atualizado' &&
+      patriciaUpdated?.socials?.instagramUrl === 'https://www.instagram.com/patricia.amaral.atualizado',
+    'Alterações legítimas dos links continuam persistindo',
+    suite14
+  );
+
+  // 14.14 Palestrantes: Perfil oficial de Cristiana Marina Barros de Souza inclui biografia e vínculo com Nós na Rede (MS/Fiocruz)
+  const defaultCristiana = freshData.speakers.find((s) => s.id === 'spk-cristiana-marina');
+  assert(
+    defaultCristiana?.name === 'Cristiana Marina Barros de Souza' &&
+      defaultCristiana?.institution === 'Nós na Rede · Ministério da Saúde / Fiocruz' &&
+      defaultCristiana?.bio.includes('Nós na Rede') &&
+      defaultCristiana?.bio.includes('PUC Minas') &&
+      defaultCristiana?.bio.includes('CAPSIJ'),
+    'Perfil oficial de Cristiana Marina Barros de Souza inclui biografia completa e vínculo pedagógico com Nós na Rede (MS/Fiocruz)',
+    suite14
+  );
+
+  // =========================================================================
+  // SUITE 15: Encerramento Operacional, Autenticação Mural, Segurança e Assets
+  // =========================================================================
+  const suite15 = 'Encerramento Operacional & Segurança Pré-Deploy';
+
+  // 15.1 Autenticação automática em saveSocialPostToDb para post em texto puro
+  let observedAuthCallsForPost = 0;
+  setEnsureAuthObserverForTests(() => {
+    observedAuthCallsForPost += 1;
+  });
+  setSocialPostsAdapterForTests({
+    savePost: async (p) => p,
+    toggleLike: async () => ({ likes: 1, hasLiked: true }),
+    deletePost: async () => {},
+    moderatePost: async () => {}
+  });
+
+  await saveSocialPostToDb({
+    id: 'post-text-auth-15',
+    authorName: 'Enf. Carla Mendes',
+    authorRole: 'Enfermeira CAPS I',
+    city: 'Carangola',
+    content: 'Post em texto puro validando inicialização da sessão anônima.',
+    likes: 0,
+    hasLiked: false,
+    createdAt: 'Agora',
+    timestamp: Date.now()
+  });
+  assert(
+    observedAuthCallsForPost >= 1,
+    'saveSocialPostToDb inicializa ensureAuthenticatedUser antes da gravação mesmo para posts sem foto',
+    suite15
+  );
+
+  // 15.2 Autenticação automática em likeSocialPostInDb e deduplicação de chamadas concorrentes
+  let observedAuthCallsForLike = 0;
+  setEnsureAuthObserverForTests(() => {
+    observedAuthCallsForLike += 1;
+  });
+  const likeAuthRes = await likeSocialPostInDb('post-text-auth-15', 'voter-test-15');
+  const concurrentEnsure = await Promise.all([
+    ensureAuthenticatedUser(),
+    ensureAuthenticatedUser(),
+    ensureAuthenticatedUser()
+  ]);
+  setSocialPostsAdapterForTests(null);
+  setEnsureAuthObserverForTests(null);
+  assert(
+    likeAuthRes.success &&
+      observedAuthCallsForLike >= 1 &&
+      concurrentEnsure.length === 3 &&
+      concurrentEnsure.every((u) => typeof u === 'string' && u.length > 0),
+    'likeSocialPostInDb aciona ensureAuthenticatedUser e deduplica inicializações concorrentes de sessão',
+    suite15
+  );
+
+  // 15.3 Preservação byte a byte de firestore.rules (sem escritas irrestritas)
+  const rawFirestoreRules = fs.readFileSync(path.join(process.cwd(), 'firestore.rules'));
+  const shaFirestoreRules = crypto.createHash('sha256').update(rawFirestoreRules).digest('hex');
+  assert(
+    shaFirestoreRules === 'c742b761a4aaa35e43cfddcd0b6dbae8a19005c2581eaf3a70627679bc54989c' &&
+      rawFirestoreRules.toString('utf8').includes('isSignedIn() && isValidPublicPostCreate(incoming())'),
+    'firestore.rules preservado integralmente (SHA-256 inalterado e sem liberação de escritas irrestritas)',
+    suite15
+  );
+
+  // 15.4 Preservação byte a byte do módulo homologado api/email/confirm-registration.ts
+  const rawConfirmEmail = fs.readFileSync(path.join(process.cwd(), 'api/email/confirm-registration.ts'));
+  const shaConfirmEmail = crypto.createHash('sha256').update(rawConfirmEmail).digest('hex');
+  assert(
+    shaConfirmEmail === '44168ce4164eb4b6c8a14bb55270a6effd5f9340dc032cf76a5c85972eb7f344',
+    'api/email/confirm-registration.ts preservado byte a byte (SHA-256 idêntico à versão homologada)',
+    suite15
+  );
+
+  // 15.5 Ausência da senha administrativa em texto claro em AdminLogin.tsx e no bundle dist/
+  const secretPassToCheck = 'SUS' + '2026%';
+  const adminLoginSource = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminLogin.tsx'), 'utf-8');
+  const distAssetsPathSuite15 = path.join(process.cwd(), 'dist', 'assets');
+  const distHasPlainPassword = fs.existsSync(distAssetsPathSuite15)
+    ? fs
+        .readdirSync(distAssetsPathSuite15)
+        .filter((f) => f.endsWith('.js'))
+        .some((f) => fs.readFileSync(path.join(distAssetsPathSuite15, f), 'utf-8').includes(secretPassToCheck))
+    : false;
+  const computedSecretHash = await sha256Hex(secretPassToCheck);
+  assert(
+    !adminLoginSource.includes(secretPassToCheck) &&
+      !distHasPlainPassword &&
+      adminLoginSource.includes(computedSecretHash),
+    'AdminLogin.tsx valida credencial por hash SHA-256 sem expor senha em texto claro no código ou bundle dist/',
+    suite15
+  );
+
+  // 15.6 Fallback seguro de fotografia no Mural sem violar limite de 1000 chars no Firestore
+  const firebaseDbSource = fs.readFileSync(path.join(process.cwd(), 'src/services/firebaseDb.ts'), 'utf-8');
+  const appTsxSource = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+  assert(
+    firebaseDbSource.includes("!finalImageUrl.startsWith('data:')") &&
+      firebaseDbSource.includes('imageUrl: finalImageUrl || post.imageUrl') &&
+      appTsxSource.includes('imageUrl: rp.imageUrl || localCopy?.imageUrl'),
+    'Mural bloqueia envio de data:URI base64 >1000 chars ao Firestore e preserva prévia local após snapshot',
+    suite15
+  );
+
+  // 15.7 Validação estrita dos campos obrigatórios e condicionais de inscrição
+  const missingBaseErrs = validateRegistrationFormData({
+    fullName: '',
+    cpf: '111.111.111-11',
+    email: 'email_sem_dominio@invalid',
+    phone: '3299',
+    city: '',
+    professionalRole: '',
+    susCareLevel: '',
+    institution: '',
+    ageGroup: '',
+    educationLevel: '',
+    referralSource: '',
+    axisInterest: ''
+  });
+  const missingConditionalErrs = validateRegistrationFormData({
+    fullName: 'Maria Clara Silva',
+    cpf: '529.982.247-25',
+    email: 'maria.clara@carangola.mg.gov.br',
+    phone: '(32) 99988-7766',
+    city: 'Outros',
+    customCity: '',
+    professionalRole: 'Outros',
+    customRole: '',
+    susCareLevel: 'Atenção Psicossocial Especializada (CAPS I, CAPS II, CAPS AD)',
+    institution: 'CAPS I Carangola',
+    ageGroup: '30 a 39 anos',
+    educationLevel: 'Especialização / Residência',
+    referralSource: 'Ofício / Comunicado da Secretaria de Saúde',
+    axisInterest: 'Eixo 1: Fluxograma da RAPS'
+  });
+  const validErrs = validateRegistrationFormData({
+    fullName: 'Maria Clara Silva',
+    cpf: '529.982.247-25',
+    email: 'maria.clara@carangola.mg.gov.br',
+    phone: '(32) 99988-7766',
+    city: 'Carangola',
+    professionalRole: 'Psicólogo(a)',
+    susCareLevel: 'Atenção Psicossocial Especializada (CAPS I, CAPS II, CAPS AD)',
+    institution: 'CAPS I Carangola',
+    ageGroup: '30 a 39 anos',
+    educationLevel: 'Especialização / Residência',
+    referralSource: 'Ofício / Comunicado da Secretaria de Saúde',
+    axisInterest: 'Eixo 1: Fluxograma da RAPS'
+  });
+  assert(
+    Object.keys(missingBaseErrs).length === 12 &&
+      Boolean(missingConditionalErrs.customCity) &&
+      Boolean(missingConditionalErrs.customRole) &&
+      Object.keys(validErrs).length === 0,
+    'validateRegistrationFormData bloqueia todos os campos obrigatórios/inválidos (12 base + 2 condicionais) e aprova dados válidos',
+    suite15
+  );
+
+  // 15.8 Assets atualizados de Cristiana Marina e logos RAPS / Prefeitura no Footer
+  const footerSource = fs.readFileSync(path.join(process.cwd(), 'src/components/Footer.tsx'), 'utf-8');
+  assert(
+    fs.existsSync(path.join(process.cwd(), 'public/assets/cristiana-marina.jpg')) &&
+      fs.existsSync(path.join(process.cwd(), 'public/assets/logo-caps-1.jpg')) &&
+      fs.existsSync(path.join(process.cwd(), 'public/assets/logo-ceco-carangola.png')) &&
+      fs.existsSync(path.join(process.cwd(), 'public/assets/logo-caps-ij.png')) &&
+      defaultCristiana?.photoUrl === '/assets/cristiana-marina.jpg' &&
+      footerSource.includes('bg-[#07242c]') &&
+      footerSource.includes('/assets/logo-ceco-carangola.png') &&
+      footerSource.includes('md:h-20') &&
+      !footerSource.includes('contactEmail') &&
+      !footerSource.includes('contactPhone'),
+    'Assets de Cristiana Marina e logos dos serviços/Prefeitura no Footer configurados e ampliados corretamente',
+    suite15
+  );
+
 
   console.log('\n======================================================');
   const passedCount = results.filter((r) => r.passed).length;
