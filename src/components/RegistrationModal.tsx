@@ -37,6 +37,7 @@ import {
   formatPhone,
   generateRegistrationCode,
   getOrCreateParticipantRegistrationIdentity,
+  buildSubscriberIdFromRegistrationId,
   sendBrowserNotification,
   isCertificateAvailableForPublic,
   CERTIFICATE_RELEASE_LABEL
@@ -372,10 +373,15 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
         return;
       }
 
-      // Alimenta base de assinantes de newsletter e whatsapp no painel do gestor apenas após confirmação
-      if (onSubscribeNewsletter && (formData.notifyWhatsapp || formData.notifyEmail)) {
+      const confirmedRegistration =
+        outcome && outcome.registration ? outcome.registration : newReg;
+
+      // O assinante determinístico (sub-${regId}) já é gravado atomicamente no mesmo batch
+      // da inscrição pública em savePublicRegistrationToDb / handleSaveRegistration (quando persisted)
+      // ou ao concluir a fila offline em syncOfflineQueue; só aciona fallback se outcome vier ausente.
+      if (!outcome && onSubscribeNewsletter && (formData.notifyWhatsapp || formData.notifyEmail)) {
         onSubscribeNewsletter({
-          id: `sub-${Date.now()}`,
+          id: buildSubscriberIdFromRegistrationId(confirmedRegistration.id),
           email: formData.email.trim().toLowerCase(),
           name: formData.fullName.trim(),
           phone: formData.phone.trim(),
@@ -388,9 +394,6 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
           subscribedAt: new Date().toISOString().split('T')[0]
         });
       }
-
-      const confirmedRegistration =
-        outcome && outcome.registration ? outcome.registration : newReg;
 
       const isOfflineQueuedResult = outcome ? outcome.status === 'queued' : queued;
       setIsQueuedOffline(isOfflineQueuedResult);

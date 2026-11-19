@@ -6,11 +6,24 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import {
   generateRegistrationCode,
   getOrCreateParticipantRegistrationIdentity,
   clearParticipantAttemptCache,
   buildRegistrationId,
+  sanitizeRegistrationId,
+  validateSubscriberId,
+  buildSubscriberIdFromRegistrationId,
+  extractRegistrationIdFromSubscriberId,
+  isSubscriberActive,
+  validateStrictIsoTimestamp,
+  hydrateConfirmedTombstonesMap,
+  reconcileSubscribersSnapshot,
+  enqueueSerialQueueTask,
+  classifySubscribersForDashboard,
+  saveToStorage,
   loadStoredData,
   saveSpeakersToStorage,
   mergeSpeakersWithDefaults,
@@ -26,8 +39,13 @@ import {
   testFirestoreConnection,
   setFirestoreConnectionProbeForTests,
   getActiveFirebaseConfigSummary,
+  getPublicUnauthInstanceDiagnostics,
+  initStrictInMemoryPublicAuth,
   savePublicRegistrationToDb,
+  saveAdminRegistrationWithTriadCheckInDb,
+  persistAdminImportedRegistrationsWithTriadCheckInDb,
   setFirestoreRegistrationAdapterForTests,
+  setAdminTriadAdapterForTests,
   synchronizeOfflineRegistrationQueue,
   persistRegistrationAndPermissionInDb,
   deleteRegistrationInDb,
@@ -43,6 +61,7 @@ import {
   subscribeNewsletterInDb,
   unsubscribeNewsletterInDb,
   deleteSubscriberInDb,
+  updateSubscriberConsentInDb,
   setNewsletterAdapterForTests,
   sha256Hex,
   generateSecureToken,
@@ -67,7 +86,7 @@ import emailHandler, {
 import statusHandler from '../api/email/status.ts';
 import mapsHandler from '../api/maps/config.ts';
 import vercelConfig from '../vercel.json' with { type: 'json' };
-import { INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS } from '../src/data/initialData.ts';
+import { INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS, INITIAL_SUBSCRIBERS } from '../src/data/initialData.ts';
 import type { Registration, SpeakerProfile, SocialPost, PushNotificationItem, NewsletterSubscriber } from '../src/types.ts';
 
 interface TestResult {
@@ -233,20 +252,25 @@ async function runTests() {
     `Novo código: ${collisionSaveRes.code}`
   );
 
-  // 2. Teste de idempotência: repetir o envio da mesma inscrição (mesmo id e código) não duplica nem falha
+  // 2. Política pública fail-closed: cliente público sem acesso PII não classifica repetição como alreadyExisted e nunca duplica ou sobrescreve
   const savedReg: Registration = {
     ...collidingReg,
     id: collisionSaveRes.id,
     code: collisionSaveRes.code
   };
   const countBeforeRepeat = mockFirestoreRegs.size;
-  const repeatSaveRes = await savePublicRegistrationToDb(savedReg);
+  let repeatFailClosedCaught = false;
+  try {
+    await savePublicRegistrationToDb(savedReg);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    repeatFailClosedCaught = msg.includes('PUBLIC_DUPLICATE_OR_UNVERIFIABLE_STATE');
+  }
   assert(
-    repeatSaveRes.success &&
-      repeatSaveRes.alreadyExisted === true &&
-      repeatSaveRes.code === savedReg.code &&
-      mockFirestoreRegs.size === countBeforeRepeat,
-    'Repetição do mesmo pedido é idempotente e não cria inscrição duplicada no Firestore',
+    repeatFailClosedCaught &&
+      mockFirestoreRegs.size === countBeforeRepeat &&
+      mockFirestorePerms.size === 2,
+    'Repetição no cliente público é fail-closed: rejeita sem falso alreadyExisted e sem duplicação',
     suite1
   );
 
@@ -345,17 +369,45 @@ async function runTests() {
     suite2
   );
 
-  // Executar sincronização novamente com os itens já confirmados: não duplica dados
+  // Sem sessão admin autorizada, cliente público não pode validar tríade pré-existente no servidor (mantém na fila)
+  const syncOutcome2NoAdmin = await synchronizeOfflineRegistrationQueue(
+    [qItem1, qItem3],
+    syncOutcome1.mergedRegistrations
+  );
+  assert(
+    syncOutcome2NoAdmin.remainingQueue.length === 2 &&
+      syncOutcome2NoAdmin.requiresAdminTriadVerificationCount === 2 &&
+      syncOutcome2NoAdmin.allSucceeded === false,
+    'Sem sessão administrativa autorizada, duplicidade pré-existente na fila permanece pendente (fail-closed)',
+    suite2
+  );
+
+  // Com leitura administrativa da tríade no servidor, confirmação positiva remove duplicidades da fila sem duplicar
+  setAdminTriadAdapterForTests({
+    isAdminAuthorized: () => true,
+    async getServerDoc(col, docId) {
+      if (col === 'registrations') return mockFirestoreRegs.get(docId) || null;
+      if (col === 'certificate_permissions') return mockFirestorePerms.get(docId) || null;
+      return null;
+    },
+    async runTriadTransaction() {
+      throw new Error('NOT_USED');
+    }
+  });
+
   const syncOutcome2 = await synchronizeOfflineRegistrationQueue(
     [qItem1, qItem3],
     syncOutcome1.mergedRegistrations
   );
   assert(
-    syncOutcome2.mergedRegistrations.length === 2 && syncOutcome2.remainingQueue.length === 0,
-    'Repetir a sincronização da fila offline é idempotente e não duplica inscrições',
+    syncOutcome2.mergedRegistrations.length === 2 &&
+      syncOutcome2.remainingQueue.length === 0 &&
+      syncOutcome2.syncedEntries.every((e) => e.alreadyExistedOnServer),
+    'Repetir a sincronização da fila offline com tríade verificada no servidor é idempotente e não duplica inscrições',
     suite2
   );
 
+  setAdminTriadAdapterForTests(null);
   setFirestoreRegistrationAdapterForTests(null);
 
   // ----------------------------------------------------
@@ -852,6 +904,58 @@ async function runTests() {
   assert(
     mat5PermanentlyBlocked,
     'Documento privado Termo de Cessão de Uso (mat-5) é estritamente expurgado do estado e nunca aparece na plataforma',
+    suite7
+  );
+
+  const expectedMoebusDocs = [
+    {
+      id: 'mat-re-existir-diferenca-2020',
+      fileName: 'livro_re_existir_na_diferenca_merhy_moebus_2020.pdf',
+      category: 'Apostila',
+      pages: 193
+    },
+    {
+      id: 'mat-tragico-producao-cuidado-2014',
+      fileName: 'livro_o_tragico_na_producao_do_cuidado_moebus_2014.pdf',
+      category: 'Apostila',
+      pages: 255
+    },
+    {
+      id: 'mat-psicologia-decolonial-2024',
+      fileName: 'artigo_psicologia_decolonial_contracolonial_moebus_2024.pdf',
+      category: 'Apostila',
+      pages: 15
+    }
+  ] as const;
+
+  const moebusMetadataAndMergeOk = expectedMoebusDocs.every((spec) => {
+    const fromFresh = initialMaterials.find((m) => m.id === spec.id);
+    const fromMerged = reloadedWithCache.materials.find((m) => m.id === spec.id);
+    return (
+      Boolean(fromFresh) &&
+      Boolean(fromMerged) &&
+      fromFresh?.format === 'PDF' &&
+      fromFresh?.category === spec.category &&
+      fromFresh?.pages === spec.pages &&
+      fromFresh?.fileName === spec.fileName &&
+      fromFresh?.fileUrl === `/materiais/${spec.fileName}`
+    );
+  });
+  assert(
+    moebusMetadataAndMergeOk,
+    'INITIAL_MATERIALS e loadStoredData incluem os 3 PDFs de Ricardo Moebus com rotas estáticas em /materiais/',
+    suite7
+  );
+
+  const moebusFilesValidOnDisk = expectedMoebusDocs.every((spec) => {
+    const filePath = path.join(materialsDir, spec.fileName);
+    if (!fs.existsSync(filePath)) return false;
+    const buf = fs.readFileSync(filePath);
+    return buf.length > 0 && buf.subarray(0, 5).toString('ascii') === '%PDF-';
+  });
+  assert(
+    moebusFilesValidOnDisk,
+    'Arquivos PDF dos 3 materiais de Ricardo Moebus existem fisicamente em public/materiais/ com assinatura %PDF- válida',
     suite7
   );
 
@@ -2828,6 +2932,1604 @@ async function runTests() {
     'Assets de Cristiana Marina e logos dos serviços/Prefeitura no Footer configurados e ampliados corretamente',
     suite15
   );
+
+  // ============================================================================
+  // SUITE 16: INTEGRAÇÃO INSCRITOS ↔ ASSINANTES & CONCORRÊNCIA TRANSACIONAL
+  // ============================================================================
+  const suite16 = 'Suite 16 — Integração Inscritos ↔ Assinantes & Concorrência Transacional';
+
+  class ConcurrentTestStorageAdapter {
+    public globalVersion = 0;
+    public conflictCount = 0;
+
+    public registrations = new Map<string, { data: Record<string, unknown>; version: number }>();
+    public permissions = new Map<string, { data: Record<string, unknown>; version: number }>();
+    public subscribers = new Map<string, { data: NewsletterSubscriber; version: number }>();
+
+    async getPermissionDoc(code: string) {
+      const entry = this.permissions.get(code);
+      return {
+        exists: !!entry,
+        data: entry ? { ...entry.data } : undefined
+      };
+    }
+
+    async commitRegistrationBatch(
+      regId: string,
+      regPayload: Record<string, unknown>,
+      permCode: string,
+      permPayload: Record<string, unknown>,
+      subPayload?: Record<string, unknown> | null
+    ): Promise<void> {
+      const maxRetries = 5;
+
+      for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+        const snapshotVersion = this.globalVersion;
+
+        // Pré-validação
+        if (this.registrations.has(regId)) {
+          const err = new Error(`COLISAO_REGISTRATION_ID: Documento ${regId} já existe.`);
+          (err as any).code = 'permission-denied';
+          throw err;
+        }
+        if (this.permissions.has(permCode)) {
+          const err = new Error(`COLISAO_PERMISSION_CODE: Código ${permCode} já registrado.`);
+          (err as any).code = 'permission-denied';
+          throw err;
+        }
+        if (subPayload && this.subscribers.has(String(subPayload.id))) {
+          const err = new Error(`SOBREESCRITA_PROIBIDA: Assinante ${subPayload.id} já existe.`);
+          (err as any).code = 'permission-denied';
+          throw err;
+        }
+
+        // Ponto de intercalação assíncrona cooperativa no event loop
+        await new Promise<void>((resolve) => setTimeout(resolve, 2));
+
+        // Seção crítica síncrona
+        if (this.globalVersion !== snapshotVersion) {
+          this.conflictCount += 1;
+          continue;
+        }
+
+        // Revalidação atômica final
+        if (this.registrations.has(regId) || this.permissions.has(permCode) || (subPayload && this.subscribers.has(String(subPayload.id)))) {
+          const err = new Error('COLISAO_NO_COMMIT');
+          (err as any).code = 'permission-denied';
+          throw err;
+        }
+
+        this.registrations.set(regId, { data: { ...regPayload }, version: 1 });
+        this.permissions.set(permCode, { data: { ...permPayload }, version: 1 });
+        if (subPayload) {
+          this.subscribers.set(String(subPayload.id), {
+            data: { ...subPayload } as unknown as NewsletterSubscriber,
+            version: 1
+          });
+        }
+        this.globalVersion += 1;
+        return;
+      }
+      throw new Error('BATCH_MAX_RETRIES_EXCEEDED');
+    }
+
+    async updateSubscriberConsent(
+      subscriberId: string,
+      changes: { receiveEmail?: boolean; receiveWhatsapp?: boolean }
+    ): Promise<void> {
+      const maxRetries = 5;
+
+      for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+        const currentEntry = this.subscribers.get(subscriberId);
+        if (!currentEntry) throw new Error('SUBSCRIBER_NOT_FOUND');
+
+        const snapshotVersion = this.globalVersion;
+        const currentData = { ...currentEntry.data };
+
+        if (currentData.status === 'unsubscribed') {
+          throw new Error('TOMBSTONE_MODIFICATION_FORBIDDEN');
+        }
+
+        const currentEmail: boolean | undefined = currentData.receiveEmail;
+        const currentWhatsapp: boolean | undefined = currentData.receiveWhatsapp;
+
+        let nextEmail: boolean | undefined = currentEmail;
+        if (changes.receiveEmail === false) {
+          nextEmail = false;
+        } else if (changes.receiveEmail === true && currentEmail !== true) {
+          nextEmail = currentEmail;
+        }
+
+        let nextWhatsapp: boolean | undefined = currentWhatsapp;
+        if (changes.receiveWhatsapp === false) {
+          nextWhatsapp = false;
+        } else if (changes.receiveWhatsapp === true && currentWhatsapp !== true) {
+          nextWhatsapp = currentWhatsapp;
+        }
+
+        const isFullyRevoked = nextEmail === false && nextWhatsapp === false;
+        const nextStatus = isFullyRevoked ? 'unsubscribed' : (currentData.status || 'active');
+
+        const updatedData: NewsletterSubscriber = {
+          ...currentData,
+          receiveEmail: nextEmail,
+          receiveWhatsapp: nextWhatsapp,
+          status: nextStatus,
+          updatedAt: new Date().toISOString(),
+          ...(isFullyRevoked ? { unsubscribedAt: currentData.unsubscribedAt || new Date().toISOString(), unsubscribeTokenHash: '' } : {})
+        };
+
+        // Ponto de intercalação
+        await new Promise<void>((resolve) => setTimeout(resolve, 2));
+
+        // Seção crítica síncrona
+        if (this.globalVersion !== snapshotVersion) {
+          this.conflictCount += 1;
+          continue;
+        }
+
+        this.subscribers.set(subscriberId, {
+          data: updatedData,
+          version: currentEntry.version + 1
+        });
+        this.globalVersion += 1;
+        return;
+      }
+      throw new Error('TRANSACTION_MAX_RETRIES_EXCEEDED');
+    }
+
+    async deleteSubscriber(subscriberId: string): Promise<{
+      success: true;
+      subscriberId: string;
+      tombstoneConfirmedAt: string;
+      alreadyTombstoned: boolean;
+    }> {
+      const cleanId = validateSubscriberId(subscriberId);
+      const currentEntry = this.subscribers.get(cleanId);
+      if (!currentEntry) {
+        throw new Error('SUBSCRIBER_NOT_FOUND');
+      }
+      if (currentEntry.data.status === 'unsubscribed') {
+        const existingTs =
+          validateStrictIsoTimestamp(currentEntry.data.unsubscribedAt) ||
+          validateStrictIsoTimestamp(currentEntry.data.updatedAt) ||
+          String(currentEntry.data.unsubscribedAt || currentEntry.data.updatedAt || '');
+        return {
+          success: true,
+          subscriberId: cleanId,
+          tombstoneConfirmedAt: existingTs,
+          alreadyTombstoned: true
+        };
+      }
+      const nowIso = new Date().toISOString();
+      this.subscribers.set(cleanId, {
+        data: {
+          ...currentEntry.data,
+          status: 'unsubscribed',
+          receiveEmail: false,
+          receiveWhatsapp: false,
+          unsubscribedAt: nowIso,
+          unsubscribeTokenHash: '',
+          updatedAt: nowIso
+        },
+        version: currentEntry.version + 1
+      });
+      this.globalVersion += 1;
+      return {
+        success: true,
+        subscriberId: cleanId,
+        tombstoneConfirmedAt: nowIso,
+        alreadyTombstoned: false
+      };
+    }
+
+    async verifyOrCreateAdminTriad(
+      reg: Registration
+    ): Promise<{ success: boolean; alreadyExisted: boolean; id: string; code: string }> {
+      const permEntry = this.permissions.get(reg.code);
+      const regEntry = this.registrations.get(reg.id);
+      const subId = buildSubscriberIdFromRegistrationId(reg.id);
+      const subEntry = this.subscribers.get(subId);
+      const wantsNews = Boolean(reg.acceptEmailNews || reg.acceptWhatsappNews);
+
+      if (permEntry) {
+        if (!regEntry) throw new Error('TRIAD_ORPHAN_PERMISSION_CONFLICT');
+        if (String(permEntry.data.registrationId || '') !== reg.id) throw new Error('CODE_COLLISION_CONFLICT');
+        if (String(regEntry.data.code || '') !== reg.code || regEntry.data.cpf !== reg.cpf || regEntry.data.email !== reg.email) {
+          throw new Error('REGISTRATION_IDENTITY_CONFLICT');
+        }
+        if (wantsNews && !subEntry) throw new Error('TRIAD_MISSING_SUBSCRIBER_CONFLICT');
+        return { success: true, alreadyExisted: true, id: reg.id, code: reg.code };
+      }
+
+      if (regEntry) throw new Error('COLISAO_REGISTRATION_ID');
+      if (wantsNews && subEntry) throw new Error('SOBREESCRITA_PROIBIDA');
+
+      const nowIso = new Date().toISOString();
+      await this.commitRegistrationBatch(
+        reg.id,
+        { id: reg.id, code: reg.code, cpf: reg.cpf, email: reg.email, fullName: reg.fullName },
+        reg.code,
+        { code: reg.code, registrationId: reg.id, participantName: reg.fullName },
+        wantsNews ? { id: subId, email: reg.email, status: 'active', receiveEmail: Boolean(reg.acceptEmailNews), receiveWhatsapp: Boolean(reg.acceptWhatsappNews), subscribedAt: nowIso.split('T')[0], consent: true } : null
+      );
+      return { success: true, alreadyExisted: false, id: reg.id, code: reg.code };
+    }
+
+    async deleteRegistration(regId: string, permCode: string): Promise<void> {
+      this.registrations.delete(regId);
+      this.permissions.delete(permCode);
+      const subId = buildSubscriberIdFromRegistrationId(regId);
+      this.subscribers.delete(subId);
+      this.globalVersion += 1;
+    }
+
+    async subscribe(sub: NewsletterSubscriber) {
+      this.subscribers.set(sub.id, { data: { ...sub }, version: 1 });
+      this.globalVersion += 1;
+      return { isNew: true, subscriber: sub };
+    }
+
+    async unsubscribe(emailOrId: string) {
+      await this.deleteSubscriber(emailOrId);
+    }
+  }
+
+  // 16.1 Criação atômica de inscrição e assinante vinculada determinística
+  const adapterSuite16 = new ConcurrentTestStorageAdapter();
+  setFirestoreRegistrationAdapterForTests(adapterSuite16);
+
+  const reg16_1 = makeSampleRegistration({
+    id: 'reg-suite16-01',
+    code: 'SM-S16-01',
+    acceptEmailNews: true,
+    acceptWhatsappNews: true
+  });
+  const res16_1 = await savePublicRegistrationToDb(reg16_1);
+  const subDoc16_1 = adapterSuite16.subscribers.get('sub-reg-suite16-01');
+
+  assert(
+    res16_1.success === true &&
+      adapterSuite16.registrations.has('reg-suite16-01') &&
+      adapterSuite16.permissions.has('SM-S16-01') &&
+      adapterSuite16.subscribers.has('sub-reg-suite16-01') &&
+      subDoc16_1?.data.status === 'active' &&
+      subDoc16_1?.data.receiveEmail === true &&
+      subDoc16_1?.data.receiveWhatsapp === true &&
+      subDoc16_1?.data.id === 'sub-reg-suite16-01',
+    'Criação atômica de inscrição e assinante com consentimento gera sub-${regId} com status active',
+    suite16
+  );
+
+  // 16.2 Inscrição sem consentimento não cria documento de assinante
+  const reg16_2 = makeSampleRegistration({
+    id: 'reg-suite16-02',
+    code: 'SM-S16-02',
+    acceptEmailNews: false,
+    acceptWhatsappNews: false
+  });
+  const res16_2 = await savePublicRegistrationToDb(reg16_2);
+  assert(
+    res16_2.success === true &&
+      adapterSuite16.registrations.has('reg-suite16-02') &&
+      adapterSuite16.permissions.has('SM-S16-02') &&
+      !adapterSuite16.subscribers.has('sub-reg-suite16-02'),
+    'Inscrição sem consentimento não cria documento em newsletter_subscribers',
+    suite16
+  );
+
+  // 16.3 Política fail-closed na repetição pública + verificação autorizada da tríade no fluxo admin
+  const subsBeforeRetry = adapterSuite16.subscribers.size;
+  let publicRetryFailedClosed = false;
+  try {
+    await savePublicRegistrationToDb(reg16_1);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    publicRetryFailedClosed = msg.includes('PUBLIC_DUPLICATE_OR_UNVERIFIABLE_STATE');
+  }
+  let adminUnauthBlocked = false;
+  try {
+    await saveAdminRegistrationWithTriadCheckInDb(reg16_1);
+  } catch (err: unknown) {
+    adminUnauthBlocked = err instanceof Error && err.message === 'ADMIN_AUTH_REQUIRED';
+  }
+  const triadAdminRes = await adapterSuite16.verifyOrCreateAdminTriad(reg16_1);
+  assert(
+    publicRetryFailedClosed &&
+      adminUnauthBlocked &&
+      triadAdminRes.alreadyExisted === true &&
+      adapterSuite16.subscribers.size === subsBeforeRetry,
+    'Retentativa pública é fail-closed e verificação admin da tríade exige autenticação + integridade',
+    suite16
+  );
+
+  // 16.4 Colisão de IDs de inscrição é bloqueada pelo lote
+  let idCollisionCaught = false;
+  try {
+    await adapterSuite16.commitRegistrationBatch('reg-suite16-01', {}, 'SM-NEW-99', {});
+  } catch (err: any) {
+    idCollisionCaught = err?.code === 'permission-denied' || String(err).includes('COLISAO_REGISTRATION_ID');
+  }
+  assert(
+    idCollisionCaught,
+    'Tentativa de gravação com registrationId já existente é rejeitada pelo lote',
+    suite16
+  );
+
+  // 16.5 Colisão de código de certificado gera novo código sem sobrescrever o existente
+  const reg16_5 = makeSampleRegistration({
+    id: 'reg-suite16-05',
+    code: 'SM-S16-01' // Colide propositalmente com reg16_1
+  });
+  const res16_5 = await savePublicRegistrationToDb(reg16_5);
+  assert(
+    res16_5.success === true &&
+      res16_5.code !== 'SM-S16-01' &&
+      adapterSuite16.permissions.has(res16_5.code) &&
+      adapterSuite16.permissions.get('SM-S16-01')?.data.registrationId === 'reg-suite16-01',
+    'Colisão de código de certificado aciona geração de novo código sem sobrescrever o anterior',
+    suite16
+  );
+
+  // 16.6 Atomicidade dos três documentos no batch
+  const adapter16_6 = new ConcurrentTestStorageAdapter();
+  await adapter16_6.commitRegistrationBatch(
+    'reg-atom-01',
+    { id: 'reg-atom-01' },
+    'SM-ATOM-01',
+    { code: 'SM-ATOM-01' },
+    { id: 'sub-reg-atom-01', email: 'atom@teste.com', status: 'active', receiveEmail: true, receiveWhatsapp: false } as any
+  );
+  assert(
+    adapter16_6.registrations.has('reg-atom-01') &&
+      adapter16_6.permissions.has('SM-ATOM-01') &&
+      adapter16_6.subscribers.has('sub-reg-atom-01') &&
+      adapter16_6.globalVersion === 1,
+    'Batch grava simultaneamente inscrição, permissão e assinante em única transação',
+    suite16
+  );
+
+  // 16.7 Falha de gravação no batch rejeita todo o lote
+  const adapter16_7 = new ConcurrentTestStorageAdapter();
+  adapter16_7.subscribers.set('sub-existing-fail', { data: { id: 'sub-existing-fail' } as any, version: 1 });
+  let failCaught = false;
+  try {
+    await adapter16_7.commitRegistrationBatch(
+      'reg-should-fail',
+      { id: 'reg-should-fail' },
+      'SM-FAIL-CODE',
+      { code: 'SM-FAIL-CODE' },
+      { id: 'sub-existing-fail' } // Colisão proposital de assinante
+    );
+  } catch (err: any) {
+    failCaught = err?.code === 'permission-denied' || String(err).includes('SOBREESCRITA_PROIBIDA');
+  }
+  assert(
+    failCaught &&
+      !adapter16_7.registrations.has('reg-should-fail') &&
+      !adapter16_7.permissions.has('SM-FAIL-CODE'),
+    'Falha em qualquer documento do lote impede a gravação dos demais documentos',
+    suite16
+  );
+
+  // 16.8 Rollback integral sem gravações parciais
+  assert(
+    adapter16_7.registrations.size === 0 &&
+      adapter16_7.permissions.size === 0 &&
+      adapter16_7.subscribers.size === 1 &&
+      adapter16_7.globalVersion === 0,
+    'Rollback integral confirma ausência de mutações parciais após rejeição do batch',
+    suite16
+  );
+
+  // 16.9 Duas criações concorrentes simultâneas comutam ambas com sucesso
+  const adapter16_9 = new ConcurrentTestStorageAdapter();
+  setFirestoreRegistrationAdapterForTests(adapter16_9);
+
+  const regConcA = makeSampleRegistration({ id: 'reg-conc-user-a', code: 'SM-CONC-A', acceptEmailNews: true });
+  const regConcB = makeSampleRegistration({ id: 'reg-conc-user-b', code: 'SM-CONC-B', acceptWhatsappNews: true });
+
+  const [resConcA, resConcB] = await Promise.all([
+    savePublicRegistrationToDb(regConcA),
+    savePublicRegistrationToDb(regConcB)
+  ]);
+
+  assert(
+    resConcA.success === true &&
+      resConcB.success === true &&
+      adapter16_9.registrations.has('reg-conc-user-a') &&
+      adapter16_9.registrations.has('reg-conc-user-b') &&
+      adapter16_9.subscribers.has('sub-reg-conc-user-a') &&
+      adapter16_9.subscribers.has('sub-reg-conc-user-b') &&
+      adapter16_9.globalVersion === 2,
+    'Duas inscrições públicas concorrentes comutam com sucesso sem perda de escrita',
+    suite16
+  );
+
+  // 16.10 Operações concorrentes em documentos diferentes não colidem (e API real exige admin antes do adapter)
+  let unauthConsentBlocked = false;
+  try {
+    await updateSubscriberConsentInDb('sub-doc-1', { receiveEmail: false });
+  } catch (err: unknown) {
+    unauthConsentBlocked = err instanceof Error && err.message === 'ADMIN_AUTH_REQUIRED';
+  }
+  const adapter16_10 = new ConcurrentTestStorageAdapter();
+  adapter16_10.subscribers.set('sub-doc-1', {
+    data: { id: 'sub-doc-1', email: 'd1@test.com', status: 'active', receiveEmail: true, receiveWhatsapp: true } as any,
+    version: 1
+  });
+  adapter16_10.subscribers.set('sub-doc-2', {
+    data: { id: 'sub-doc-2', email: 'd2@test.com', status: 'active', receiveEmail: true, receiveWhatsapp: true } as any,
+    version: 1
+  });
+
+  await Promise.all([
+    adapter16_10.updateSubscriberConsent('sub-doc-1', { receiveEmail: false }),
+    adapter16_10.updateSubscriberConsent('sub-doc-2', { receiveWhatsapp: false })
+  ]);
+
+  assert(
+    unauthConsentBlocked &&
+      adapter16_10.subscribers.get('sub-doc-1')?.data.receiveEmail === false &&
+      adapter16_10.subscribers.get('sub-doc-1')?.data.receiveWhatsapp === true &&
+      adapter16_10.subscribers.get('sub-doc-2')?.data.receiveEmail === true &&
+      adapter16_10.subscribers.get('sub-doc-2')?.data.receiveWhatsapp === false,
+    'Atualizações concorrentes em documentos distintos preservam preferências independentes e barreira admin real',
+    suite16
+  );
+
+  // 16.11 Duas revogações concorrentes no mesmo assinante convergem monotonicamente
+  const adapter16_11 = new ConcurrentTestStorageAdapter();
+  adapter16_11.subscribers.set('sub-race-1', {
+    data: { id: 'sub-race-1', email: 'race@test.com', status: 'active', receiveEmail: true, receiveWhatsapp: true } as any,
+    version: 1
+  });
+
+  await Promise.all([
+    adapter16_11.updateSubscriberConsent('sub-race-1', { receiveEmail: false }),
+    adapter16_11.updateSubscriberConsent('sub-race-1', { receiveWhatsapp: false })
+  ]);
+
+  const raceResult = adapter16_11.subscribers.get('sub-race-1');
+  assert(
+    raceResult?.data.receiveEmail === false &&
+      raceResult?.data.receiveWhatsapp === false &&
+      raceResult?.data.status === 'unsubscribed' &&
+      raceResult?.version === 3,
+    'Duas revogações simultâneas no mesmo documento resolvem conflito OCC e convergem para tombstone',
+    suite16
+  );
+
+  // 16.12 Prevenção de Lost Update comprovada por detecção de conflito
+  assert(
+    adapter16_11.conflictCount >= 1,
+    'Prevenção de Lost Update comprovada com registro de pelo menos 1 colisão tratada no retry',
+    suite16
+  );
+
+  // 16.13 Contrato DeleteSubscriberResult: grava tombstone, preserva unsubscribedAt existente sem reescrever e rejeita inexistente
+  let unauthSubDeleteBlocked = false;
+  try {
+    await deleteSubscriberInDb('sub-tomb-test');
+  } catch (err: unknown) {
+    unauthSubDeleteBlocked = err instanceof Error && err.message === 'ADMIN_AUTH_REQUIRED';
+  }
+
+  const adapter16_13 = new ConcurrentTestStorageAdapter();
+  adapter16_13.subscribers.set('sub-tomb-test', {
+    data: { id: 'sub-tomb-test', email: 'tomb@test.com', status: 'active', receiveEmail: true, receiveWhatsapp: true } as any,
+    version: 1
+  });
+
+  const delRes1 = await adapter16_13.deleteSubscriber('sub-tomb-test');
+  const delRes2 = await adapter16_13.deleteSubscriber('sub-tomb-test'); // Já tombstonado
+  const tombDoc = adapter16_13.subscribers.get('sub-tomb-test');
+  let notFoundRejected = false;
+  try {
+    await adapter16_13.deleteSubscriber('sub-nao-existe');
+  } catch (err: unknown) {
+    notFoundRejected = err instanceof Error && err.message === 'SUBSCRIBER_NOT_FOUND';
+  }
+
+  assert(
+    unauthSubDeleteBlocked &&
+      delRes1.success === true &&
+      delRes1.alreadyTombstoned === false &&
+      delRes2.alreadyTombstoned === true &&
+      delRes2.tombstoneConfirmedAt === delRes1.tombstoneConfirmedAt &&
+      tombDoc?.version === 2 &&
+      notFoundRejected &&
+      tombDoc?.data.status === 'unsubscribed' &&
+      tombDoc?.data.receiveEmail === false &&
+      tombDoc?.data.receiveWhatsapp === false,
+    'Exclusão administrativa retorna DeleteSubscriberResult, preserva tombstone sem reescrever e rejeita inexistente',
+    suite16
+  );
+
+  // 16.14 Tentativa de reativação em tombstone é estritamente bloqueada
+  let tombReactivationBlocked = false;
+  try {
+    await adapter16_13.updateSubscriberConsent('sub-tomb-test', { receiveEmail: true });
+  } catch (err: any) {
+    tombReactivationBlocked = String(err).includes('TOMBSTONE_MODIFICATION_FORBIDDEN');
+  }
+  assert(
+    tombReactivationBlocked,
+    'Tentativa de reativar ou modificar tombstone cancelado é rejeitada com erro específico',
+    suite16
+  );
+
+  // 16.15 Revogação parcial de um canal preserva o outro canal e mantém status active
+  const adapter16_15 = new ConcurrentTestStorageAdapter();
+  adapter16_15.subscribers.set('sub-partial-01', {
+    data: { id: 'sub-partial-01', email: 'part@test.com', status: 'active', receiveEmail: true, receiveWhatsapp: true } as any,
+    version: 1
+  });
+
+  await adapter16_15.updateSubscriberConsent('sub-partial-01', { receiveWhatsapp: false });
+  const partialDoc = adapter16_15.subscribers.get('sub-partial-01');
+
+  assert(
+    partialDoc?.data.receiveWhatsapp === false &&
+      partialDoc?.data.receiveEmail === true &&
+      partialDoc?.data.status === 'active',
+    'Revogação parcial de canal mantém o outro canal ativo e preserva status active',
+    suite16
+  );
+
+  // 16.16 Assinante legado com um campo ausente não é convertido em tombstone
+  const adapter16_16 = new ConcurrentTestStorageAdapter();
+  adapter16_16.subscribers.set('sub-leg-one', {
+    data: { id: 'sub-leg-one', email: 'leg1@test.com', status: 'active', receiveWhatsapp: true } as any,
+    version: 1
+  });
+
+  await adapter16_16.updateSubscriberConsent('sub-leg-one', { receiveWhatsapp: false });
+  const legOneDoc = adapter16_16.subscribers.get('sub-leg-one');
+
+  assert(
+    legOneDoc?.data.receiveEmail === undefined &&
+      legOneDoc?.data.receiveWhatsapp === false &&
+      legOneDoc?.data.status === 'active',
+    'Assinante legado com receiveEmail ausente preserva indefinição e não vira tombstone',
+    suite16
+  );
+
+  // 16.17 Assinante legado com ambos os campos ausentes permanece active após atualização não-revogante
+  const adapter16_17 = new ConcurrentTestStorageAdapter();
+  adapter16_17.subscribers.set('sub-leg-both', {
+    data: { id: 'sub-leg-both', email: 'legboth@test.com', status: 'active' } as any,
+    version: 1
+  });
+
+  await adapter16_17.updateSubscriberConsent('sub-leg-both', {});
+  const legBothDoc = adapter16_17.subscribers.get('sub-leg-both');
+
+  assert(
+    legBothDoc?.data.receiveEmail === undefined &&
+      legBothDoc?.data.receiveWhatsapp === undefined &&
+      legBothDoc?.data.status === 'active',
+    'Assinante legado com ambos canais ausentes permanece active e preserva ausência sem erros',
+    suite16
+  );
+
+  // 16.18 Fila offline sincroniza inscrições e assinantes vinculados com confirmação
+  const adapter16_18 = new ConcurrentTestStorageAdapter();
+  setFirestoreRegistrationAdapterForTests(adapter16_18);
+
+  const qItem = makeSampleRegistration({
+    id: 'reg-offline-s16',
+    code: 'SM-OFF-16',
+    acceptEmailNews: true,
+    acceptWhatsappNews: true
+  });
+  const syncOutcome = await synchronizeOfflineRegistrationQueue([qItem], []);
+
+  assert(
+    syncOutcome.allSucceeded === true &&
+      syncOutcome.synced.length === 1 &&
+      syncOutcome.remainingQueue.length === 0 &&
+      adapter16_18.registrations.has('reg-offline-s16') &&
+      adapter16_18.subscribers.has('sub-reg-offline-s16'),
+    'Fila offline envia pendentes, confirma gravação atômica e vincula assinante determinístico',
+    suite16,
+    `allSucceeded=${syncOutcome.allSucceeded}, synced=${syncOutcome.synced.length}, rem=${syncOutcome.remainingQueue.length}, regs=${Array.from(adapter16_18.registrations.keys()).join('|')}, subs=${Array.from(adapter16_18.subscribers.keys()).join('|')}`
+  );
+
+  // 16.19 Exclusão de inscrição remove atomicamente inscrição, permissão e assinante determinístico
+  await adapter16_18.deleteRegistration('reg-offline-s16', 'SM-OFF-16');
+
+  assert(
+    !adapter16_18.registrations.has('reg-offline-s16') &&
+      !adapter16_18.permissions.has('SM-OFF-16') &&
+      !adapter16_18.subscribers.has('sub-reg-offline-s16'),
+    'Exclusão de inscrição remove simultaneamente inscrição, permissão e assinante determinístico',
+    suite16
+  );
+
+  // 16.20 Preservação dos 16 palestrantes oficiais, filtro estrito (=== true) e validação sem mutação silenciosa
+  const allSpeakers = SPEAKERS_PROFILES;
+  const initialSubs = INITIAL_SUBSCRIBERS;
+  const sampleDeterministicId = buildSubscriberIdFromRegistrationId('reg-ex-999');
+  const extractedRegId = extractRegistrationIdFromSubscriberId(sampleDeterministicId);
+  const activeEmailTrue = isSubscriberActive({ id: 'sub-act', email: 'act@test.com', status: 'active', receiveEmail: true } as any);
+  const inactiveUndefined = isSubscriberActive({ id: 'sub-undef', email: 'undef@test.com', status: 'active' } as any);
+  const inactiveTombstone = isSubscriberActive({ id: 'sub-inact', email: 'inact@test.com', status: 'unsubscribed', receiveEmail: true } as any);
+
+  let invalidSubIdRejected = false;
+  try {
+    validateSubscriberId('sub invalid@email.com!');
+  } catch (err: unknown) {
+    invalidSubIdRejected = err instanceof Error && err.message.includes('INVALID_SUBSCRIBER_ID');
+  }
+  const longValidRegId = 'reg-' + 'a'.repeat(120); // 124 chars
+  const builtLongSubId = buildSubscriberIdFromRegistrationId(longValidRegId);
+
+  assert(
+    allSpeakers.length === 16 &&
+      allSpeakers.some((s) => s.id === 'spk-gisella-consensa') &&
+      initialSubs.length === 0 &&
+      sampleDeterministicId === 'sub-reg-ex-999' &&
+      extractedRegId === 'reg-ex-999' &&
+      builtLongSubId === `sub-${longValidRegId}` &&
+      builtLongSubId.length === 128 &&
+      activeEmailTrue === true &&
+      inactiveUndefined === false &&
+      inactiveTombstone === false &&
+      invalidSubIdRejected,
+    'Preservação dos 16 palestrantes, filtro estrito === true e validação canônica de IDs até 128 chars',
+    suite16
+  );
+
+  // 16.21 Isolamento estrutural de publicUnauthApp / publicUnauthDb + persistência estritamente em memória sem fallback getAuth
+  const diag1 = getPublicUnauthInstanceDiagnostics();
+  const diag2 = getPublicUnauthInstanceDiagnostics();
+  const firebaseDbSrc16 = fs.readFileSync(path.join(process.cwd(), 'src/services/firebaseDb.ts'), 'utf-8');
+  const adminDashSource = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf-8');
+  const publicInitMatch = firebaseDbSrc16.match(
+    /export const initStrictInMemoryPublicAuth[\s\S]*?const getOrInitPublicUnauthInstances[\s\S]*?const \{ publicApp: publicUnauthApp/
+  );
+  const publicInitBodyNoComments = (publicInitMatch ? publicInitMatch[0] : '').replace(/\/\/.*$/gm, '');
+  const publicAdapterMatch = firebaseDbSrc16.match(
+    /const defaultPublicRegistrationAdapter[\s\S]*?let customRegistrationAdapterForTests/
+  );
+  const publicAdapterBody = (publicAdapterMatch ? publicAdapterMatch[0] : '').replace(/\/\/.*$/gm, '');
+  const subAdminMatch = firebaseDbSrc16.match(
+    /export const subscribeAdminSubscribers[\s\S]*$/
+  );
+  const subAdminBodyNoComments = (subAdminMatch ? subAdminMatch[0] : '').replace(/\/\/.*$/gm, '');
+
+  const testAppOk = initializeApp(
+    { apiKey: 'test-key-16', appId: '1:16:web:ok', projectId: 'simposio-carangola' },
+    'test-public-strict-inmem-ok'
+  );
+  const testAppWrong = initializeApp(
+    { apiKey: 'test-key-16', appId: '1:16:web:wrong', projectId: 'simposio-carangola' },
+    'test-public-strict-inmem-wrong'
+  );
+  let hmrSameInstance = false;
+  let wrongPersistenceRejected = false;
+  try {
+    const authFirst = initStrictInMemoryPublicAuth(testAppOk);
+    const authSecond = initStrictInMemoryPublicAuth(testAppOk);
+    hmrSameInstance = authFirst === authSecond;
+
+    getAuth(testAppWrong);
+    try {
+      initStrictInMemoryPublicAuth(testAppWrong);
+    } catch (err: unknown) {
+      wrongPersistenceRejected =
+        err instanceof Error && err.message.includes('PUBLIC_UNAUTH_PERSISTENCE_VIOLATION');
+    }
+  } finally {
+    await deleteApp(testAppOk).catch(() => {});
+    await deleteApp(testAppWrong).catch(() => {});
+  }
+
+  assert(
+    diag1.appName === 'simposio-public-unauth' &&
+      diag1.projectId === 'simposio-carangola' &&
+      diag1.databaseId === '(default)' &&
+      diag1.hasCurrentUser === false &&
+      diag1.persistenceMode === 'inMemoryPersistence' &&
+      diag1.inMemoryPersistenceVerified === true &&
+      diag1.isolatedFromDefault === true &&
+      diag2.isolatedFromDefault === true &&
+      hmrSameInstance &&
+      wrongPersistenceRejected &&
+      !publicInitBodyNoComments.includes('getAuth(') &&
+      !publicInitBodyNoComments.includes('signIn') &&
+      publicAdapterBody.includes('doc(publicUnauthDb,') &&
+      publicAdapterBody.includes('writeBatch(publicUnauthDb)') &&
+      !publicAdapterBody.includes('(db,') &&
+      !publicAdapterBody.includes('writeBatch(db)') &&
+      subAdminBodyNoComments.includes("collection(db, 'newsletter_subscribers')") &&
+      !/\blimit\s*\(/.test(subAdminBodyNoComments) &&
+      !/\borderBy\s*\(/.test(subAdminBodyNoComments) &&
+      !/\bwhere\s*\(/.test(subAdminBodyNoComments) &&
+      !adminDashSource.includes('s.receiveEmail !== false') &&
+      !adminDashSource.includes('subscribers.length') &&
+      adminDashSource.includes('classifySubscribersForDashboard'),
+    'Instância pública publicUnauthDb isolada, auth estritamente inMemoryPersistence sem fallback getAuth e painéis/queries sem truncamento',
+    suite16
+  );
+
+  // 16.22 permission_denied sem evidência de código conflitante não regenera ID/código e propaga erro real
+  let batchPermCallCount = 0;
+  setFirestoreRegistrationAdapterForTests({
+    async getPermissionDoc() {
+      return { exists: false };
+    },
+    async commitRegistrationBatch() {
+      batchPermCallCount += 1;
+      throw Object.assign(new Error('Missing or insufficient permissions'), { code: 'permission-denied' });
+    }
+  });
+  let unverifiedPermPropagated = false;
+  try {
+    await savePublicRegistrationToDb(makeSampleRegistration({ id: 'reg-perm-fail', code: 'SM-PERM-1' }), 3);
+  } catch (err: unknown) {
+    unverifiedPermPropagated = err instanceof Error && err.message.includes('permission_denied');
+  }
+  assert(
+    unverifiedPermPropagated && batchPermCallCount === 1,
+    'permission_denied sem prova documental não regenera ID/código e propaga erro na 1ª falha',
+    suite16
+  );
+
+  // 16.23 Validação da tríade admin detecta permissão órfã e assinante ausente sem recriar
+  const adapter16_23 = new ConcurrentTestStorageAdapter();
+  adapter16_23.permissions.set('SM-ORPHAN', { data: { code: 'SM-ORPHAN', registrationId: 'reg-orphan-1' }, version: 1 });
+  let orphanBlocked = false;
+  try {
+    await adapter16_23.verifyOrCreateAdminTriad(makeSampleRegistration({ id: 'reg-orphan-1', code: 'SM-ORPHAN' }));
+  } catch (err: unknown) {
+    orphanBlocked = err instanceof Error && err.message === 'TRIAD_ORPHAN_PERMISSION_CONFLICT';
+  }
+  adapter16_23.registrations.set('reg-miss-sub', {
+    data: { id: 'reg-miss-sub', code: 'SM-MISSSUB', cpf: '123.456.789-01', email: 'maria.silva@carangola.mg.gov.br' },
+    version: 1
+  });
+  adapter16_23.permissions.set('SM-MISSSUB', { data: { code: 'SM-MISSSUB', registrationId: 'reg-miss-sub' }, version: 1 });
+  let missingSubBlocked = false;
+  try {
+    await adapter16_23.verifyOrCreateAdminTriad(
+      makeSampleRegistration({ id: 'reg-miss-sub', code: 'SM-MISSSUB', acceptEmailNews: true })
+    );
+  } catch (err: unknown) {
+    missingSubBlocked = err instanceof Error && err.message === 'TRIAD_MISSING_SUBSCRIBER_CONFLICT';
+  }
+  assert(
+    orphanBlocked && missingSubBlocked && !adapter16_23.subscribers.has('sub-reg-miss-sub'),
+    'Inspeção da tríade bloqueia permissão órfã e assinante ausente sem recriar registro',
+    suite16
+  );
+
+  // 16.24 Validação ISO 8601 estrita integrada (0000 rejeitado, 0001..0099, pré-1970, bissextos, fusos e Timestamp)
+  assert(
+    validateStrictIsoTimestamp('0000-01-01T00:00:00Z') === null &&
+      validateStrictIsoTimestamp('0001-01-01T00:00:00Z') === '0001-01-01T00:00:00Z' &&
+      validateStrictIsoTimestamp('0004-02-29T10:00:00Z') === '0004-02-29T10:00:00Z' &&
+      validateStrictIsoTimestamp('0050-02-29T10:00:00Z') === null &&
+      validateStrictIsoTimestamp('0099-12-31T23:59:59-12:00') === '0099-12-31T23:59:59-12:00' &&
+      validateStrictIsoTimestamp('1969-12-31T23:59:59Z') === '1969-12-31T23:59:59Z' &&
+      validateStrictIsoTimestamp('2026-02-31T12:00:00Z') === null &&
+      validateStrictIsoTimestamp('2026-11-18T20:00:00+14:00') === '2026-11-18T20:00:00+14:00' &&
+      validateStrictIsoTimestamp('2026-11-18T20:00:00+14:01') === null &&
+      validateStrictIsoTimestamp('2026-11-18T20:00:00+03:60') === null &&
+      validateStrictIsoTimestamp({ toDate: () => new Date('0000-01-01T00:00:00Z') }) === null &&
+      validateStrictIsoTimestamp({ toDate: () => new Date('0050-06-15T12:00:00Z') }) === '0050-06-15T12:00:00.000Z',
+    'Validador ISO 8601 estrito rejeita 0000/fusos fora da política e valida 0001..9999, pré-1970 e Timestamp',
+    suite16
+  );
+
+  // 16.25 Separação de confiança local_persisted_hint vs server_verified na hidratação e reconciliação de snapshots
+  const forgedLocalSub: NewsletterSubscriber = {
+    id: 'sub-forged-1',
+    email: 'forged@test.com',
+    subscribedAt: '2026-11-18',
+    status: 'unsubscribed',
+    receiveEmail: false,
+    receiveWhatsapp: false,
+    unsubscribedAt: '2026-11-18T10:00:00Z'
+  };
+  const tombMap = hydrateConfirmedTombstonesMap(
+    [forgedLocalSub],
+    [{ id: 'sub-forged-1', confirmedAtIso: '2026-11-18T10:00:00Z', subscriber: forgedLocalSub }]
+  );
+  const hintLevelOk = tombMap.get('sub-forged-1')?.trustLevel === 'local_persisted_hint';
+  const cacheKeepsHint = reconcileSubscribersSnapshot(
+    [{ id: 'sub-forged-1', email: 'forged@test.com', subscribedAt: '2026-11-18', status: 'active', receiveEmail: true, receiveWhatsapp: false }],
+    [forgedLocalSub],
+    tombMap,
+    { source: 'firestore_cache', isExhaustive: false }
+  );
+  const serverOverridesHint = reconcileSubscribersSnapshot(
+    [{ id: 'sub-forged-1', email: 'forged@test.com', subscribedAt: '2026-11-18', status: 'active', receiveEmail: true, receiveWhatsapp: false }],
+    cacheKeepsHint,
+    tombMap,
+    { source: 'firestore_server', isExhaustive: true }
+  );
+  // Agora marca server_verified em RAM (transação da sessão): snapshot antigo não reverte
+  tombMap.set('sub-ram-verified', {
+    subscriber: { ...forgedLocalSub, id: 'sub-ram-verified' },
+    confirmedAtIso: '2026-11-18T22:00:00Z',
+    confirmedAtMs: Date.parse('2026-11-18T22:00:00Z'),
+    trustLevel: 'server_verified',
+    seenOnAuthoritativeServer: false
+  });
+  const staleBlockedByRam = reconcileSubscribersSnapshot(
+    [{ id: 'sub-ram-verified', email: 'real@test.com', subscribedAt: '2026-11-18', status: 'active', receiveEmail: true, receiveWhatsapp: false }],
+    [],
+    tombMap,
+    { source: 'firestore_server', isExhaustive: true }
+  );
+  assert(
+    hintLevelOk &&
+      cacheKeepsHint[0]?.status === 'unsubscribed' &&
+      serverOverridesHint[0]?.status === 'active' &&
+      staleBlockedByRam[0]?.status === 'unsubscribed',
+    'Hidratação separa local_persisted_hint de server_verified e impede regressão sem cegar servidor autoritativo',
+    suite16
+  );
+
+  // 16.26 Contrato StorageSaveResult, sanitização/colisão de IDs e invariante estrutural de App.tsx
+  const gStorage = globalThis as unknown as { localStorage?: unknown };
+  const prevLocalStorage = gStorage.localStorage;
+  let storageNoLocal: ReturnType<typeof saveToStorage>;
+  let storageQuotaFail: ReturnType<typeof saveToStorage>;
+  try {
+    delete gStorage.localStorage;
+    storageNoLocal = saveToStorage(STORAGE_KEYS.SUBSCRIBERS, []);
+    gStorage.localStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError');
+      },
+      removeItem: () => undefined,
+      clear: () => undefined
+    };
+    storageQuotaFail = saveToStorage(STORAGE_KEYS.SUBSCRIBERS, []);
+  } finally {
+    if (prevLocalStorage === undefined) {
+      delete gStorage.localStorage;
+    } else {
+      gStorage.localStorage = prevLocalStorage;
+    }
+  }
+
+  const normCommonId = sanitizeRegistrationId('reg-hist-2026-abc');
+  const normSpecialA = sanitizeRegistrationId('reg#esp/01');
+  const normSpecialB = sanitizeRegistrationId('reg@esp?01');
+  const appSource = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+  const directSetSubscribersCount = (appSource.match(/\bsetSubscribers\s*\(/g) || []).length;
+  const activeSubscriber16_26: NewsletterSubscriber = {
+    id: 'sub-active-keep',
+    email: 'ativo.cross@test.com',
+    subscribedAt: '2026-11-18',
+    status: 'active',
+    receiveEmail: true,
+    receiveWhatsapp: false,
+    consent: true
+  };
+  const currentWithActiveAndTomb: NewsletterSubscriber[] = [
+    activeSubscriber16_26,
+    {
+      ...forgedLocalSub,
+      id: 'sub-ram-verified',
+      status: 'active',
+      receiveEmail: true,
+      receiveWhatsapp: true
+    }
+  ];
+  const emptyCrossTabPreserved = reconcileSubscribersSnapshot(
+    [],
+    currentWithActiveAndTomb,
+    tombMap,
+    { source: 'cross_tab_storage', isExhaustive: false }
+  );
+  const emptyCachePreserved = reconcileSubscribersSnapshot(
+    [],
+    currentWithActiveAndTomb,
+    tombMap,
+    { source: 'firestore_cache', isExhaustive: false }
+  );
+
+  const crossTabActive = emptyCrossTabPreserved.find((s) => s.id === 'sub-active-keep');
+  const crossTabTomb = emptyCrossTabPreserved.find((s) => s.id === 'sub-ram-verified');
+  const cacheActive = emptyCachePreserved.find((s) => s.id === 'sub-active-keep');
+  const cacheTomb = emptyCachePreserved.find((s) => s.id === 'sub-ram-verified');
+
+  assert(
+    storageNoLocal.persisted === false &&
+      storageNoLocal.notified === false &&
+      storageNoLocal.error === 'localStorage_unavailable' &&
+      storageQuotaFail.persisted === false &&
+      storageQuotaFail.notified === false &&
+      storageQuotaFail.error === 'QuotaExceededError' &&
+      normCommonId === 'reg-hist-2026-abc' &&
+      normSpecialA === 'reg-esp-01' &&
+      normSpecialA === normSpecialB &&
+      directSetSubscribersCount === 1 &&
+      appSource.includes('applySubscribersTransition') &&
+      appSource.includes('enqueueSubscriberOperation') &&
+      appSource.includes('hydrateConfirmedTombstonesMap') &&
+      emptyCrossTabPreserved.length === 2 &&
+      crossTabActive?.status === 'active' &&
+      crossTabActive.receiveEmail === true &&
+      crossTabTomb?.status === 'unsubscribed' &&
+      emptyCachePreserved.length === 2 &&
+      cacheActive?.status === 'active' &&
+      cacheTomb?.status === 'unsubscribed',
+    'Contrato saveToStorage segregado, IDs normalizados, despachante único em App.tsx e preservação de ativos + tombstones em snapshots vazios não-exaustivos',
+    suite16
+  );
+
+  // 16.27 Mutex FIFO resiliente a rejeições (enqueueSerialQueueTask) + ordem ref/setState no despachante
+  const queueTailRef = { current: Promise.resolve() };
+  const fifoTrace: string[] = [];
+  const pTask1 = enqueueSerialQueueTask(queueTailRef, async () => {
+    fifoTrace.push('start-1');
+    await new Promise((r) => setTimeout(r, 15));
+    fifoTrace.push('end-1');
+    return 'ok-1';
+  });
+  const pTask2 = enqueueSerialQueueTask(queueTailRef, async () => {
+    fifoTrace.push('start-2');
+    await new Promise((r) => setTimeout(r, 5));
+    fifoTrace.push('err-2');
+    throw new Error('BOOM_MUTEX');
+  });
+  const pTask3 = enqueueSerialQueueTask(queueTailRef, async () => {
+    fifoTrace.push('start-3');
+    fifoTrace.push('end-3');
+    return 'ok-3';
+  });
+
+  const [res1, settled2, res3] = await Promise.all([
+    pTask1,
+    pTask2.catch((e: Error) => e.message),
+    pTask3
+  ]);
+  const refIdx = appSource.indexOf('subscribersRef.current = nextState');
+  const setIdx = appSource.indexOf('setSubscribers(nextState)');
+
+  assert(
+    res1 === 'ok-1' &&
+      settled2 === 'BOOM_MUTEX' &&
+      res3 === 'ok-3' &&
+      fifoTrace.join(',') === 'start-1,end-1,start-2,err-2,start-3,end-3' &&
+      refIdx > -1 &&
+      setIdx > refIdx &&
+      !appSource.includes('setSubscribers((prev') &&
+      appSource.includes('enqueueSerialQueueTask(subscriberOpQueueRef, op)'),
+    'Mutex FIFO propaga rejeição sem envenenar fila e applySubscribersTransition atualiza ref antes do React fora do updater',
+    suite16
+  );
+
+  // 16.28 Classificador estrito (=== true) do AdminDashboard exclui indefinidos legados e tombstones dos KPIs/filtros/exportação
+  const dashboardSample: NewsletterSubscriber[] = [
+    {
+      id: 'sub-both',
+      email: 'both@test.com',
+      phone: '32999990001',
+      subscribedAt: '2026-11-18',
+      status: 'active',
+      receiveEmail: true,
+      receiveWhatsapp: true,
+      origin: 'inscricao'
+    },
+    {
+      id: 'sub-wa-only',
+      email: 'wa@test.com',
+      phone: '32999990002',
+      subscribedAt: '2026-11-18',
+      status: 'active',
+      receiveWhatsapp: true
+    },
+    {
+      id: 'sub-email-only',
+      email: 'mail@test.com',
+      subscribedAt: '2026-11-18',
+      status: 'active',
+      receiveEmail: true,
+      receiveWhatsapp: false
+    },
+    {
+      id: 'sub-wa-no-phone',
+      email: 'wanophone@test.com',
+      subscribedAt: '2026-11-18',
+      status: 'active',
+      receiveWhatsapp: true
+    },
+    {
+      id: 'sub-legacy-undef',
+      email: 'legacy@test.com',
+      phone: '32999990003',
+      subscribedAt: '2026-11-18',
+      status: 'active'
+    } as unknown as NewsletterSubscriber,
+    {
+      id: 'sub-tombstone-cancel',
+      email: 'cancel@test.com',
+      phone: '32999990004',
+      subscribedAt: '2026-11-18',
+      status: 'unsubscribed',
+      receiveEmail: true,
+      receiveWhatsapp: true,
+      unsubscribedAt: '2026-11-18T12:00:00Z'
+    }
+  ];
+  const buckets = classifySubscribersForDashboard(dashboardSample);
+
+  assert(
+    buckets.activeSubscribers.map((s) => s.id).join(',') === 'sub-both,sub-wa-only,sub-email-only,sub-wa-no-phone' &&
+      buckets.cancelledSubscribers.map((s) => s.id).join(',') === 'sub-tombstone-cancel' &&
+      buckets.whatsappSubscribers.map((s) => s.id).join(',') === 'sub-both,sub-wa-only' &&
+      buckets.emailSubscribers.map((s) => s.id).join(',') === 'sub-both,sub-email-only' &&
+      buckets.registrationOriginSubscribers.map((s) => s.id).join(',') === 'sub-both',
+    'Classificador AdminDashboard aplica filtro estrito === true e isola tombstones e registros legados indefinidos',
+    suite16
+  );
+
+  // 16.29 Grupo B: Caminhos administrativos reais usam transação da tríade e reportam falhas parciais individualmente sem falso rollback
+  const adminBatchRegs = new Map<string, Record<string, unknown>>();
+  const adminBatchPerms = new Map<string, Record<string, unknown>>();
+  const adminBatchSubs = new Map<string, Record<string, unknown>>();
+  // Pre-popula permissão órfã para testar falha individual no meio do lote
+  adminBatchPerms.set('CAR-SM-ORPHAN99', {
+    code: 'CAR-SM-ORPHAN99',
+    registrationId: 'reg-orphan-batch-99',
+    status: 'confirmada',
+    certificateIssued: false
+  });
+
+  setAdminTriadAdapterForTests({
+    isAdminAuthorized: () => true,
+    async getServerDoc(col, docId) {
+      const m =
+        col === 'registrations'
+          ? adminBatchRegs
+          : col === 'certificate_permissions'
+          ? adminBatchPerms
+          : adminBatchSubs;
+      return m.get(docId) || null;
+    },
+    async runTriadTransaction(fn) {
+      const staged: Array<{
+        col: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers';
+        docId: string;
+        data: Record<string, unknown>;
+      }> = [];
+      const res = await fn({
+        get: async (col, docId) => {
+          const m =
+            col === 'registrations'
+              ? adminBatchRegs
+              : col === 'certificate_permissions'
+              ? adminBatchPerms
+              : adminBatchSubs;
+          const v = m.get(docId);
+          return v ? { ...v } : null;
+        },
+        set: (col, docId, data) => {
+          staged.push({ col, docId, data });
+        }
+      });
+      for (const s of staged) {
+        const m =
+          s.col === 'registrations'
+            ? adminBatchRegs
+            : s.col === 'certificate_permissions'
+            ? adminBatchPerms
+            : adminBatchSubs;
+        m.set(s.docId, { ...s.data });
+      }
+      return res;
+    }
+  });
+
+  const validBatch1 = makeSampleRegistration({
+    id: 'reg-adm-ok-1',
+    code: 'CAR-SM-ADM0001',
+    fullName: 'Valido Um',
+    acceptEmailNews: true,
+    acceptWhatsappNews: false
+  });
+  const orphanBatch2 = makeSampleRegistration({
+    id: 'reg-orphan-batch-99',
+    code: 'CAR-SM-ORPHAN99',
+    fullName: 'Conflito Orfao'
+  });
+  const validBatch3 = makeSampleRegistration({
+    id: 'reg-adm-ok-3',
+    code: 'CAR-SM-ADM0003',
+    fullName: 'Valido Tres',
+    acceptEmailNews: false,
+    acceptWhatsappNews: false
+  });
+
+  const batchReport = await persistAdminImportedRegistrationsWithTriadCheckInDb([
+    validBatch1,
+    orphanBatch2,
+    validBatch3
+  ]);
+
+  const seedBodyMatch = firebaseDbSrc16.match(
+    /export const seedInitialDataIfNeeded[\s\S]*?return \{ seededRegistrations, seededConfig, seededMaterials \};/
+  );
+  const seedBody = seedBodyMatch ? seedBodyMatch[0] : '';
+
+  assert(
+    batchReport.totalAttempted === 3 &&
+      batchReport.confirmedCreated.map((r) => r.id).join(',') === 'reg-adm-ok-1,reg-adm-ok-3' &&
+      batchReport.failed.length === 1 &&
+      batchReport.failed[0].code === 'CAR-SM-ORPHAN99' &&
+      batchReport.failed[0].error.includes('TRIAD_ORPHAN_PERMISSION_CONFLICT') &&
+      adminBatchRegs.has('reg-adm-ok-1') &&
+      adminBatchSubs.has('sub-reg-adm-ok-1') &&
+      adminBatchRegs.has('reg-adm-ok-3') &&
+      !adminBatchRegs.has('reg-orphan-batch-99') &&
+      adminDashSource.includes('saveAdminRegistrationWithTriadCheckInDb') &&
+      !adminDashSource.includes('persistRegistrationAndPermissionInDb') &&
+      adminDashSource.includes('batchImportReport') &&
+      appSource.includes('persistAdminImportedRegistrationsWithTriadCheckInDb') &&
+      !appSource.includes('handleBatchImportRegistrations = (newBatch: Registration[])') &&
+      seedBody.includes('persistAdminImportedRegistrationsWithTriadCheckInDb') &&
+      !seedBody.includes('persistMultipleRegistrationsInDb'),
+    'Grupo B: fluxos administrativos reais usam transação da tríade e importações parciais reportam falhas individualmente sem rollback enganoso',
+    suite16
+  );
+
+  // 16.30 Grupo D: existingRegistrations não descarta fila, permission-denied e documento isolado permanecem fail-closed
+  let localTrickCommitCalls = 0;
+  const offlineMockRegs = new Map<string, Record<string, unknown>>();
+  const offlineMockPerms = new Map<string, Record<string, unknown>>();
+  const offlineMockSubs = new Map<string, Record<string, unknown>>();
+  // Permissão isolada sem registrations/{id}
+  offlineMockPerms.set('CAR-SM-ISOLATED', {
+    code: 'CAR-SM-ISOLATED',
+    registrationId: 'reg-isolated-only',
+    status: 'confirmada',
+    certificateIssued: false
+  });
+
+  const qLocalOnlyTrick = makeSampleRegistration({
+    id: 'reg-local-trick',
+    code: 'CAR-SM-TRICK01',
+    acceptEmailNews: true,
+    acceptWhatsappNews: false
+  });
+  const qIsolatedPerm = makeSampleRegistration({
+    id: 'reg-isolated-only',
+    code: 'CAR-SM-ISOLATED'
+  });
+
+  setFirestoreRegistrationAdapterForTests({
+    async getPermissionDoc(code) {
+      const p = offlineMockPerms.get(code);
+      return { exists: Boolean(p), data: p };
+    },
+    async commitRegistrationBatch(regId, regPayload, permCode, permPayload, subPayload) {
+      if (regId === 'reg-local-trick') {
+        localTrickCommitCalls += 1;
+        throw Object.assign(new Error('Missing or insufficient permissions'), { code: 'permission-denied' });
+      }
+      offlineMockRegs.set(regId, regPayload);
+      offlineMockPerms.set(permCode, permPayload);
+      if (subPayload) offlineMockSubs.set(String(subPayload.id), subPayload);
+    }
+  });
+  setAdminTriadAdapterForTests({
+    isAdminAuthorized: () => true,
+    async getServerDoc(col, docId) {
+      const m =
+        col === 'registrations'
+          ? offlineMockRegs
+          : col === 'certificate_permissions'
+          ? offlineMockPerms
+          : offlineMockSubs;
+      return m.get(docId) || null;
+    },
+    async runTriadTransaction() {
+      throw new Error('NOT_USED');
+    }
+  });
+
+  const failClosedQueueOutcome = await synchronizeOfflineRegistrationQueue(
+    [qLocalOnlyTrick, qIsolatedPerm],
+    [qLocalOnlyTrick, qIsolatedPerm]
+  );
+
+  assert(
+    localTrickCommitCalls === 1 &&
+      failClosedQueueOutcome.synced.length === 0 &&
+      failClosedQueueOutcome.remainingQueue.length === 2 &&
+      failClosedQueueOutcome.allSucceeded === false,
+    'Grupo D: existingRegistrations não descarta fila; permission-denied e documento isolado permanecem pendentes sem confirmação falsa',
+    suite16
+  );
+
+  // 16.31 Grupo D + tombstones: separação entre consentimento original no registro e assinante já revogado ('unsubscribed')
+  const qTombQueue = makeSampleRegistration({
+    id: 'reg-tomb-sync-1',
+    code: 'CAR-SM-TOMBSYNC',
+    cpf: '111.222.333-44',
+    email: 'tomb.sync@carangola.mg.gov.br',
+    acceptEmailNews: true,
+    acceptWhatsappNews: false
+  });
+  offlineMockRegs.set('reg-tomb-sync-1', {
+    id: 'reg-tomb-sync-1',
+    code: 'CAR-SM-TOMBSYNC',
+    cpf: '111.222.333-44',
+    email: 'tomb.sync@carangola.mg.gov.br',
+    status: 'presente',
+    certificateIssued: true,
+    acceptEmailNews: true,
+    acceptWhatsappNews: false
+  });
+  offlineMockPerms.set('CAR-SM-TOMBSYNC', {
+    code: 'CAR-SM-TOMBSYNC',
+    registrationId: 'reg-tomb-sync-1',
+    status: 'presente',
+    certificateIssued: true
+  });
+  offlineMockSubs.set('sub-reg-tomb-sync-1', {
+    id: 'sub-reg-tomb-sync-1',
+    email: 'tomb.sync@carangola.mg.gov.br',
+    status: 'unsubscribed',
+    receiveEmail: false,
+    receiveWhatsapp: false,
+    consent: true,
+    unsubscribedAt: '2026-11-18T18:00:00Z'
+  });
+
+  // 1) Sem sessão admin autorizada: permanece pendente sem declarar confirmação
+  setAdminTriadAdapterForTests({
+    isAdminAuthorized: () => false,
+    async getServerDoc() {
+      return null;
+    },
+    async runTriadTransaction() {
+      throw new Error('NOT_USED');
+    }
+  });
+  const unauthTombQueueOutcome = await synchronizeOfflineRegistrationQueue([qTombQueue], []);
+
+  // 2) Com sessão admin autorizada: reconhece consentimento original compatível preservando tombstone sem reativar
+  setAdminTriadAdapterForTests({
+    isAdminAuthorized: () => true,
+    async getServerDoc(col, docId) {
+      const m =
+        col === 'registrations'
+          ? offlineMockRegs
+          : col === 'certificate_permissions'
+          ? offlineMockPerms
+          : offlineMockSubs;
+      return m.get(docId) || null;
+    },
+    async runTriadTransaction() {
+      throw new Error('NOT_USED');
+    }
+  });
+  const authTombQueueOutcome = await synchronizeOfflineRegistrationQueue([qTombQueue], []);
+
+  // 3) Divergência no consentimento original do registro mantém item na fila
+  offlineMockRegs.set('reg-tomb-sync-1', {
+    ...offlineMockRegs.get('reg-tomb-sync-1'),
+    acceptEmailNews: false
+  });
+  const consentMismatchOutcome = await synchronizeOfflineRegistrationQueue([qTombQueue], []);
+
+  const persistedSubAfterTombSync = offlineMockSubs.get('sub-reg-tomb-sync-1');
+  assert(
+    unauthTombQueueOutcome.remainingQueue.length === 1 &&
+      unauthTombQueueOutcome.requiresAdminTriadVerificationCount === 1 &&
+      authTombQueueOutcome.remainingQueue.length === 0 &&
+      authTombQueueOutcome.allSucceeded === true &&
+      authTombQueueOutcome.syncedEntries[0]?.alreadyExistedOnServer === true &&
+      authTombQueueOutcome.syncedEntries[0]?.subscriberTombstoned === true &&
+      authTombQueueOutcome.syncedEntries[0]?.registration.status === 'presente' &&
+      persistedSubAfterTombSync?.status === 'unsubscribed' &&
+      persistedSubAfterTombSync?.receiveEmail === false &&
+      consentMismatchOutcome.remainingQueue.length === 1,
+    'Grupo D/Tombstones: reconhece tríade íntegra separando consentimento original de tombstone revogado sem reativar e exige sessão admin + integridade original',
+    suite16
+  );
+
+  // 16.32 Grupo B: validação integral da tríade preexistente no caminho administrativo (permissão, identidade, consentimentos e tombstone)
+  const triadAdminRegs = new Map<string, Record<string, unknown>>();
+  const triadAdminPerms = new Map<string, Record<string, unknown>>();
+  const triadAdminSubs = new Map<string, Record<string, unknown>>();
+
+  setAdminTriadAdapterForTests({
+    isAdminAuthorized: () => true,
+    async getServerDoc(col, docId) {
+      const m =
+        col === 'registrations'
+          ? triadAdminRegs
+          : col === 'certificate_permissions'
+          ? triadAdminPerms
+          : triadAdminSubs;
+      return m.get(docId) || null;
+    },
+    async runTriadTransaction(fn) {
+      const staged: Array<{
+        col: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers';
+        docId: string;
+        data: Record<string, unknown>;
+      }> = [];
+      const res = await fn({
+        get: async (col, docId) => {
+          const m =
+            col === 'registrations'
+              ? triadAdminRegs
+              : col === 'certificate_permissions'
+              ? triadAdminPerms
+              : triadAdminSubs;
+          const v = m.get(docId);
+          return v ? { ...v } : null;
+        },
+        set: (col, docId, data) => {
+          staged.push({ col, docId, data });
+        }
+      });
+      for (const s of staged) {
+        const m =
+          s.col === 'registrations'
+            ? triadAdminRegs
+            : s.col === 'certificate_permissions'
+            ? triadAdminPerms
+            : triadAdminSubs;
+        m.set(s.docId, { ...s.data });
+      }
+      return res;
+    }
+  });
+
+  const adminExistingSample = makeSampleRegistration({
+    id: 'reg-adm-triad-ex1',
+    code: 'CAR-SM-TRIADEX1',
+    cpf: '555.666.777-88',
+    email: 'triade.admin@carangola.mg.gov.br',
+    acceptEmailNews: true,
+    acceptWhatsappNews: false
+  });
+
+  const expectAdminTriadReject = async (expectedReason: string): Promise<boolean> => {
+    try {
+      await saveAdminRegistrationWithTriadCheckInDb(adminExistingSample);
+      return false;
+    } catch (err: unknown) {
+      return err instanceof Error && err.message.includes(expectedReason);
+    }
+  };
+
+  // Base íntegra no servidor
+  const seedTriadBaseline = () => {
+    triadAdminRegs.set('reg-adm-triad-ex1', {
+      id: 'reg-adm-triad-ex1',
+      code: 'CAR-SM-TRIADEX1',
+      cpf: '555.666.777-88',
+      email: 'triade.admin@carangola.mg.gov.br',
+      status: 'confirmada',
+      certificateIssued: false,
+      acceptEmailNews: true,
+      acceptWhatsappNews: false
+    });
+    triadAdminPerms.set('CAR-SM-TRIADEX1', {
+      code: 'CAR-SM-TRIADEX1',
+      registrationId: 'reg-adm-triad-ex1',
+      status: 'confirmada',
+      certificateIssued: false
+    });
+    triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+      id: 'sub-reg-adm-triad-ex1',
+      email: 'triade.admin@carangola.mg.gov.br',
+      status: 'active',
+      receiveEmail: true,
+      receiveWhatsapp: false,
+      consent: true
+    });
+  };
+
+  // 1) permData.code divergente
+  seedTriadBaseline();
+  triadAdminPerms.set('CAR-SM-TRIADEX1', {
+    ...triadAdminPerms.get('CAR-SM-TRIADEX1'),
+    code: 'CAR-SM-OUTRO'
+  });
+  const badPermCodeRejected = await expectAdminTriadReject('CODE_COLLISION_CONFLICT');
+
+  // 2) regData.id divergente
+  seedTriadBaseline();
+  triadAdminRegs.set('reg-adm-triad-ex1', {
+    ...triadAdminRegs.get('reg-adm-triad-ex1'),
+    id: 'reg-outro-id'
+  });
+  const badRegIdRejected = await expectAdminTriadReject('REGISTRATION_IDENTITY_CONFLICT');
+
+  // 3) consentimento original em regData divergente
+  seedTriadBaseline();
+  triadAdminRegs.set('reg-adm-triad-ex1', {
+    ...triadAdminRegs.get('reg-adm-triad-ex1'),
+    acceptEmailNews: false
+  });
+  const badOrigConsentRejected = await expectAdminTriadReject('ORIGINAL_CONSENT_MISMATCH');
+
+  // 4) subData.id divergente
+  seedTriadBaseline();
+  triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+    ...triadAdminSubs.get('sub-reg-adm-triad-ex1'),
+    id: 'sub-de-outro'
+  });
+  const badSubIdRejected = await expectAdminTriadReject('SUBSCRIBER_IDENTITY_OR_CONSENT_INVALID');
+
+  // 5) subData.email divergente do da inscrição
+  seedTriadBaseline();
+  triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+    ...triadAdminSubs.get('sub-reg-adm-triad-ex1'),
+    email: 'terceiro@carangola.mg.gov.br'
+  });
+  const badSubEmailRejected = await expectAdminTriadReject('SUBSCRIBER_IDENTITY_OR_CONSENT_INVALID');
+
+  // 6) subData.consent !== true
+  seedTriadBaseline();
+  triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+    ...triadAdminSubs.get('sub-reg-adm-triad-ex1'),
+    consent: false
+  });
+  const badSubConsentRejected = await expectAdminTriadReject('SUBSCRIBER_IDENTITY_OR_CONSENT_INVALID');
+
+  // 7) subData ativo com canal divergente do consentimento original
+  seedTriadBaseline();
+  triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+    ...triadAdminSubs.get('sub-reg-adm-triad-ex1'),
+    receiveEmail: false
+  });
+  const badActiveChannelsRejected = await expectAdminTriadReject('ACTIVE_SUBSCRIBER_CHANNEL_MISMATCH');
+
+  // 8) subData tombstone com canal ainda true (corrompido)
+  seedTriadBaseline();
+  triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+    ...triadAdminSubs.get('sub-reg-adm-triad-ex1'),
+    status: 'unsubscribed',
+    receiveEmail: true,
+    receiveWhatsapp: false
+  });
+  const corruptTombstoneRejected = await expectAdminTriadReject('INVALID_TOMBSTONE_CHANNELS');
+
+  // 9) Tríade ativa íntegra é aceita como alreadyExisted: true
+  seedTriadBaseline();
+  const validExistingActiveRes = await saveAdminRegistrationWithTriadCheckInDb(adminExistingSample);
+
+  // 10) Tríade íntegra com tombstone revogado (status 'unsubscribed', receiveEmail/Whatsapp: false e consent original preservado em regData) é aceita e não reativa
+  triadAdminSubs.set('sub-reg-adm-triad-ex1', {
+    ...triadAdminSubs.get('sub-reg-adm-triad-ex1'),
+    status: 'unsubscribed',
+    receiveEmail: false,
+    receiveWhatsapp: false,
+    unsubscribedAt: '2026-11-18T19:00:00Z'
+  });
+  const validExistingTombRes = await saveAdminRegistrationWithTriadCheckInDb(adminExistingSample);
+  const subDocAfterAdminCheck = triadAdminSubs.get('sub-reg-adm-triad-ex1');
+
+  assert(
+    badPermCodeRejected &&
+      badRegIdRejected &&
+      badOrigConsentRejected &&
+      badSubIdRejected &&
+      badSubEmailRejected &&
+      badSubConsentRejected &&
+      badActiveChannelsRejected &&
+      corruptTombstoneRejected &&
+      validExistingActiveRes.alreadyExisted === true &&
+      validExistingActiveRes.subscriberTombstoned === false &&
+      validExistingTombRes.alreadyExisted === true &&
+      validExistingTombRes.subscriberTombstoned === true &&
+      subDocAfterAdminCheck?.status === 'unsubscribed' &&
+      subDocAfterAdminCheck?.receiveEmail === false,
+    'Grupo B: transação administrativa valida integralmente permissão, identidade, consentimentos e integridade do assinante/tombstone na tríade preexistente',
+    suite16
+  );
+
+  // 16.33 Grupo B (fechamento de contorno sem opt-in): consentimento original true com entrada sem consentimento,
+  // assinante inesperado sem opt-in (admin + fila offline) e campos de consentimento ausentes no documento original
+  const expectAdminRejectFor = async (regInput: Registration, expectedReason: string): Promise<boolean> => {
+    try {
+      await saveAdminRegistrationWithTriadCheckInDb(regInput);
+      return false;
+    } catch (err: unknown) {
+      return err instanceof Error && err.message.includes(expectedReason);
+    }
+  };
+
+  // Caso 1: Consentimento original true em regData, mas entrada administrativa recebida sem consentimento (false e undefined)
+  seedTriadBaseline();
+  const bypassFalseInput: Registration = {
+    ...adminExistingSample,
+    acceptEmailNews: false,
+    acceptWhatsappNews: false
+  };
+  const bypassOmittedInput: Registration = {
+    ...adminExistingSample,
+    acceptEmailNews: undefined,
+    acceptWhatsappNews: undefined
+  };
+  const bypassFalseRejected = await expectAdminRejectFor(bypassFalseInput, 'ORIGINAL_CONSENT_MISMATCH');
+  const bypassOmittedRejected = await expectAdminRejectFor(bypassOmittedInput, 'ORIGINAL_CONSENT_MISMATCH');
+
+  // Caso 2: Consentimento original false nos dois canais, mas existência de assinante inesperado (sub-{id} isolado)
+  seedTriadBaseline();
+  triadAdminRegs.set('reg-adm-triad-ex1', {
+    ...triadAdminRegs.get('reg-adm-triad-ex1'),
+    acceptEmailNews: false,
+    acceptWhatsappNews: false
+  });
+  const unexpectedSubAdminRejected = await expectAdminRejectFor(
+    bypassFalseInput,
+    'UNEXPECTED_SUBSCRIBER_WITHOUT_OPT_IN'
+  );
+
+  // Também comprovar que a fila offline (verifyIntactRegistrationTriadOnServer) detecta assinante inesperado sem opt-in
+  setFirestoreRegistrationAdapterForTests({
+    async getPermissionDoc(code) {
+      const p = triadAdminPerms.get(code);
+      return { exists: Boolean(p), data: p };
+    },
+    async commitRegistrationBatch() {
+      throw Object.assign(new Error('Missing or insufficient permissions'), { code: 'permission-denied' });
+    }
+  });
+  const unexpectedSubQueueOutcome = await synchronizeOfflineRegistrationQueue([bypassFalseInput], []);
+
+  // Caso 3: Campos de consentimento ausentes no documento original (regData sem acceptEmailNews/acceptWhatsappNews)
+  const regDocWithoutConsent = { ...(triadAdminRegs.get('reg-adm-triad-ex1') as Record<string, unknown>) };
+  delete regDocWithoutConsent.acceptEmailNews;
+  delete regDocWithoutConsent.acceptWhatsappNews;
+  triadAdminRegs.set('reg-adm-triad-ex1', regDocWithoutConsent);
+
+  // 3a) Entrada com opt-in true contra documento sem campos de consentimento -> rejeita
+  const missingOrigVsOptInTrueRejected = await expectAdminRejectFor(
+    adminExistingSample,
+    'ORIGINAL_CONSENT_MISMATCH'
+  );
+  // 3b) Entrada sem opt-in contra documento sem campos de consentimento, mas com assinante inesperado presente -> rejeita
+  const missingOrigWithUnexpectedSubRejected = await expectAdminRejectFor(
+    bypassOmittedInput,
+    'UNEXPECTED_SUBSCRIBER_WITHOUT_OPT_IN'
+  );
+  // 3c) Documento original com tipo não booleano corrompido -> rejeita
+  triadAdminRegs.set('reg-adm-triad-ex1', { ...regDocWithoutConsent, acceptEmailNews: 'sim' });
+  const nonBoolOrigConsentRejected = await expectAdminRejectFor(
+    bypassOmittedInput,
+    'ORIGINAL_CONSENT_MISMATCH'
+  );
+  // 3d) Documento original sem campos de consentimento + entrada sem opt-in + sem assinante no servidor -> aceita (legado sem opt-in)
+  triadAdminRegs.set('reg-adm-triad-ex1', regDocWithoutConsent);
+  triadAdminSubs.delete('sub-reg-adm-triad-ex1');
+  const missingOrigWithoutSubAccepted = await saveAdminRegistrationWithTriadCheckInDb(bypassOmittedInput);
+
+  assert(
+    bypassFalseRejected &&
+      bypassOmittedRejected &&
+      unexpectedSubAdminRejected &&
+      unexpectedSubQueueOutcome.remainingQueue.length === 1 &&
+      unexpectedSubQueueOutcome.pendingFailures[0]?.reason === 'UNEXPECTED_SUBSCRIBER_WITHOUT_OPT_IN' &&
+      missingOrigVsOptInTrueRejected &&
+      missingOrigWithUnexpectedSubRejected &&
+      nonBoolOrigConsentRejected &&
+      missingOrigWithoutSubAccepted.alreadyExisted === true &&
+      missingOrigWithoutSubAccepted.subscriberTombstoned === false,
+    'Grupo B (condição de contorno): bloqueia bypass sem opt-in, rejeita assinante inesperado sem opt-in (admin e fila) e trata campos de consentimento ausentes no documento original',
+    suite16
+  );
+
+  // Limpeza de adapters após a suite
+  setAdminTriadAdapterForTests(null);
+  setFirestoreRegistrationAdapterForTests(null);
+  setNewsletterAdapterForTests(null);
 
 
   console.log('\n======================================================');

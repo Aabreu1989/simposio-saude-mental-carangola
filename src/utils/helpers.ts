@@ -10,6 +10,7 @@ const STORAGE_KEYS = {
   POSTS: 'carangola_sm_posts',
   NOTIFICATIONS: 'carangola_sm_notifications',
   SUBSCRIBERS: 'carangola_sm_subscribers',
+  CONFIRMED_SUBSCRIBER_TOMBSTONES: 'carangola_sm_confirmed_sub_tombstones',
   EVALUATIONS: 'carangola_sm_evaluations',
   OFFLINE_QUEUE: 'carangola_sm_offline_queue',
   LAST_REGISTERED: 'carangola_sm_last_registered',
@@ -296,13 +297,25 @@ export const loadStoredData = () => {
   const rawStoredSpeakers = getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES);
   const syncedSpeakers = mergeSpeakersWithDefaults(rawStoredSpeakers);
 
+  const LEGACY_FAKE_SUB_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4']);
+  const loadedSubscribers = getItem<NewsletterSubscriber[]>(
+    STORAGE_KEYS.SUBSCRIBERS,
+    INITIAL_SUBSCRIBERS
+  ).filter((s) => s && !LEGACY_FAKE_SUB_IDS.has(s.id));
+
+  const confirmedSubscriberTombstones = getItem<ConfirmedSubscriberTombstoneHint[]>(
+    STORAGE_KEYS.CONFIRMED_SUBSCRIBER_TOMBSTONES,
+    []
+  ).filter((h) => h && typeof h.id === 'string' && typeof h.confirmedAtIso === 'string');
+
   return {
     config: loadedConfig,
     registrations: normalizedRegistrations,
     materials: syncedMaterials,
     posts: mergedPosts,
     notifications,
-    subscribers: getItem<NewsletterSubscriber[]>(STORAGE_KEYS.SUBSCRIBERS, INITIAL_SUBSCRIBERS),
+    subscribers: loadedSubscribers,
+    confirmedSubscriberTombstones,
     evaluations: getItem<EvaluationFeedback[]>(STORAGE_KEYS.EVALUATIONS, INITIAL_EVALUATIONS),
     offlineQueue: getItem<Registration[]>(STORAGE_KEYS.OFFLINE_QUEUE, []),
     lastRegistered: getItem<Registration | null>(STORAGE_KEYS.LAST_REGISTERED, null),
@@ -313,15 +326,17 @@ export const loadStoredData = () => {
 
 export const REALTIME_CHANNEL_NAME = 'simposio_sus_realtime';
 
-export const broadcastRealtimeUpdate = (key: string) => {
+export const broadcastRealtimeUpdate = (key: string): boolean => {
   try {
     if (typeof BroadcastChannel !== 'undefined') {
       const channel = new BroadcastChannel(REALTIME_CHANNEL_NAME);
       channel.postMessage({ key, senderId: TAB_INSTANCE_ID, timestamp: Date.now() });
       channel.close();
+      return true;
     }
+    return false;
   } catch {
-    // ignore BroadcastChannel errors in restricted contexts
+    return false;
   }
 };
 
@@ -491,14 +506,37 @@ export const saveSpeakersToStorage = (speakers: SpeakerProfile[]): void => {
   }
 };
 
-export const saveToStorage = (key: string, data: unknown) => {
+export interface StorageSaveResult {
+  persisted: boolean;
+  notified: boolean;
+  error?: string;
+}
+
+export const saveToStorage = (key: string, data: unknown): StorageSaveResult => {
+  let persisted = false;
+  let notified = false;
+  let errorMsg: string | undefined;
+
   try {
-    if (typeof localStorage === 'undefined') return;
+    if (typeof localStorage === 'undefined') {
+      return { persisted: false, notified: false, error: 'localStorage_unavailable' };
+    }
     localStorage.setItem(key, JSON.stringify(data));
-    broadcastRealtimeUpdate(key);
-  } catch (err) {
+    persisted = true;
+  } catch (err: unknown) {
+    errorMsg = err instanceof Error ? err.message : String(err);
     console.warn('Aviso ao gravar em localStorage:', err);
   }
+
+  if (persisted) {
+    try {
+      notified = broadcastRealtimeUpdate(key);
+    } catch {
+      notified = false;
+    }
+  }
+
+  return { persisted, notified, error: errorMsg };
 };
 
 export const saveMaterialsToStorageSafe = (materials: DownloadMaterial[]): { savedFull: boolean; quotaFallback: boolean } => {
@@ -1627,4 +1665,406 @@ export const normalizeGoogleDriveImageUrl = (
   return { url: trimmed, isDriveFolder: false, isDriveFile: false };
 };
 
+export const sanitizeRegistrationId = (rawId: string, fallbackPrefix = 'reg'): string => {
+  const trimmed = (rawId || '').trim();
+  if (/^[a-zA-Z0-9_-]{1,124}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const cleaned = trimmed.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 124);
+  return cleaned || `${fallbackPrefix}-${Date.now()}`.slice(0, 124);
+};
+
+export const validateSubscriberId = (subscriberId: string): string => {
+  const trimmed = typeof subscriberId === 'string' ? subscriberId.trim() : '';
+  if (
+    !trimmed ||
+    trimmed.length > 128 ||
+    trimmed.includes('@') ||
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(trimmed)
+  ) {
+    throw new Error(`INVALID_SUBSCRIBER_ID: Identificador de assinante inválido ("${trimmed.slice(0, 40)}").`);
+  }
+  return trimmed;
+};
+
+export const buildSubscriberIdFromRegistrationId = (registrationId: string): string => {
+  const clean = sanitizeRegistrationId(registrationId, 'reg');
+  return `sub-${clean}`;
+};
+
+export const extractRegistrationIdFromSubscriberId = (subscriberId: string): string | null => {
+  const clean = (subscriberId || '').trim();
+  if (!clean || !/^[a-zA-Z0-9_-]{1,128}$/.test(clean) || clean.includes('@')) {
+    return null;
+  }
+  if (clean.startsWith('sub-')) {
+    const candidate = clean.slice(4);
+    return candidate.length >= 3 ? candidate : null;
+  }
+  return null;
+};
+
+export const isSubscriberActive = (sub?: NewsletterSubscriber | null): boolean => {
+  if (!sub) return false;
+  if (sub.status === 'unsubscribed') return false;
+  return sub.receiveEmail === true || sub.receiveWhatsapp === true;
+};
+
+/**
+ * Validador temporal ISO 8601 estrito para datas civis (0001..9999) e timestamps do Firestore.
+ * Política explícita de produto para fusos horários: restringe deslocamentos aos fusos civis
+ * territoriais válidos (UTC-12:00 a UTC+14:00, minutos 00..59). Rejeita ano 0000 e datas
+ * calendáricas impossíveis; aceita datas válidas anteriores a 1970 (Date.parse negativo).
+ */
+export const validateStrictIsoTimestamp = (raw: unknown): string | null => {
+  let candidateStr: string;
+
+  if (raw && typeof (raw as { toDate?: () => Date }).toDate === 'function') {
+    try {
+      const dt = (raw as { toDate: () => Date }).toDate();
+      if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return null;
+      const isoYear = dt.getUTCFullYear();
+      if (isoYear < 1 || isoYear > 9999) return null;
+      candidateStr = dt.toISOString();
+    } catch {
+      return null;
+    }
+  } else if (typeof raw === 'string') {
+    candidateStr = raw.trim();
+  } else {
+    return null;
+  }
+
+  const match = candidateStr.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/
+  );
+  if (!match) return null;
+
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const h = Number(match[4]);
+  const min = Number(match[5]);
+  const s = Number(match[6]);
+  const tz = match[8];
+
+  if (y < 1 || y > 9999) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31 || h > 23 || min > 59 || s > 59) return null;
+
+  const checkDate = new Date(Date.UTC(2000, 0, 1, h, min, s));
+  checkDate.setUTCFullYear(y, m - 1, d);
+  if (
+    checkDate.getUTCFullYear() !== y ||
+    checkDate.getUTCMonth() !== m - 1 ||
+    checkDate.getUTCDate() !== d
+  ) {
+    return null;
+  }
+
+  if (tz !== 'Z') {
+    const sign = tz[0];
+    const tzH = Number(tz.slice(1, 3));
+    const tzM = Number(tz.slice(4, 6));
+    if (tzM > 59) return null;
+    if (sign === '+' && (tzH > 14 || (tzH === 14 && tzM > 0))) return null;
+    if (sign === '-' && (tzH > 12 || (tzH === 12 && tzM > 0))) return null;
+  }
+
+  const parsed = Date.parse(candidateStr);
+  if (Number.isNaN(parsed) || !Number.isFinite(parsed)) return null;
+
+  return candidateStr;
+};
+
+export interface ConfirmedSubscriberTombstoneHint {
+  id: string;
+  confirmedAtIso: string;
+  subscriber: NewsletterSubscriber;
+}
+
+export type TombstoneTrustLevel = 'local_persisted_hint' | 'server_verified';
+
+export interface ConfirmedTombstoneEntry {
+  subscriber: NewsletterSubscriber;
+  confirmedAtIso: string;
+  confirmedAtMs: number;
+  trustLevel: TombstoneTrustLevel;
+  seenOnAuthoritativeServer: boolean;
+}
+
+export interface SubscribersSnapshotMeta {
+  source: 'firestore_server' | 'firestore_cache' | 'cross_tab_storage';
+  isExhaustive: boolean;
+}
+
+export const getConfirmedSubscriberTombstoneHints = (): ConfirmedSubscriberTombstoneHint[] => {
+  try {
+    if (typeof localStorage === 'undefined') return [];
+    const raw = localStorage.getItem(STORAGE_KEYS.CONFIRMED_SUBSCRIBER_TOMBSTONES);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((x) => x && typeof x.id === 'string' && typeof x.confirmedAtIso === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveConfirmedSubscriberTombstoneHints = (
+  hints: ConfirmedSubscriberTombstoneHint[]
+): StorageSaveResult => {
+  return saveToStorage(STORAGE_KEYS.CONFIRMED_SUBSCRIBER_TOMBSTONES, hints);
+};
+
+export const addConfirmedSubscriberTombstoneHint = (
+  subscriber: NewsletterSubscriber,
+  confirmedAtIso: string
+): StorageSaveResult => {
+  const validIso = validateStrictIsoTimestamp(confirmedAtIso) || new Date().toISOString();
+  const current = getConfirmedSubscriberTombstoneHints().filter((h) => h.id !== subscriber.id);
+  const normalizedSub: NewsletterSubscriber = {
+    ...subscriber,
+    status: 'unsubscribed',
+    receiveEmail: false,
+    receiveWhatsapp: false,
+    unsubscribedAt: validIso
+  };
+  return saveConfirmedSubscriberTombstoneHints([
+    { id: subscriber.id, confirmedAtIso: validIso, subscriber: normalizedSub },
+    ...current
+  ]);
+};
+
+export const removeConfirmedSubscriberTombstoneHint = (subscriberId: string): StorageSaveResult => {
+  const current = getConfirmedSubscriberTombstoneHints().filter((h) => h.id !== subscriberId);
+  return saveConfirmedSubscriberTombstoneHints(current);
+};
+
+/**
+ * Hidrata mapa de tombstones exclusivamente como 'local_persisted_hint'.
+ * Registros lidos do localStorage NUNCA recebem 'server_verified'.
+ */
+export const hydrateConfirmedTombstonesMap = (
+  initialSubscribers: NewsletterSubscriber[],
+  persistedHints: ConfirmedSubscriberTombstoneHint[]
+): Map<string, ConfirmedTombstoneEntry> => {
+  const map = new Map<string, ConfirmedTombstoneEntry>();
+
+  for (const hint of persistedHints || []) {
+    const validIso = validateStrictIsoTimestamp(hint?.confirmedAtIso);
+    if (hint?.id && validIso) {
+      map.set(hint.id, {
+        subscriber: {
+          ...hint.subscriber,
+          id: hint.id,
+          status: 'unsubscribed',
+          receiveEmail: false,
+          receiveWhatsapp: false,
+          unsubscribedAt: validIso
+        },
+        confirmedAtIso: validIso,
+        confirmedAtMs: Date.parse(validIso),
+        trustLevel: 'local_persisted_hint',
+        seenOnAuthoritativeServer: false
+      });
+    }
+  }
+
+  for (const sub of initialSubscribers || []) {
+    if (sub?.id && sub.status === 'unsubscribed' && !map.has(sub.id)) {
+      const validIso =
+        validateStrictIsoTimestamp(sub.unsubscribedAt) ||
+        validateStrictIsoTimestamp(sub.updatedAt);
+      if (validIso) {
+        map.set(sub.id, {
+          subscriber: {
+            ...sub,
+            status: 'unsubscribed',
+            receiveEmail: false,
+            receiveWhatsapp: false,
+            unsubscribedAt: validIso
+          },
+          confirmedAtIso: validIso,
+          confirmedAtMs: Date.parse(validIso),
+          trustLevel: 'local_persisted_hint',
+          seenOnAuthoritativeServer: false
+        });
+      }
+    }
+  }
+
+  return map;
+};
+
+/**
+ * Reconcilia snapshots de assinantes diferenciando origem autoritativa do servidor,
+ * cache local e cross-tab, separando hints locais ('local_persisted_hint') de confirmações
+ * remotas da sessão ('server_verified'), sem reativação implícita de tombstones.
+ */
+export const reconcileSubscribersSnapshot = (
+  incomingList: NewsletterSubscriber[],
+  currentList: NewsletterSubscriber[],
+  tombstonesMap: Map<string, ConfirmedTombstoneEntry>,
+  meta: SubscribersSnapshotMeta,
+  deletedRegIds: Set<string> = new Set()
+): NewsletterSubscriber[] => {
+  if ((!incomingList || incomingList.length === 0) && !meta.isExhaustive) {
+    const preserved = new Map<string, NewsletterSubscriber>();
+    for (const existing of currentList || []) {
+      if (!existing?.id) continue;
+      const regId = extractRegistrationIdFromSubscriberId(existing.id);
+      if (regId && deletedRegIds.has(regId)) continue;
+      const tombstoneEntry = tombstonesMap.get(existing.id);
+      preserved.set(existing.id, tombstoneEntry ? tombstoneEntry.subscriber : existing);
+    }
+    for (const entry of tombstonesMap.values()) {
+      if (!entry?.subscriber?.id) continue;
+      const regId = extractRegistrationIdFromSubscriberId(entry.subscriber.id);
+      if (regId && deletedRegIds.has(regId)) continue;
+      if (!preserved.has(entry.subscriber.id)) {
+        preserved.set(entry.subscriber.id, entry.subscriber);
+      }
+    }
+    return Array.from(preserved.values());
+  }
+
+  const incomingMap = new Map<string, NewsletterSubscriber>();
+  for (const s of incomingList || []) {
+    if (s?.id) incomingMap.set(s.id, s);
+  }
+
+  const result: NewsletterSubscriber[] = [];
+
+  for (const incoming of incomingList || []) {
+    const existingEntry = tombstonesMap.get(incoming.id);
+
+    if (incoming.status === 'unsubscribed') {
+      const validIso =
+        validateStrictIsoTimestamp(incoming.unsubscribedAt) ||
+        validateStrictIsoTimestamp(incoming.updatedAt) ||
+        existingEntry?.confirmedAtIso ||
+        new Date().toISOString();
+
+      const normalized: NewsletterSubscriber = {
+        ...incoming,
+        status: 'unsubscribed',
+        receiveEmail: false,
+        receiveWhatsapp: false,
+        unsubscribedAt: validIso
+      };
+
+      if (meta.source === 'firestore_server') {
+        tombstonesMap.set(incoming.id, {
+          subscriber: normalized,
+          confirmedAtIso: validIso,
+          confirmedAtMs: Date.parse(validIso),
+          trustLevel: 'server_verified',
+          seenOnAuthoritativeServer: true
+        });
+      }
+      result.push(normalized);
+      continue;
+    }
+
+    // incoming traz status diferente de 'unsubscribed' (ex.: 'active')
+    if (existingEntry) {
+      if (existingEntry.trustLevel === 'server_verified') {
+        // Confirmado por transação ou snapshot servidor nesta sessão em RAM: bloqueia regressão
+        result.push({
+          ...incoming,
+          status: 'unsubscribed',
+          receiveEmail: false,
+          receiveWhatsapp: false,
+          unsubscribedAt: existingEntry.confirmedAtIso
+        });
+        continue;
+      }
+
+      if (meta.source === 'firestore_server' && meta.isExhaustive) {
+        // Apenas hint local do localStorage: snapshot exaustivo do servidor real é fonte da verdade
+        tombstonesMap.delete(incoming.id);
+        result.push(incoming);
+        continue;
+      }
+
+      // Cache offline ou broadcast entre abas: preserva hint até resposta do servidor
+      result.push(existingEntry.subscriber);
+      continue;
+    }
+
+    result.push(incoming);
+  }
+
+  // Preservar ou remover tombstones omitidos do incomingList
+  for (const [id, entry] of tombstonesMap.entries()) {
+    if (!incomingMap.has(id)) {
+      const regId = extractRegistrationIdFromSubscriberId(id);
+      const isCascadeDeleted = Boolean(regId && deletedRegIds.has(regId));
+
+      if (
+        meta.source === 'firestore_server' &&
+        meta.isExhaustive &&
+        (entry.seenOnAuthoritativeServer ||
+          isCascadeDeleted ||
+          entry.trustLevel === 'local_persisted_hint')
+      ) {
+        tombstonesMap.delete(id);
+      } else {
+        result.push(entry.subscriber);
+      }
+    }
+  }
+
+  return result;
+};
+
+/**
+ * Executa tarefas assíncronas em fila FIFO estrita sobre uma cauda mutável sem que uma rejeição
+ * envenene operações subsequentes, preservando o erro original apenas para o chamador da operação falhada.
+ */
+export const enqueueSerialQueueTask = <T>(
+  tailRef: { current: Promise<void> },
+  op: () => Promise<T>
+): Promise<T> => {
+  const task = tailRef.current.then(
+    () => op(),
+    () => op()
+  );
+  tailRef.current = task.then(
+    () => undefined,
+    () => undefined
+  );
+  return task;
+};
+
+export interface DashboardSubscriberBuckets {
+  activeSubscribers: NewsletterSubscriber[];
+  cancelledSubscribers: NewsletterSubscriber[];
+  whatsappSubscribers: NewsletterSubscriber[];
+  emailSubscribers: NewsletterSubscriber[];
+  registrationOriginSubscribers: NewsletterSubscriber[];
+}
+
+/**
+ * Classifica assinantes para o AdminDashboard aplicando rigorosamente isSubscriberActive e comparações === true.
+ */
+export const classifySubscribersForDashboard = (
+  subscribers: NewsletterSubscriber[]
+): DashboardSubscriberBuckets => {
+  const list = Array.isArray(subscribers) ? subscribers : [];
+  const activeSubscribers = list.filter(isSubscriberActive);
+  const cancelledSubscribers = list.filter((s) => Boolean(s) && s.status === 'unsubscribed');
+  const whatsappSubscribers = activeSubscribers.filter((s) => s.receiveWhatsapp === true && !!s.phone);
+  const emailSubscribers = activeSubscribers.filter((s) => s.receiveEmail === true);
+  const registrationOriginSubscribers = activeSubscribers.filter((s) => s.origin === 'inscricao' || !!s.role);
+
+  return {
+    activeSubscribers,
+    cancelledSubscribers,
+    whatsappSubscribers,
+    emailSubscribers,
+    registrationOriginSubscribers
+  };
+};
 

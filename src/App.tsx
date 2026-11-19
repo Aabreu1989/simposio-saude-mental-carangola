@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   EventConfig,
   Registration,
@@ -36,7 +36,17 @@ import {
   addDeletedPostId,
   broadcastRealtimeUpdate,
   mergeSpeakersWithDefaults,
-  INVENTED_POST_IDS
+  INVENTED_POST_IDS,
+  buildSubscriberIdFromRegistrationId,
+  hydrateConfirmedTombstonesMap,
+  reconcileSubscribersSnapshot,
+  addConfirmedSubscriberTombstoneHint,
+  removeConfirmedSubscriberTombstoneHint,
+  validateStrictIsoTimestamp,
+  enqueueSerialQueueTask,
+  type ConfirmedTombstoneEntry,
+  type StorageSaveResult,
+  type SubscribersSnapshotMeta
 } from './utils/helpers.ts';
 import { isSupabaseConfigured, supabaseRestQuery } from './services/supabaseClient.ts';
 import {
@@ -50,7 +60,9 @@ import {
   synchronizeOfflineRegistrationQueue,
   persistRegistrationAndPermissionInDb,
   persistMultipleRegistrationsInDb,
+  persistAdminImportedRegistrationsWithTriadCheckInDb,
   deleteRegistrationInDb,
+  type AdminBatchImportResult,
   recordCertificateDownloadInDb,
   saveEventConfigInDb,
   subscribeEventConfig,
@@ -137,6 +149,36 @@ export default function App() {
   const [posts, setPosts] = useState<SocialPost[]>(initialData.posts);
   const [notifications, setNotifications] = useState<PushNotificationItem[]>(initialData.notifications);
   const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>(initialData.subscribers);
+  const subscribersRef = useRef<NewsletterSubscriber[]>(initialData.subscribers);
+  const subscriberOpQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const confirmedTombstonesRef = useRef<Map<string, ConfirmedTombstoneEntry> | null>(null);
+  if (confirmedTombstonesRef.current === null) {
+    confirmedTombstonesRef.current = hydrateConfirmedTombstonesMap(
+      initialData.subscribers,
+      initialData.confirmedSubscriberTombstones
+    );
+  }
+
+  const applySubscribersTransition = useCallback(
+    (
+      computeNext: (current: NewsletterSubscriber[]) => NewsletterSubscriber[],
+      options: { persist: boolean }
+    ): { nextState: NewsletterSubscriber[]; storageResult: StorageSaveResult | null } => {
+      const nextState = computeNext(subscribersRef.current);
+      subscribersRef.current = nextState;
+      setSubscribers(nextState);
+      const storageResult = options.persist
+        ? saveToStorage(STORAGE_KEYS.SUBSCRIBERS, nextState)
+        : null;
+      return { nextState, storageResult };
+    },
+    []
+  );
+
+  const enqueueSubscriberOperation = useCallback(
+    <T,>(op: () => Promise<T>): Promise<T> => enqueueSerialQueueTask(subscriberOpQueueRef, op),
+    []
+  );
   const [evaluations, setEvaluations] = useState<EvaluationFeedback[]>(initialData.evaluations);
   const [offlineQueue, setOfflineQueue] = useState<Registration[]>(initialData.offlineQueue);
   const [lastRegistered, setLastRegistered] = useState<Registration | null>(initialData.lastRegistered);
@@ -362,10 +404,23 @@ export default function App() {
       saveToStorage(STORAGE_KEYS.CERT_DOWNLOADS, remoteDownloads);
     });
 
-    const unsubSubscribers = subscribeAdminSubscribers((remoteSubscribers) => {
+    const unsubSubscribers = subscribeAdminSubscribers((remoteSubscribers, meta) => {
       if (!isActive || !remoteSubscribers) return;
-      setSubscribers(remoteSubscribers);
-      saveToStorage(STORAGE_KEYS.SUBSCRIBERS, remoteSubscribers);
+      const snapshotMeta: SubscribersSnapshotMeta = meta || {
+        source: 'firestore_server',
+        isExhaustive: false
+      };
+      applySubscribersTransition(
+        (current) =>
+          reconcileSubscribersSnapshot(
+            remoteSubscribers,
+            current,
+            confirmedTombstonesRef.current!,
+            snapshotMeta,
+            getDeletedRegistrationIds()
+          ),
+        { persist: true }
+      );
     });
 
     return () => {
@@ -638,7 +693,19 @@ export default function App() {
       if (!changedKey || changedKey === STORAGE_KEYS.MATERIALS) setMaterials(fresh.materials);
       if (!changedKey || changedKey === STORAGE_KEYS.POSTS) setPosts(fresh.posts);
       if (!changedKey || changedKey === STORAGE_KEYS.NOTIFICATIONS) setNotifications(fresh.notifications);
-      if (!changedKey || changedKey === STORAGE_KEYS.SUBSCRIBERS) setSubscribers(fresh.subscribers);
+      if (!changedKey || changedKey === STORAGE_KEYS.SUBSCRIBERS) {
+        applySubscribersTransition(
+          (current) =>
+            reconcileSubscribersSnapshot(
+              fresh.subscribers,
+              current,
+              confirmedTombstonesRef.current!,
+              { source: 'cross_tab_storage', isExhaustive: false },
+              getDeletedRegistrationIds()
+            ),
+          { persist: false }
+        );
+      }
       if (!changedKey || changedKey === STORAGE_KEYS.EVALUATIONS) setEvaluations(fresh.evaluations);
       if (!changedKey || changedKey === STORAGE_KEYS.OFFLINE_QUEUE) setOfflineQueue(fresh.offlineQueue);
       if (!changedKey || changedKey === STORAGE_KEYS.LAST_REGISTERED) setLastRegistered(fresh.lastRegistered);
@@ -743,6 +810,40 @@ export default function App() {
         const latestSynced = outcome.synced[0];
         setLastRegistered(latestSynced);
         saveToStorage(STORAGE_KEYS.LAST_REGISTERED, latestSynced);
+
+        const syncedSubs = outcome.syncedEntries
+          .filter(
+            (entry) =>
+              !entry.alreadyExistedOnServer &&
+              !entry.subscriberTombstoned &&
+              Boolean(entry.registration.acceptEmailNews || entry.registration.acceptWhatsappNews)
+          )
+          .map((entry): NewsletterSubscriber => {
+            const reg = entry.registration;
+            return {
+              id: buildSubscriberIdFromRegistrationId(reg.id),
+              email: (reg.email || '').trim().toLowerCase(),
+              name: reg.fullName,
+              phone: reg.phone,
+              city: reg.city,
+              role: reg.professionalRole,
+              institution: reg.institution,
+              receiveEmail: Boolean(reg.acceptEmailNews),
+              receiveWhatsapp: Boolean(reg.acceptWhatsappNews),
+              origin: 'inscricao',
+              subscribedAt: new Date().toISOString().split('T')[0],
+              status: 'active',
+              consent: true
+            };
+          });
+
+        if (syncedSubs.length > 0) {
+          const syncedSubIds = new Set(syncedSubs.map((s) => s.id));
+          applySubscribersTransition(
+            (prev) => [...syncedSubs, ...prev.filter((s) => !syncedSubIds.has(s.id))],
+            { persist: true }
+          );
+        }
       }
 
       setOfflineQueue(outcome.remainingQueue);
@@ -753,10 +854,14 @@ export default function App() {
           'Sincronização Concluída',
           `Todas as ${outcome.synced.length} inscrições realizadas offline foram confirmadas no Firestore.`
         );
-      } else if (outcome.synced.length > 0 && !outcome.allSucceeded) {
+      } else if (outcome.remainingQueue.length > 0) {
+        const authNote =
+          outcome.requiresAdminTriadVerificationCount > 0
+            ? ' Verificação remota de duplicidades pré-existentes exige sessão administrativa autorizada; itens mantidos na fila.'
+            : '';
         sendBrowserNotification(
-          'Sincronização Parcial',
-          `${outcome.synced.length} inscrições sincronizadas. ${outcome.remainingQueue.length} ainda aguardam confirmação remota.`
+          outcome.synced.length > 0 ? 'Sincronização Parcial' : 'Sincronização Pendente',
+          `${outcome.synced.length} confirmada(s). ${outcome.remainingQueue.length} permanece(m) pendente(s) na fila sem confirmação.${authNote}`
         );
       }
     } finally {
@@ -799,6 +904,30 @@ export default function App() {
       saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
       setLastRegistered(confirmedReg);
       saveToStorage(STORAGE_KEYS.LAST_REGISTERED, confirmedReg);
+
+      if (!saveRes.alreadyExisted && (confirmedReg.acceptEmailNews || confirmedReg.acceptWhatsappNews)) {
+        const subId = buildSubscriberIdFromRegistrationId(confirmedReg.id);
+        const newSub: NewsletterSubscriber = {
+          id: subId,
+          email: confirmedReg.email,
+          name: confirmedReg.fullName,
+          phone: confirmedReg.phone,
+          city: confirmedReg.city,
+          role: confirmedReg.professionalRole,
+          institution: confirmedReg.institution,
+          receiveEmail: Boolean(confirmedReg.acceptEmailNews),
+          receiveWhatsapp: Boolean(confirmedReg.acceptWhatsappNews),
+          origin: 'inscricao',
+          subscribedAt: new Date().toISOString().split('T')[0],
+          status: 'active',
+          consent: true
+        };
+        applySubscribersTransition(
+          (prev) => [newSub, ...prev.filter((s) => s.id !== subId)],
+          { persist: true }
+        );
+      }
+
       return {
         status: saveRes.alreadyExisted ? 'already_exists' : 'persisted',
         registration: confirmedReg
@@ -903,6 +1032,13 @@ export default function App() {
       saveToStorage(STORAGE_KEYS.CERT_DOWNLOADS, updated);
       return updated;
     });
+    const deterministicSubId = buildSubscriberIdFromRegistrationId(id);
+    confirmedTombstonesRef.current?.delete(deterministicSubId);
+    removeConfirmedSubscriberTombstoneHint(deterministicSubId);
+    applySubscribersTransition(
+      (prev) => prev.filter((s) => s.id !== deterministicSubId),
+      { persist: true }
+    );
     const storedLast = loadStoredData().lastRegistered;
     if (lastRegistered?.id === id || storedLast?.id === id) {
       setLastRegistered(null);
@@ -923,62 +1059,156 @@ export default function App() {
     }
   };
 
-  // Handler for Batch Import (Google Forms & Excel)
-  const handleBatchImportRegistrations = (newBatch: Registration[]) => {
-    let persistedList: Registration[] = [];
-    setRegistrations((prev) => {
-      const existingCpfMap = new Set(
-        prev.map((r) => (r.cpf || '').replace(/\D/g, '')).filter(Boolean)
-      );
-      const existingEmailMap = new Set(
-        prev.map((r) => (r.email || '').toLowerCase().trim()).filter(Boolean)
-      );
+  // Handler for Batch Import (Google Forms & Excel) com transação administrativa da tríade e reporte individual
+  const handleBatchImportRegistrations = async (
+    newBatch: Registration[]
+  ): Promise<AdminBatchImportResult> => {
+    const baselineRegs = registrations.length > 0 ? registrations : loadStoredData().registrations;
+    const existingCpfMap = new Set(
+      baselineRegs.map((r) => (r.cpf || '').replace(/\D/g, '')).filter(Boolean)
+    );
+    const existingEmailMap = new Set(
+      baselineRegs.map((r) => (r.email || '').toLowerCase().trim()).filter(Boolean)
+    );
 
-      const trulyNew: Registration[] = [];
-      const updatedExisting = [...prev];
+    const trulyNew: Registration[] = [];
+    const notesUpdatedExisting: Registration[] = [];
+    const updatedNotesById = new Map<string, Registration>();
 
-      for (const item of newBatch) {
-        const cleanCpf = (item.cpf || '').replace(/\D/g, '');
-        const cleanEmail = (item.email || '').toLowerCase().trim();
+    for (const item of newBatch) {
+      const cleanCpf = (item.cpf || '').replace(/\D/g, '');
+      const cleanEmail = (item.email || '').toLowerCase().trim();
 
-        const isDuplicate =
-          (cleanCpf && existingCpfMap.has(cleanCpf)) ||
-          (cleanEmail && existingEmailMap.has(cleanEmail));
+      const isDuplicate =
+        (cleanCpf && existingCpfMap.has(cleanCpf)) ||
+        (cleanEmail && existingEmailMap.has(cleanEmail));
 
-        if (!isDuplicate) {
-          const normalizedItem: Registration = {
-            ...item,
-            certificateIssued: item.status === 'presente' ? Boolean(item.certificateIssued) : false
+      if (!isDuplicate) {
+        const normalizedItem: Registration = {
+          ...item,
+          certificateIssued: item.status === 'presente' ? Boolean(item.certificateIssued) : false
+        };
+        trulyNew.push(normalizedItem);
+        if (cleanCpf) existingCpfMap.add(cleanCpf);
+        if (cleanEmail) existingEmailMap.add(cleanEmail);
+      } else {
+        const existingMatch = baselineRegs.find(
+          (e) =>
+            (cleanCpf && (e.cpf || '').replace(/\D/g, '') === cleanCpf) ||
+            (cleanEmail && (e.email || '').toLowerCase().trim() === cleanEmail)
+        );
+        if (existingMatch && !existingMatch.notes?.includes('Google Forms')) {
+          const annotated: Registration = {
+            ...existingMatch,
+            notes:
+              (existingMatch.notes ? existingMatch.notes + ' | ' : '') +
+              'Registrado também via Google Forms'
           };
-          trulyNew.push(normalizedItem);
-          if (cleanCpf) existingCpfMap.add(cleanCpf);
-          if (cleanEmail) existingEmailMap.add(cleanEmail);
-        } else {
-          // If already exists, annotate note without duplicating record
-          const idx = updatedExisting.findIndex(
-            (e) =>
-              (cleanCpf && (e.cpf || '').replace(/\D/g, '') === cleanCpf) ||
-              (cleanEmail && (e.email || '').toLowerCase().trim() === cleanEmail)
+          notesUpdatedExisting.push(annotated);
+          updatedNotesById.set(annotated.id, annotated);
+        }
+      }
+    }
+
+    if (notesUpdatedExisting.length > 0) {
+      setRegistrations((prev) => {
+        const merged = prev.map((r) => updatedNotesById.get(r.id) || r);
+        saveToStorage(STORAGE_KEYS.REGISTRATIONS, merged);
+        return merged;
+      });
+      persistMultipleRegistrationsInDb(notesUpdatedExisting).catch((err) => {
+        console.warn('Aviso ao atualizar observações de inscritos existentes:', err);
+      });
+    }
+
+    if (trulyNew.length === 0) {
+      return {
+        totalAttempted: 0,
+        confirmedCreated: [],
+        confirmedExisting: [],
+        failed: [],
+        itemResults: []
+      };
+    }
+
+    try {
+      const importResult = await persistAdminImportedRegistrationsWithTriadCheckInDb(trulyNew);
+      const confirmedRegs = [...importResult.confirmedCreated, ...importResult.confirmedExisting];
+
+      if (confirmedRegs.length > 0) {
+        setRegistrations((prev) => {
+          const seenIds = new Set(prev.map((r) => r.id));
+          const toAppend = confirmedRegs.filter((r) => !seenIds.has(r.id));
+          const merged = [...prev, ...toAppend];
+          saveToStorage(STORAGE_KEYS.REGISTRATIONS, merged);
+          return merged;
+        });
+
+        const newSubs = importResult.confirmedCreated
+          .filter((reg) => Boolean(reg.acceptEmailNews || reg.acceptWhatsappNews))
+          .map((reg): NewsletterSubscriber => ({
+            id: buildSubscriberIdFromRegistrationId(reg.id),
+            email: (reg.email || '').trim().toLowerCase(),
+            name: reg.fullName,
+            phone: reg.phone,
+            city: reg.city,
+            role: reg.professionalRole,
+            institution: reg.institution,
+            receiveEmail: Boolean(reg.acceptEmailNews),
+            receiveWhatsapp: Boolean(reg.acceptWhatsappNews),
+            origin: 'inscricao',
+            subscribedAt: new Date().toISOString().split('T')[0],
+            status: 'active',
+            consent: true
+          }));
+
+        if (newSubs.length > 0) {
+          const newSubIds = new Set(newSubs.map((s) => s.id));
+          applySubscribersTransition(
+            (prev) => [...newSubs, ...prev.filter((s) => !newSubIds.has(s.id))],
+            { persist: true }
           );
-          if (idx !== -1 && !updatedExisting[idx].notes?.includes('Google Forms')) {
-            updatedExisting[idx] = {
-              ...updatedExisting[idx],
-              notes: (updatedExisting[idx].notes ? updatedExisting[idx].notes + ' | ' : '') + 'Registrado também via Google Forms'
-            };
-          }
         }
       }
 
-      const merged = [...updatedExisting, ...trulyNew];
-      persistedList = trulyNew;
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, merged);
-      return merged;
-    });
+      if (importResult.failed.length > 0) {
+        const failedSummary = importResult.failed
+          .map((f) => `${f.fullName} [${f.code}]: ${f.error}`)
+          .join(' | ');
+        setFirebaseSyncError(
+          `Importação parcial: ${confirmedRegs.length} confirmada(s) no Firestore; ${importResult.failed.length} rejeitada(s) sem gravação: ${failedSummary}`
+        );
+      } else {
+        setFirebaseSyncError(null);
+      }
 
-    if (persistedList.length > 0) {
-      persistMultipleRegistrationsInDb(persistedList).catch((err) => {
-        console.warn('Aviso ao importar lote para Firestore:', err);
-      });
+      return importResult;
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      const failedResult: AdminBatchImportResult = {
+        totalAttempted: trulyNew.length,
+        confirmedCreated: [],
+        confirmedExisting: [],
+        failed: trulyNew.map((r) => ({
+          id: r.id,
+          code: r.code,
+          fullName: r.fullName,
+          email: r.email,
+          error: reason
+        })),
+        itemResults: trulyNew.map((r) => ({
+          id: r.id,
+          code: r.code,
+          fullName: r.fullName,
+          email: r.email,
+          outcome: 'failed',
+          error: reason
+        }))
+      };
+      setFirebaseSyncError(
+        `Falha na importação administrativa (${trulyNew.length} item(ns) não gravados no Firestore): ${reason}`
+      );
+      return failedResult;
     }
   };
 
@@ -1092,32 +1322,82 @@ export default function App() {
   };
 
   const handleSubscribeNewsletter = async (subscriber: NewsletterSubscriber) => {
-    const updated = [subscriber, ...subscribers.filter((s) => s.email !== subscriber.email)];
-    setSubscribers(updated);
-    saveToStorage(STORAGE_KEYS.SUBSCRIBERS, updated);
-
-    try {
-      const res = await subscribeNewsletterInDb(subscriber);
-      setSubscribers((prev) =>
-        prev.map((s) => (s.email === subscriber.email ? res.subscriber : s))
-      );
-    } catch (err) {
-      console.warn('Inscrição na newsletter mantida localmente:', err);
-    }
+    return enqueueSubscriberOperation(async () => {
+      try {
+        const res = await subscribeNewsletterInDb(subscriber);
+        applySubscribersTransition(
+          (prev) => [
+            res.subscriber,
+            ...prev.filter((s) => s.id !== res.subscriber.id && s.email !== res.subscriber.email)
+          ],
+          { persist: true }
+        );
+      } catch (err) {
+        console.warn('Falha ao gravar inscrição na newsletter no Firestore:', err);
+        throw err;
+      }
+    });
   };
 
-  const handleDeleteSubscriber = async (id: string) => {
-    setSubscribers((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      saveToStorage(STORAGE_KEYS.SUBSCRIBERS, updated);
-      return updated;
-    });
+  const handleDeleteSubscriber = async (id: string): Promise<void> => {
+    return enqueueSubscriberOperation(async () => {
+      // 1. Confirmação remota prévia obrigatória via transação atômica no Firestore.
+      // Em caso de documento inexistente, sessão não-admin ou erro de rede/lote, lança exceção
+      // sem modificar React, subscribersRef, confirmedTombstonesRef nem localStorage.
+      const remoteResult = await deleteSubscriberInDb(id);
+      const confirmedIso =
+        validateStrictIsoTimestamp(remoteResult.tombstoneConfirmedAt) ||
+        remoteResult.tombstoneConfirmedAt;
+      const confirmedMs = Date.parse(confirmedIso) || Date.now();
 
-    try {
-      await deleteSubscriberInDb(id);
-    } catch (err) {
-      console.warn('Erro ao remover assinante no Firestore:', err);
-    }
+      let confirmedTarget: NewsletterSubscriber | null = null;
+      const { storageResult } = applySubscribersTransition(
+        (currentInMemory) =>
+          currentInMemory.map((s) => {
+            if (s.id === id) {
+              const tombstoned: NewsletterSubscriber = {
+                ...s,
+                status: 'unsubscribed' as const,
+                receiveEmail: false,
+                receiveWhatsapp: false,
+                unsubscribedAt: confirmedIso
+              };
+              confirmedTarget = tombstoned;
+              return tombstoned;
+            }
+            return s;
+          }),
+        { persist: true }
+      );
+
+      const fallbackSub: NewsletterSubscriber = confirmedTarget || {
+        id,
+        email: '',
+        subscribedAt: '',
+        receiveEmail: false,
+        receiveWhatsapp: false,
+        status: 'unsubscribed',
+        unsubscribedAt: confirmedIso
+      };
+
+      // Registra confirmação na memória RAM desta sessão como 'server_verified'
+      confirmedTombstonesRef.current?.set(id, {
+        subscriber: fallbackSub,
+        confirmedAtIso: confirmedIso,
+        confirmedAtMs: confirmedMs,
+        trustLevel: 'server_verified',
+        seenOnAuthoritativeServer: false
+      });
+
+      // Persiste hint local após confirmação remota (tratado apenas como 'local_persisted_hint' em recargas)
+      addConfirmedSubscriberTombstoneHint(fallbackSub, confirmedIso);
+
+      if (storageResult && !storageResult.persisted) {
+        console.warn(
+          `[Storage] Tombstone ${id} confirmado no Firestore, mas persistência em localStorage falhou: ${storageResult.error || 'indisponível'}.`
+        );
+      }
+    });
   };
 
   const handleAddMaterial = async (

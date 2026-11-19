@@ -631,6 +631,45 @@ export const INITIAL_MATERIALS: DownloadMaterial[] = [
     fileUrl: '/materiais/guia_acolhimento_crise_saude_mental_raps_ms_2026.pdf'
   },
   {
+    id: 'mat-re-existir-diferenca-2020',
+    title: 'Livro Re-existir na Diferença: Coletânea (Série Micropolítica do Trabalho e o Cuidado em Saúde)',
+    category: 'Apostila',
+    author: 'Emerson Elias Merhy & Ricardo Luiz Narciso Moebus (Prefácio: Ailton Krenak) · Editora Rede Unida',
+    format: 'PDF',
+    size: '1.7 MB',
+    fileName: 'livro_re_existir_na_diferenca_merhy_moebus_2020.pdf',
+    description: 'Coletânea da Série Micropolítica do Trabalho e o Cuidado em Saúde (1ª edição, Porto Alegre: Editora Rede Unida, 2020), escrita por Emerson Elias Merhy e Ricardo Luiz Narciso Moebus, com prefácio de Ailton Krenak. Obra de referência bibliográfica vinculada ao palestrante do Simpósio Dr. Ricardo Moebus. ISBN 978-65-87180-13-7 · DOI 1018310/9786587180137.',
+    pages: 193,
+    downloadsCount: 0,
+    fileUrl: '/materiais/livro_re_existir_na_diferenca_merhy_moebus_2020.pdf'
+  },
+  {
+    id: 'mat-tragico-producao-cuidado-2014',
+    title: 'Livro O Trágico na Produção do Cuidado: Uma Estética da Saúde Mental',
+    category: 'Apostila',
+    author: 'Ricardo Luiz Narciso Moebus (Prefácio: Emerson Elias Merhy) · Editora Rede UNIDA',
+    format: 'PDF',
+    size: '1.2 MB',
+    fileName: 'livro_o_tragico_na_producao_do_cuidado_moebus_2014.pdf',
+    description: 'Livro da Coleção Micropolítica do Trabalho e o Cuidado em Saúde (1ª edição revisada, Porto Alegre: Editora Rede UNIDA, 2014), escrito pelo Dr. Ricardo Luiz Narciso Moebus com prefácio de Emerson Elias Merhy. Obra de referência bibliográfica sobre a produção do cuidado e uma estética da saúde mental.',
+    pages: 255,
+    downloadsCount: 0,
+    fileUrl: '/materiais/livro_o_tragico_na_producao_do_cuidado_moebus_2014.pdf'
+  },
+  {
+    id: 'mat-psicologia-decolonial-2024',
+    title: 'Artigo: Psicologia decolonial, contracolonial, por vir?',
+    category: 'Apostila',
+    author: 'Ricardo Luiz Narciso Moebus, Alexandre Franca Barreto & Maristela de Melo Moraes · Estudos de Psicologia (Campinas)',
+    format: 'PDF',
+    size: '132 KB',
+    fileName: 'artigo_psicologia_decolonial_contracolonial_moebus_2024.pdf',
+    description: 'Artigo científico publicado na revista Estudos de Psicologia (Campinas, 2024, vol. 41, e230087, acesso aberto CC-BY), integrante do Dossiê "Perspectivas em Psicologia Indígena no Brasil: desafios éticos e epistemológicos". Autoria de Ricardo Luiz Narciso Moebus, Alexandre Franca Barreto e Maristela de Melo Moraes. DOI: https://doi.org/10.1590/1982-0275202441e230087pt.',
+    pages: 15,
+    downloadsCount: 0,
+    fileUrl: '/materiais/artigo_psicologia_decolonial_contracolonial_moebus_2024.pdf'
+  },
+  {
     id: 'mat-1',
     title: 'Guia Estratégico para o Cuidado de Pessoas com Necessidades Relacionadas ao Consumo de Álcool e Outras Drogas: Guia AD',
     category: 'Cartilha',
@@ -887,53 +926,31 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     photoPosition: 'center 18%',
     bio: 'Médico psiquiatra, professor e pesquisador brasileiro.\n\nFormação Acadêmica:\n• Medicina: Universidade Federal de Minas Gerais (UFMG), formado em 1994.\n• Especialização: Psiquiatria e Psiquiatria da Infância e Adolescência pela Fundação Hospitalar do Estado de Minas Gerais (FHEMIG).\n• Mestrado e Doutorado: Medicina pela Universidade Federal do Rio de Janeiro (UFRJ).\n• Pós-doutorado: Racionalidades da Saúde pela Universidade Federal Fluminense (UFF).\n\nAtuação Profissional:\n• Docência: Professor associado do Departamento de Medicina de Família, Saúde Mental e Coletiva da Escola de Medicina da Universidade Federal de Ouro Preto (UFOP).\n• Saúde Pública: Atua como psiquiatra no CAPS Infância e Juventude em Ouro Preto, além de desenvolver pesquisas em áreas como saúde coletiva, dependências químicas.',
     socials: {}
+  },
+  {
+    id: 'spk-gisella-consensa',
+    name: 'Gisella Loiola Consensa',
+    role: 'Secretária Municipal de Saúde',
+    institution: 'Secretaria Municipal de Saúde de Carangola',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Abertura Solene Oficial',
+    sessionTime: '08:30 – 09:15',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1bfOsNTplIqDFlTgNeulg_0Bnx4fzZI7Z',
+    photoPosition: 'center 18%',
+    bio: 'Secretária Municipal de Saúde de Carangola, liderando a cooperação interfederativa entre os municípios da microrregião para consolidação dos serviços de saúde pública e da RAPS no SUS.',
+    socials: {
+      instagram: '@saude.carangola',
+      instagramUrl: 'https://www.instagram.com/saude.carangola',
+      linkedin: 'Secretaria Municipal de Saúde · Carangola',
+      linkedinUrl: 'https://www.linkedin.com/'
+    }
   }
 ];
 
 // Alertas vazios por padrão — o gestor cria os alertas no Painel do Gestor
 export const INITIAL_NOTIFICATIONS: PushNotificationItem[] = [];
 
-export const INITIAL_SUBSCRIBERS: NewsletterSubscriber[] = [
-  {
-    id: 'sub-1',
-    email: 'amandasabreu89@gmail.com',
-    name: 'Amanda Silveira Abreu',
-    role: 'Psicóloga',
-    city: 'Carangola',
-    receiveWhatsapp: true,
-    phone: '(32) 99841-2233',
-    subscribedAt: '2026-11-01'
-  },
-  {
-    id: 'sub-2',
-    email: 'lucas.resende@esperafeliz.mg.gov.br',
-    name: 'Lucas Resende Faria',
-    role: 'Enfermeiro',
-    city: 'Espera Feliz',
-    receiveWhatsapp: true,
-    phone: '(32) 98877-4411',
-    subscribedAt: '2026-11-01'
-  },
-  {
-    id: 'sub-3',
-    email: 'marina.duarte@tombos.mg.gov.br',
-    name: 'Marina Duarte Pimentel',
-    role: 'Assistente Social',
-    city: 'Tombos',
-    receiveWhatsapp: false,
-    subscribedAt: '2026-11-02'
-  },
-  {
-    id: 'sub-4',
-    email: 'saude.farialemos@farialemos.mg.gov.br',
-    name: 'Secretaria de Saúde Faria Lemos',
-    role: 'Gestor',
-    city: 'Faria Lemos',
-    receiveWhatsapp: true,
-    phone: '(32) 98833-2211',
-    subscribedAt: '2026-11-03'
-  }
-];
+export const INITIAL_SUBSCRIBERS: NewsletterSubscriber[] = [];
 
 export const REGIONAL_CITIES = [
   'Carangola',

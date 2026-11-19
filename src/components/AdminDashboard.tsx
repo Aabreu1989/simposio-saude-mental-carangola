@@ -80,7 +80,8 @@ import {
   sendBrowserNotification,
   triggerMaterialDownload,
   normalizeGoogleDriveImageUrl,
-  isProhibitedPrivateMaterial
+  isProhibitedPrivateMaterial,
+  classifySubscribersForDashboard
 } from '../utils/helpers.ts';
 import {
   sendRegistrationConfirmationEmail,
@@ -88,9 +89,10 @@ import {
   sendBroadcastEmailToAttendees
 } from '../services/confirmationEmailService.ts';
 import {
-  persistRegistrationAndPermissionInDb,
+  saveAdminRegistrationWithTriadCheckInDb,
   isVerifiedAdminUser,
-  firestoreAuth
+  firestoreAuth,
+  type AdminBatchImportResult
 } from '../services/firebaseDb.ts';
 import {
   formatNotificationWhatsAppMessage,
@@ -121,12 +123,12 @@ interface AdminDashboardProps {
   onToggleCheckIn: (id: string) => void;
   onUpdateRegistrationStatus?: (id: string, newStatus: 'confirmada' | 'presente' | 'cancelada') => void;
   onDeleteRegistration?: (id: string) => void;
-  onBatchImportRegistrations?: (imported: Registration[]) => void;
+  onBatchImportRegistrations?: (imported: Registration[]) => Promise<AdminBatchImportResult | void> | void;
   notifications: PushNotificationItem[];
   onSendNotification: (notif: PushNotificationItem) => void;
   onDeleteNotification?: (id: string) => void;
   subscribers: NewsletterSubscriber[];
-  onDeleteSubscriber?: (id: string) => void;
+  onDeleteSubscriber?: (id: string) => Promise<void> | void;
   materials: DownloadMaterial[];
   onAddMaterial?: (
     mat: DownloadMaterial,
@@ -189,6 +191,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'analytics' | 'attendees' | 'certificates' | 'materials' | 'posts' | 'notifications' | 'subscribers' | 'customizer' | 'speakers'>('analytics');
   const [customizerSubView, setCustomizerSubView] = useState<'event' | 'badge'>('event');
   const [isGoogleFormsModalOpen, setIsGoogleFormsModalOpen] = useState(false);
+  const [batchImportReport, setBatchImportReport] = useState<AdminBatchImportResult | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<'all' | 'portal' | 'google_forms'>('all');
   const [postSearch, setPostSearch] = useState('');
   const [postDeleteNotice, setPostDeleteNotice] = useState<string | null>(null);
@@ -437,9 +440,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Search & Filter for Subscribers (WhatsApp & Newsletter)
   const [subscriberSearch, setSubscriberSearch] = useState('');
-  const [subscriberFilter, setSubscriberFilter] = useState<'all' | 'whatsapp' | 'email'>('all');
+  const [subscriberFilter, setSubscriberFilter] = useState<'all' | 'whatsapp' | 'email' | 'cancelled'>('all');
   const [copiedWhatsappList, setCopiedWhatsappList] = useState(false);
   const [copiedEmailList, setCopiedEmailList] = useState(false);
+  const [deletingSubscriberId, setDeletingSubscriberId] = useState<string | null>(null);
+  const [subscriberActionFeedback, setSubscriberActionFeedback] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   // Badge print modal
   const [selectedBadgeAttendee, setSelectedBadgeAttendee] = useState<Registration | null>(null);
@@ -484,7 +492,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const checkedInCount = registrations.filter((r) => r.status === 'presente').length;
   const checkInRate = totalRegistrations > 0 ? Math.round((checkedInCount / totalRegistrations) * 100) : 0;
   const totalMaterialsDownloads = materials.reduce((acc, m) => acc + m.downloadsCount, 0);
-  const totalSubscribers = subscribers.length;
+  const subscriberBuckets = classifySubscribersForDashboard(subscribers);
+  const activeSubscribersList = subscriberBuckets.activeSubscribers;
+  const totalSubscribers = activeSubscribersList.length;
 
   // Base microrregion cities (first 9 without 'Outros')
   const microrregionCities = REGIONAL_CITIES.filter((c) => c !== 'Outros');
@@ -1472,12 +1482,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   const handleExportSubscribers = () => {
-    const data = subscribers.map((s) => ({
+    const data = activeSubscribersList.map((s) => ({
       Nome: s.name || '',
       Email: s.email,
       Telefone_WhatsApp: s.phone || '',
       Municipio: s.city || '',
-      Recebe_WhatsApp: s.receiveWhatsapp ? 'Sim' : 'Não',
+      Recebe_Email: s.receiveEmail === true ? 'Sim' : 'Não',
+      Recebe_WhatsApp: s.receiveWhatsapp === true ? 'Sim' : 'Não',
       Data_Inscricao: s.subscribedAt
     }));
     exportToExcel(`newsletter_whatsapp_simposio_carangola_${new Date().toISOString().split('T')[0]}`, 'Assinantes', data);
@@ -1564,15 +1575,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       let res = await sendRegistrationConfirmationEmail(reg, INITIAL_SCHEDULE, config, { resend: true });
 
       // Se a inscrição não for encontrada no Firestore institucional (ex: dados legados em cache ou importados),
-      // sincroniza no Firestore caso o gestor esteja autenticado e reexecuta o disparo
+      // sincroniza no Firestore com verificação transacional da tríade caso o gestor esteja autenticado e reexecuta o disparo
       if (!res.actuallyDelivered && res.errorCode === 'REGISTRATION_NOT_FOUND') {
+        let triadSyncError: string | null = null;
         try {
           if (isVerifiedAdminUser(firestoreAuth.currentUser)) {
-            await persistRegistrationAndPermissionInDb(reg);
+            await saveAdminRegistrationWithTriadCheckInDb(reg);
             res = await sendRegistrationConfirmationEmail(reg, INITIAL_SCHEDULE, config, { resend: true });
           }
-        } catch {
-          // prossegue com o resultado existente se a sincronização falhar
+        } catch (syncErr: unknown) {
+          triadSyncError = syncErr instanceof Error ? syncErr.message : String(syncErr);
+        }
+        if (triadSyncError) {
+          setEmailResendToast({
+            success: false,
+            message: `Inscrição ${reg.code} não sincronizada no Firestore: bloqueio na verificação transacional da tríade (${triadSyncError}).`
+          });
+          return;
         }
       }
 
@@ -1998,12 +2017,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
                   activeTab === 'subscribers' ? 'bg-white text-[#ea7a38]' : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
                 }`}>
-                  {subscribers.length}
+                  {totalSubscribers}
                 </span>
               </div>
               <div>
                 <div className="text-xs sm:text-xs md:text-sm font-bold leading-tight">
-                  Assinantes ({subscribers.length})
+                  Assinantes ({totalSubscribers})
                 </div>
                 <div className={`text-[10px] sm:text-[11px] leading-tight mt-0.5 ${
                   activeTab === 'subscribers' ? 'text-white/85' : 'text-stone-400'
@@ -2095,6 +2114,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     : firebaseSyncState.error ||
                       'Conecte com a conta autorizada (farmaciademinas.marketing@gmail.com) para sincronizar diretamente com o banco de dados Firebase.'}
                 </div>
+                {firebaseSyncState.isConnected && firebaseSyncState.isVerifiedAdmin && firebaseSyncState.error && (
+                  <div className="mt-1.5 px-2.5 py-1.5 rounded-lg bg-rose-100 border border-rose-300 text-rose-900 text-[11px] font-semibold">
+                    {firebaseSyncState.error}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -3254,6 +3278,46 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </div>
+
+            {batchImportReport && batchImportReport.totalAttempted > 0 && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+                  batchImportReport.failed.length > 0
+                    ? 'bg-amber-50 border-amber-300 text-amber-950'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-bold">
+                    Resultado da importação transacional ({batchImportReport.totalAttempted} tentada(s)):{' '}
+                    {batchImportReport.confirmedCreated.length} criada(s) no Firestore ·{' '}
+                    {batchImportReport.confirmedExisting.length} já existente(s) íntegra(s) ·{' '}
+                    {batchImportReport.failed.length} rejeitada(s) sem gravação
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBatchImportReport(null)}
+                    className="px-2 py-0.5 text-[11px] font-semibold rounded bg-white/80 hover:bg-white border border-current/20 cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                {batchImportReport.failed.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-semibold">
+                      As inscrições confirmadas permaneceram gravadas no Firestore; os itens abaixo falharam individualmente e não foram gravados:
+                    </div>
+                    <ul className="list-disc pl-4 space-y-0.5 text-[11px] font-mono">
+                      {batchImportReport.failed.map((item) => (
+                        <li key={`${item.id}-${item.code}`}>
+                          {item.fullName} [{item.code}] ({item.email || 'sem e-mail'}): {item.error}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Filters Row */}
             <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 p-3.5 rounded-xl border transition-colors ${theme.subCard}`}>
@@ -5220,11 +5284,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
         {/* TAB 4: ASSINANTES DA NEWSLETTER & WHATSAPP (Alimentado pelo Formulário de Inscrição) */}
         {activeTab === 'subscribers' && (() => {
-          const whatsappSubscribers = subscribers.filter((s) => s.receiveWhatsapp && !!s.phone);
-          const emailSubscribers = subscribers.filter((s) => s.receiveEmail !== false);
-          const registrationOriginSubscribers = subscribers.filter((s) => s.origin === 'inscricao' || !!s.role);
+          const {
+            activeSubscribers,
+            cancelledSubscribers,
+            whatsappSubscribers,
+            emailSubscribers,
+            registrationOriginSubscribers
+          } = subscriberBuckets;
 
-          const filteredSubList = subscribers.filter((s) => {
+          const baseListForFilter =
+            subscriberFilter === 'cancelled'
+              ? cancelledSubscribers
+              : subscriberFilter === 'whatsapp'
+              ? whatsappSubscribers
+              : subscriberFilter === 'email'
+              ? emailSubscribers
+              : activeSubscribers;
+
+          const filteredSubList = baseListForFilter.filter((s) => {
             const matchesSearch =
               !subscriberSearch.trim() ||
               (s.name && s.name.toLowerCase().includes(subscriberSearch.toLowerCase())) ||
@@ -5232,13 +5309,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               (s.phone && s.phone.includes(subscriberSearch)) ||
               (s.city && s.city.toLowerCase().includes(subscriberSearch.toLowerCase()));
 
-            const matchesType =
-              subscriberFilter === 'all' ||
-              (subscriberFilter === 'whatsapp' && s.receiveWhatsapp && !!s.phone) ||
-              (subscriberFilter === 'email' && s.receiveEmail !== false);
-
-            return matchesSearch && matchesType;
+            return matchesSearch;
           });
+
+          const handleDeleteSubscriberClick = async (subId: string) => {
+            if (!onDeleteSubscriber || deletingSubscriberId) return;
+            setDeletingSubscriberId(subId);
+            setSubscriberActionFeedback(null);
+            try {
+              await onDeleteSubscriber(subId);
+              setSubscriberActionFeedback({
+                success: true,
+                message: 'Assinante cancelado (tombstone) com confirmação remota no Firestore.'
+              });
+              setTimeout(() => setSubscriberActionFeedback(null), 4000);
+            } catch (err: unknown) {
+              const detail = err instanceof Error ? err.message : 'Falha ao confirmar remoção no Firestore.';
+              setSubscriberActionFeedback({
+                success: false,
+                message: `Não foi possível cancelar o assinante remotamente: ${detail}`
+              });
+            } finally {
+              setDeletingSubscriberId(null);
+            }
+          };
 
           const handleCopyWhatsappBroadcast = () => {
             const phoneList = whatsappSubscribers.map((s) => s.phone).filter(Boolean).join('; ');
@@ -5248,7 +5342,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           };
 
           const handleCopyEmailBroadcast = () => {
-            const emailList = subscribers.map((s) => s.email).filter(Boolean).join(', ');
+            const emailList = emailSubscribers.map((s) => s.email).filter(Boolean).join(', ');
             navigator.clipboard.writeText(emailList);
             setCopiedEmailList(true);
             setTimeout(() => setCopiedEmailList(false), 3000);
@@ -5330,12 +5424,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               </div>
 
+              {subscriberActionFeedback && (
+                <div
+                  className={`p-3 rounded-xl border text-xs font-semibold ${
+                    subscriberActionFeedback.success
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}
+                >
+                  {subscriberActionFeedback.message}
+                </div>
+              )}
+
               {/* KPI Strip */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className={`p-4 rounded-xl border ${theme.subCard}`}>
                   <div className="text-[11px] font-bold text-stone-500 uppercase tracking-wider font-mono">Total de Assinantes</div>
-                  <div className={`text-2xl font-black mt-1 font-mono ${theme.textHeading}`}>{subscribers.length}</div>
-                  <div className="text-[11px] text-stone-400 mt-0.5">Contatos cadastrados</div>
+                  <div className={`text-2xl font-black mt-1 font-mono ${theme.textHeading}`}>{activeSubscribers.length}</div>
+                  <div className="text-[11px] text-stone-400 mt-0.5">Contatos ativos</div>
                 </div>
 
                 <div className={`p-4 rounded-xl border ${theme.subCard}`}>
@@ -5382,12 +5488,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className="sm:col-span-4">
                   <select
                     value={subscriberFilter}
-                    onChange={(e) => setSubscriberFilter(e.target.value as any)}
+                    onChange={(e) => setSubscriberFilter(e.target.value as 'all' | 'whatsapp' | 'email' | 'cancelled')}
                     className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
                   >
-                    <option value="all">Todos os Assinantes ({subscribers.length})</option>
+                    <option value="all">Assinantes Ativos ({activeSubscribers.length})</option>
                     <option value="whatsapp">Apenas WhatsApp Ativo ({whatsappSubscribers.length})</option>
                     <option value="email">Apenas E-mail / Boletim ({emailSubscribers.length})</option>
+                    <option value="cancelled">Cancelados / Tombstones ({cancelledSubscribers.length})</option>
                   </select>
                 </div>
               </div>
@@ -5401,6 +5508,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ) : (
                   filteredSubList.map((s) => {
                     const cleanPhone = s.phone ? s.phone.replace(/\D/g, '') : '';
+                    const isTombstone = s.status === 'unsubscribed';
+                    const isDeleting = deletingSubscriberId === s.id;
                     return (
                       <div key={s.id} className="p-3.5 rounded-xl border border-stone-200 bg-stone-50 space-y-2.5">
                         <div className="flex items-start justify-between gap-2">
@@ -5409,9 +5518,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {s.role && <div className="text-[11px] text-stone-500">{s.role}</div>}
                           </div>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            s.receiveWhatsapp ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-700'
+                            isTombstone
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                              : s.receiveWhatsapp === true
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : s.receiveEmail === true
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-stone-200 text-stone-700'
                           }`}>
-                            {s.receiveWhatsapp ? 'WhatsApp Ativo' : 'Apenas E-mail'}
+                            {isTombstone
+                              ? 'Cancelado (Tombstone)'
+                              : s.receiveWhatsapp === true
+                              ? 'WhatsApp Ativo'
+                              : s.receiveEmail === true
+                              ? 'Apenas E-mail'
+                              : 'Sem Canal Ativo'}
                           </span>
                         </div>
 
@@ -5426,7 +5547,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             Cadastrado em: {s.subscribedAt}
                           </span>
                           <div className="flex items-center gap-1.5">
-                            {cleanPhone && (
+                            {!isTombstone && s.receiveWhatsapp === true && cleanPhone && (
                               <a
                                 href={`https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodeURIComponent(`Olá ${s.name || ''}! Entramos em contato da organização do 1º Simpósio de Saúde Mental da Microrregião de Carangola.`)}`}
                                 target="_blank"
@@ -5439,9 +5560,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             )}
                             <button
                               type="button"
-                              onClick={() => onDeleteSubscriber?.(s.id)}
-                              className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                              title="Excluir assinante imediatamente"
+                              disabled={isTombstone || isDeleting}
+                              onClick={() => handleDeleteSubscriberClick(s.id)}
+                              className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                              title={isTombstone ? 'Assinante já cancelado (tombstone)' : 'Excluir assinante imediatamente'}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -5477,6 +5599,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ) : (
                       filteredSubList.map((s) => {
                         const cleanPhone = s.phone ? s.phone.replace(/\D/g, '') : '';
+                        const isTombstone = s.status === 'unsubscribed';
+                        const isDeleting = deletingSubscriberId === s.id;
                         return (
                           <tr key={s.id} className="hover:bg-stone-50 transition-colors">
                             <td className="py-3 px-4">
@@ -5488,16 +5612,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <td className="py-3 px-4 text-stone-700">{s.city || 'Carangola'}</td>
                             <td className="py-3 px-4">
                               <div className="flex items-center gap-1.5">
-                                {s.receiveWhatsapp && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                    <MessageCircle className="w-2.5 h-2.5" />
-                                    <span>WhatsApp</span>
+                                {isTombstone ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                                    Cancelado (Tombstone)
                                   </span>
+                                ) : (
+                                  <>
+                                    {s.receiveWhatsapp === true && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                        <MessageCircle className="w-2.5 h-2.5" />
+                                        <span>WhatsApp</span>
+                                      </span>
+                                    )}
+                                    {s.receiveEmail === true && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                                        <Mail className="w-2.5 h-2.5" />
+                                        <span>E-mail</span>
+                                      </span>
+                                    )}
+                                  </>
                                 )}
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                                  <Mail className="w-2.5 h-2.5" />
-                                  <span>E-mail</span>
-                                </span>
                               </div>
                             </td>
                             <td className="py-3 px-4">
@@ -5507,7 +5641,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             </td>
                             <td className="py-3 px-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
-                                {cleanPhone ? (
+                                {!isTombstone && s.receiveWhatsapp === true && cleanPhone ? (
                                   <a
                                     href={`https://api.whatsapp.com/send?phone=55${cleanPhone}&text=${encodeURIComponent(`Olá ${s.name || ''}! Entramos em contato da organização do 1º Simpósio de Saúde Mental da Microrregião de Carangola.`)}`}
                                     target="_blank"
@@ -5521,9 +5655,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 ) : null}
                                 <button
                                   type="button"
-                                  onClick={() => onDeleteSubscriber?.(s.id)}
-                                  className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                                  title="Excluir assinante imediatamente"
+                                  disabled={isTombstone || isDeleting}
+                                  onClick={() => handleDeleteSubscriberClick(s.id)}
+                                  className="p-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                                  title={isTombstone ? 'Assinante já cancelado (tombstone)' : 'Excluir assinante imediatamente'}
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -6171,7 +6306,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         config={config}
         onUpdateConfig={onUpdateConfig}
         registrations={registrations}
-        onBatchImportRegistrations={onBatchImportRegistrations || (() => {})}
+        onBatchImportRegistrations={async (imported) => {
+          if (!onBatchImportRegistrations) return;
+          const report = await onBatchImportRegistrations(imported);
+          if (report) {
+            setBatchImportReport(report);
+          }
+        }}
       />
 
       {/* Delete Attendee Confirmation Modal */}

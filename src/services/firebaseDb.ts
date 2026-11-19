@@ -3,15 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
+  initializeAuth,
+  inMemoryPersistence,
   GoogleAuthProvider,
   signInWithPopup,
   signInAnonymously,
   signOut,
   onAuthStateChanged,
-  User
+  type Auth,
+  type User
 } from 'firebase/auth';
 import {
   getFirestore,
@@ -51,16 +54,92 @@ import {
 import { SPEAKERS_PROFILES } from '../data/initialData.ts';
 import {
   generateRegistrationCode,
-  buildRegistrationId
+  buildRegistrationId,
+  sanitizeRegistrationId,
+  validateSubscriberId,
+  buildSubscriberIdFromRegistrationId,
+  validateStrictIsoTimestamp,
+  SubscribersSnapshotMeta
 } from '../utils/helpers.ts';
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().some((a) => a.name === '[DEFAULT]') ? getApp() : initializeApp(firebaseConfig);
 export const firestoreAuth = getAuth(app);
 export const ACTIVE_FIREBASE_PROJECT_ID = firebaseConfig.projectId;
 export const ACTIVE_FIRESTORE_DATABASE_ID =
   (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId || '(default)';
 export const db = getFirestore(app, ACTIVE_FIRESTORE_DATABASE_ID);
 export const storage = getStorage(app);
+
+const PUBLIC_UNAUTH_APP_NAME = 'simposio-public-unauth';
+const inMemoryVerifiedPublicAuths = new WeakSet<Auth>();
+
+/**
+ * Inicializa Auth na instância pública exclusivamente com `inMemoryPersistence`.
+ * Re-execuções com as mesmas opções (ex.: HMR) retornam a mesma instância sem erro;
+ * se o app já tiver sido inicializado com persistência diferente (ex.: via getAuth()),
+ * falha fechado lançando PUBLIC_UNAUTH_PERSISTENCE_VIOLATION sem recorrer a getAuth().
+ */
+export const initStrictInMemoryPublicAuth = (targetApp: FirebaseApp): Auth => {
+  let publicAuth: Auth;
+  try {
+    publicAuth = initializeAuth(targetApp, { persistence: inMemoryPersistence });
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    if (code === 'auth/already-initialized') {
+      throw new Error(
+        'PUBLIC_UNAUTH_PERSISTENCE_VIOLATION: Instância Auth pública já inicializada sem garantia estrita de inMemoryPersistence.'
+      );
+    }
+    throw err;
+  }
+
+  if (publicAuth.currentUser !== null) {
+    throw new Error('PUBLIC_UNAUTH_INVARIANT_VIOLATION: Instância pública não pode possuir sessão autenticada.');
+  }
+
+  inMemoryVerifiedPublicAuths.add(publicAuth);
+  return publicAuth;
+};
+
+// Inicialização estritamente idempotente (inclusive sob HMR) da instância pública não autenticada.
+// Não exporta o serviço Auth privado e garante persistência apenas em memória sem nenhum signIn.
+const getOrInitPublicUnauthInstances = () => {
+  const existingPublicApp = getApps().find((a) => a.name === PUBLIC_UNAUTH_APP_NAME);
+  if (existingPublicApp) {
+    if (
+      existingPublicApp.options.projectId !== firebaseConfig.projectId ||
+      existingPublicApp.options.appId !== firebaseConfig.appId ||
+      existingPublicApp.options.apiKey !== firebaseConfig.apiKey
+    ) {
+      throw new Error('PUBLIC_UNAUTH_APP_CONFIG_MISMATCH');
+    }
+  }
+
+  const publicApp = existingPublicApp || initializeApp(firebaseConfig, PUBLIC_UNAUTH_APP_NAME);
+  const publicAuth = initStrictInMemoryPublicAuth(publicApp);
+  const publicDb = getFirestore(publicApp, ACTIVE_FIRESTORE_DATABASE_ID);
+  return { publicApp, publicAuth, publicDb };
+};
+
+const { publicApp: publicUnauthApp, publicDb: publicUnauthDb } = getOrInitPublicUnauthInstances();
+
+export const getPublicUnauthInstanceDiagnostics = () => {
+  const { publicApp, publicAuth, publicDb } = getOrInitPublicUnauthInstances();
+  return {
+    appName: publicApp.name,
+    projectId: publicApp.options.projectId,
+    databaseId: ACTIVE_FIRESTORE_DATABASE_ID,
+    hasCurrentUser: publicAuth.currentUser !== null,
+    persistenceMode: 'inMemoryPersistence' as const,
+    inMemoryPersistenceVerified: inMemoryVerifiedPublicAuths.has(publicAuth),
+    isolatedFromDefault:
+      publicApp !== app &&
+      publicDb !== db &&
+      publicAuth !== firestoreAuth &&
+      publicUnauthApp === publicApp &&
+      publicUnauthDb === publicDb
+  };
+};
 
 export const getActiveFirebaseConfigSummary = () => ({
   projectId: ACTIVE_FIREBASE_PROJECT_ID,
@@ -170,6 +249,20 @@ export function classifyFirestoreError(error: unknown): FirestoreErrorCategory {
     msg.includes('unauthenticated')
   ) {
     return 'auth_error';
+  }
+  if (
+    code.includes('validation') ||
+    msg.includes('validation_error')
+  ) {
+    return 'validation_error';
+  }
+  if (
+    code.includes('already-exists') ||
+    msg.includes('public_duplicate_or_unverifiable_state') ||
+    msg.includes('triad_') ||
+    msg.includes('registration_identity_conflict')
+  ) {
+    return 'collision';
   }
   if (
     code.includes('invalid-argument') ||
@@ -396,7 +489,7 @@ export interface CertificatePermissionRecord {
 }
 
 const buildRegistrationDoc = (reg: Registration, nowIso: string): Record<string, unknown> => {
-  const id = sanitizeId(reg.id, 'reg');
+  const id = sanitizeRegistrationId(reg.id, 'reg');
   const code = sanitizeCode(reg.code);
   const status = reg.status === 'presente' || reg.status === 'cancelada' ? reg.status : 'confirmada';
   // Regra estrita: certificado só pode estar liberado quando credenciado ('presente')
@@ -445,7 +538,7 @@ const buildRegistrationDoc = (reg: Registration, nowIso: string): Record<string,
 };
 
 const buildPermissionDoc = (reg: Registration, nowIso: string): Record<string, unknown> => {
-  const id = sanitizeId(reg.id, 'reg');
+  const id = sanitizeRegistrationId(reg.id, 'reg');
   const code = sanitizeCode(reg.code);
   const status = reg.status === 'presente' || reg.status === 'cancelada' ? reg.status : 'confirmada';
   const certificateIssued = status === 'presente' ? Boolean(reg.certificateIssued) : false;
@@ -484,6 +577,32 @@ export const isVerifiedAdminUser = (
   if (!user.uid || typeof user.uid !== 'string') return false;
   const userEmail = (user.email || '').trim().toLowerCase();
   return AUTHORIZED_ADMIN_EMAILS.some((adm) => adm.toLowerCase() === userEmail);
+};
+
+/**
+ * Verificação assíncrona alinhada integralmente a `isAdmin()` das firestore.rules:
+ * verifica token JWT real (`email_verified`), allowlist oficial e documento `/admins/{uid}` no servidor.
+ * Usada exclusivamente no caminho administrativo sobre `[DEFAULT]` `db`.
+ */
+export const isAuthorizedServerAdminSession = async (): Promise<boolean> => {
+  await firestoreAuth.authStateReady();
+  const user = firestoreAuth.currentUser;
+  if (!user || (user as { isLocalFallback?: boolean }).isLocalFallback) {
+    return false;
+  }
+
+  const tokenResult = await user.getIdTokenResult();
+  if (tokenResult.claims.email_verified !== true) {
+    return false;
+  }
+
+  const claimEmail = String(tokenResult.claims.email || user.email || '').trim().toLowerCase();
+  if (AUTHORIZED_ADMIN_EMAILS.some((adm) => adm.toLowerCase() === claimEmail)) {
+    return true;
+  }
+
+  const adminSnap = await getDocFromServer(doc(db, 'admins', user.uid));
+  return adminSnap.exists();
 };
 
 export const signInFirestoreAdmin = async (): Promise<FirebaseAdminUser | null> => {
@@ -542,6 +661,7 @@ export const subscribeAuthState = (
 export interface PublicRegistrationSaveResult {
   success: boolean;
   alreadyExisted?: boolean;
+  subscriberTombstoned?: boolean;
   id: string;
   code: string;
   attemptsUsed: number;
@@ -553,22 +673,28 @@ export interface FirestoreRegistrationStorageAdapter {
     regId: string,
     regPayload: Record<string, unknown>,
     permCode: string,
-    permPayload: Record<string, unknown>
+    permPayload: Record<string, unknown>,
+    subPayload?: Record<string, unknown> | null
   ) => Promise<void>;
 }
 
-const defaultRegistrationAdapter: FirestoreRegistrationStorageAdapter = {
+// Adaptador público padrão vinculado ESTRITAMENTE à instância isolada não autenticada (publicUnauthDb).
+// Nunca lê firestoreAuth ([DEFAULT]), eliminando qualquer janela de corrida TOCTOU entre sessão e escrita.
+const defaultPublicRegistrationAdapter: FirestoreRegistrationStorageAdapter = {
   async getPermissionDoc(code: string) {
-    const snap = await getDocFromServer(doc(db, 'certificate_permissions', code));
+    const snap = await getDocFromServer(doc(publicUnauthDb, 'certificate_permissions', code));
     return {
       exists: snap.exists(),
       data: snap.exists() ? (snap.data() as Record<string, unknown>) : undefined
     };
   },
-  async commitRegistrationBatch(regId, regPayload, permCode, permPayload) {
-    const batch = writeBatch(db);
-    batch.set(doc(db, 'registrations', regId), regPayload);
-    batch.set(doc(db, 'certificate_permissions', permCode), permPayload);
+  async commitRegistrationBatch(regId, regPayload, permCode, permPayload, subPayload) {
+    const batch = writeBatch(publicUnauthDb);
+    batch.set(doc(publicUnauthDb, 'registrations', regId), regPayload);
+    batch.set(doc(publicUnauthDb, 'certificate_permissions', permCode), permPayload);
+    if (subPayload) {
+      batch.set(doc(publicUnauthDb, 'newsletter_subscribers', String(subPayload.id)), subPayload);
+    }
     await batch.commit();
   }
 };
@@ -581,11 +707,98 @@ export function setFirestoreRegistrationAdapterForTests(
   customRegistrationAdapterForTests = adapter;
 }
 
+export interface AdminTriadStorageAdapterForTests {
+  isAdminAuthorized: () => boolean;
+  getServerDoc: (
+    collectionName: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers',
+    docId: string
+  ) => Promise<Record<string, unknown> | null>;
+  runTriadTransaction: <T>(
+    fn: (tx: {
+      get: (
+        collectionName: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers',
+        docId: string
+      ) => Promise<Record<string, unknown> | null>;
+      set: (
+        collectionName: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers',
+        docId: string,
+        data: Record<string, unknown>
+      ) => void;
+    }) => Promise<T>
+  ) => Promise<T>;
+}
+
+let customAdminTriadAdapterForTests: AdminTriadStorageAdapterForTests | null = null;
+
+export function setAdminTriadAdapterForTests(
+  adapter: AdminTriadStorageAdapterForTests | null
+): void {
+  customAdminTriadAdapterForTests = adapter;
+}
+
+const buildSubscriberPayloadFromRegistration = (
+  currentReg: Registration,
+  candidateId: string,
+  nowIso: string
+): Record<string, unknown> | null => {
+  const wantsNews = Boolean(currentReg.acceptEmailNews || currentReg.acceptWhatsappNews);
+  if (!wantsNews) return null;
+
+  const subId = validateSubscriberId(buildSubscriberIdFromRegistrationId(candidateId));
+  const payload: Record<string, unknown> = {
+    id: subId,
+    email: String(currentReg.email).trim().toLowerCase(),
+    name: String(currentReg.fullName).trim(),
+    phone: currentReg.phone ? String(currentReg.phone).trim() : undefined,
+    city: currentReg.city ? String(currentReg.city).trim() : undefined,
+    role: currentReg.professionalRole ? String(currentReg.professionalRole).trim() : undefined,
+    institution: currentReg.institution ? String(currentReg.institution).trim() : undefined,
+    receiveEmail: Boolean(currentReg.acceptEmailNews),
+    receiveWhatsapp: Boolean(currentReg.acceptWhatsappNews),
+    origin: 'inscricao',
+    subscribedAt: nowIso.split('T')[0],
+    status: 'active',
+    consent: true,
+    updatedAt: nowIso
+  };
+  Object.keys(payload).forEach((k) => {
+    if (payload[k] === undefined) delete payload[k];
+  });
+  return payload;
+};
+
+const validatePublicBatchPayloadsLocally = (
+  regPayload: Record<string, unknown>,
+  permPayload: Record<string, unknown>,
+  subPayload: Record<string, unknown> | null
+): void => {
+  const regId = String(regPayload.id || '');
+  const code = String(regPayload.code || '');
+  if (!/^[a-zA-Z0-9_-]{1,124}$/.test(regId)) {
+    throw new Error('VALIDATION_ERROR: Identificador de inscrição inválido.');
+  }
+  if (!/^[A-Z0-9_-]{3,32}$/.test(code) || permPayload.code !== code || permPayload.registrationId !== regId) {
+    throw new Error('VALIDATION_ERROR: Código de permissão incompatível.');
+  }
+  if (String(regPayload.fullName || '').trim().length < 2 || String(regPayload.cpf || '').trim().length < 11) {
+    throw new Error('VALIDATION_ERROR: Dados obrigatórios da inscrição inválidos.');
+  }
+  if (regPayload.status !== 'confirmada' || regPayload.certificateIssued !== false) {
+    throw new Error('VALIDATION_ERROR: Inscrição pública deve iniciar como confirmada sem certificado.');
+  }
+  if (subPayload) {
+    validateSubscriberId(String(subPayload.id || ''));
+    if (String(subPayload.email || '').trim().length < 5 || subPayload.status !== 'active' || subPayload.consent !== true) {
+      throw new Error('VALIDATION_ERROR: Payload de assinante inválido.');
+    }
+  }
+};
+
 export const savePublicRegistrationToDb = async (
   reg: Registration,
   maxCollisionRetries = 3
 ): Promise<PublicRegistrationSaveResult> => {
-  const adapter = customRegistrationAdapterForTests || defaultRegistrationAdapter;
+  const adapter = customRegistrationAdapterForTests || defaultPublicRegistrationAdapter;
   const nowIso = new Date().toISOString();
   const stableId = buildRegistrationId(reg.id);
 
@@ -603,43 +816,62 @@ export const savePublicRegistrationToDb = async (
 
   for (let attempt = 0; attempt < maxCollisionRetries; attempt += 1) {
     attemptsUsed += 1;
-    let candidateCode = sanitizeCode(currentReg.code);
-    const candidateId = sanitizeId(currentReg.id, 'reg');
+    const candidateCode = sanitizeCode(currentReg.code);
+    const candidateId = sanitizeRegistrationId(currentReg.id, 'reg');
     triedCodes.add(candidateCode);
 
-    // 1. Pre-flight check on certificate_permissions/{candidateCode}
+    // 1. Pré-checagem pública em certificate_permissions/{candidateCode}
+    let existingPerm: { exists: boolean; data?: Record<string, unknown> } | null = null;
     try {
-      const existingPerm = await adapter.getPermissionDoc(candidateCode);
-      if (existingPerm.exists) {
-        const existingRegId = String(existingPerm.data?.registrationId || '');
-        if (existingRegId === candidateId) {
-          // Idempotent retry of the exact same registration operation: do not duplicate or overwrite
-          return {
-            success: true,
-            alreadyExisted: true,
-            id: candidateId,
-            code: candidateCode,
-            attemptsUsed
-          };
-        }
-        // Genuine code collision with a different registration: generate a fresh unique code
-        const newCode = generateRegistrationCode(0, Array.from(triedCodes));
-        triedCodes.add(newCode);
-        currentReg = {
-          ...currentReg,
-          code: newCode
-        };
-        candidateCode = newCode;
-      }
+      existingPerm = await adapter.getPermissionDoc(candidateCode);
     } catch {
-      // If pre-flight check fails (e.g. offline), proceed to commit which will surface the authoritative error
+      existingPerm = null;
+    }
+
+    if (existingPerm?.exists) {
+      const existingRegId = String(existingPerm.data?.registrationId || '');
+      if (existingRegId !== candidateId) {
+        // Colisão real de código com outra inscrição: preserva documento alheio e gera novo código
+        if (attempt < maxCollisionRetries - 1) {
+          const newCode = generateRegistrationCode(0, Array.from(triedCodes));
+          triedCodes.add(newCode);
+          currentReg = {
+            ...currentReg,
+            code: newCode
+          };
+          continue;
+        }
+        const colErr = Object.assign(
+          new Error(`CODE_COLLISION_EXHAUSTED: Código ${candidateCode} já ocupado por outra inscrição.`),
+          { code: 'already-exists' }
+        );
+        handleFirestoreError(colErr, OperationType.WRITE, `certificate_permissions/${candidateCode}`);
+      }
+
+      // Mesmo registrationId na permissão pública: política estritamente FAIL-CLOSED.
+      // O cliente público não lê registrations/newsletter_subscribers (LGPD), portanto NUNCA
+      // classifica como alreadyExisted: true e NUNCA cria/recupera assinante.
+      const dupErr = Object.assign(
+        new Error(
+          'PUBLIC_DUPLICATE_OR_UNVERIFIABLE_STATE: Já existe registro vinculado a este identificador/código. Consulte seu comprovante na aba Certificado ou contate a coordenação.'
+        ),
+        { code: 'already-exists' }
+      );
+      handleFirestoreError(dupErr, OperationType.WRITE, `certificate_permissions/${candidateCode}`);
     }
 
     const regPayload = buildRegistrationDoc(currentReg, nowIso);
     const permPayload = buildPermissionDoc(currentReg, nowIso);
+    const subPayload = buildSubscriberPayloadFromRegistration(currentReg, candidateId, nowIso);
 
     try {
-      await adapter.commitRegistrationBatch(candidateId, regPayload, candidateCode, permPayload);
+      validatePublicBatchPayloadsLocally(regPayload, permPayload, subPayload);
+    } catch (validationErr) {
+      handleFirestoreError(validationErr, OperationType.WRITE, `registrations/${candidateId}`);
+    }
+
+    try {
+      await adapter.commitRegistrationBatch(candidateId, regPayload, candidateCode, permPayload, subPayload);
 
       return {
         success: true,
@@ -652,33 +884,36 @@ export const savePublicRegistrationToDb = async (
       lastError = error;
       const category = classifyFirestoreError(error);
 
-      // If permission_denied occurred during commit, check if it was caused by a concurrent write on candidateCode
+      // Só trata colisão concorrente diante de PROVA DOCUMENTAL POSITIVA em certificate_permissions;
+      // permission_denied sem evidência de código conflitante propaga o erro sem mascarar autorização/ID.
       if (category === 'permission_denied') {
+        let postPerm: { exists: boolean; data?: Record<string, unknown> } | null = null;
         try {
-          const postPerm = await adapter.getPermissionDoc(candidateCode);
-          if (postPerm.exists) {
-            const existingRegId = String(postPerm.data?.registrationId || '');
-            if (existingRegId === candidateId) {
-              return {
-                success: true,
-                alreadyExisted: true,
-                id: candidateId,
-                code: candidateCode,
-                attemptsUsed
-              };
-            }
-            if (attempt < maxCollisionRetries - 1) {
-              const newCode = generateRegistrationCode(0, Array.from(triedCodes));
-              triedCodes.add(newCode);
-              currentReg = {
-                ...currentReg,
-                code: newCode
-              };
-              continue;
-            }
-          }
+          postPerm = await adapter.getPermissionDoc(candidateCode);
         } catch {
-          // ignore secondary check error
+          postPerm = null;
+        }
+
+        if (postPerm?.exists) {
+          const existingRegId = String(postPerm.data?.registrationId || '');
+          if (existingRegId !== candidateId && attempt < maxCollisionRetries - 1) {
+            const newCode = generateRegistrationCode(0, Array.from(triedCodes));
+            triedCodes.add(newCode);
+            currentReg = {
+              ...currentReg,
+              code: newCode
+            };
+            continue;
+          }
+          if (existingRegId === candidateId) {
+            const dupErr = Object.assign(
+              new Error(
+                'PUBLIC_DUPLICATE_OR_UNVERIFIABLE_STATE: Registro concorrente já existente no servidor para este código/identificador.'
+              ),
+              { code: 'already-exists' }
+            );
+            handleFirestoreError(dupErr, OperationType.WRITE, `certificate_permissions/${candidateCode}`);
+          }
         }
       }
 
@@ -689,12 +924,518 @@ export const savePublicRegistrationToDb = async (
   handleFirestoreError(lastError, OperationType.WRITE, `registrations/${currentReg.id}`);
 };
 
+interface TriadDocsValidationResult {
+  valid: boolean;
+  reason?:
+    | 'TRIAD_ORPHAN_PERMISSION_CONFLICT'
+    | 'INCOMPLETE_TRIAD_OR_ISOLATED_DOC'
+    | 'CODE_COLLISION_CONFLICT'
+    | 'REGISTRATION_IDENTITY_CONFLICT'
+    | 'ORIGINAL_CONSENT_MISMATCH'
+    | 'TRIAD_MISSING_SUBSCRIBER_CONFLICT'
+    | 'UNEXPECTED_SUBSCRIBER_WITHOUT_OPT_IN'
+    | 'SUBSCRIBER_IDENTITY_OR_CONSENT_INVALID'
+    | 'INVALID_TOMBSTONE_CHANNELS'
+    | 'ACTIVE_SUBSCRIBER_CHANNEL_MISMATCH';
+  subscriberTombstoned: boolean;
+}
+
+/**
+ * Validação única e rigorosa da tríade (`registrations` + `certificate_permissions` + `newsletter_subscribers`),
+ * compartilhada entre o caminho transacional administrativo (Grupo B) e a reconciliação da fila offline (Grupo D).
+ */
+const validateExistingRegistrationTriadDocs = (params: {
+  candidateId: string;
+  candidateCode: string;
+  subId: string;
+  expectedCpf: string;
+  expectedEmail: string;
+  expectedEmailOptIn: boolean;
+  expectedWhatsappOptIn: boolean;
+  regData: Record<string, unknown> | null;
+  permData: Record<string, unknown> | null;
+  subData: Record<string, unknown> | null;
+}): TriadDocsValidationResult => {
+  const {
+    candidateId,
+    candidateCode,
+    subId,
+    expectedCpf,
+    expectedEmail,
+    expectedEmailOptIn,
+    expectedWhatsappOptIn,
+    regData,
+    permData,
+    subData
+  } = params;
+
+  if (permData && !regData) {
+    return { valid: false, reason: 'TRIAD_ORPHAN_PERMISSION_CONFLICT', subscriberTombstoned: false };
+  }
+  if (!permData || !regData) {
+    return { valid: false, reason: 'INCOMPLETE_TRIAD_OR_ISOLATED_DOC', subscriberTombstoned: false };
+  }
+
+  if (
+    String(permData.code || '') !== candidateCode ||
+    String(permData.registrationId || '') !== candidateId
+  ) {
+    return { valid: false, reason: 'CODE_COLLISION_CONFLICT', subscriberTombstoned: false };
+  }
+
+  const cleanCpf = (v: unknown) => String(v || '').replace(/\D/g, '');
+  const cleanEmail = (v: unknown) => String(v || '').trim().toLowerCase();
+
+  if (
+    String(regData.id || '') !== candidateId ||
+    String(regData.code || '') !== candidateCode ||
+    cleanCpf(regData.cpf) !== cleanCpf(expectedCpf) ||
+    cleanEmail(regData.email) !== cleanEmail(expectedEmail)
+  ) {
+    return { valid: false, reason: 'REGISTRATION_IDENTITY_CONFLICT', subscriberTombstoned: false };
+  }
+
+  // 1. Validar tipos e correspondência do consentimento original persistido em regData
+  //    ANTES de qualquer decisão sobre existência esperada de assinante
+  if (
+    (regData.acceptEmailNews !== undefined && typeof regData.acceptEmailNews !== 'boolean') ||
+    (regData.acceptWhatsappNews !== undefined && typeof regData.acceptWhatsappNews !== 'boolean')
+  ) {
+    return { valid: false, reason: 'ORIGINAL_CONSENT_MISMATCH', subscriberTombstoned: false };
+  }
+
+  const persistedEmailOptIn = regData.acceptEmailNews === true;
+  const persistedWhatsappOptIn = regData.acceptWhatsappNews === true;
+  const incomingEmailOptIn = Boolean(expectedEmailOptIn);
+  const incomingWhatsappOptIn = Boolean(expectedWhatsappOptIn);
+
+  if (persistedEmailOptIn !== incomingEmailOptIn || persistedWhatsappOptIn !== incomingWhatsappOptIn) {
+    return { valid: false, reason: 'ORIGINAL_CONSENT_MISMATCH', subscriberTombstoned: false };
+  }
+
+  // 2. Determinar a existência esperada do assinante a partir do consentimento original persistido
+  const persistedHasOptIn = persistedEmailOptIn || persistedWhatsappOptIn;
+  let subscriberTombstoned = false;
+
+  if (!persistedHasOptIn) {
+    // Sem opt-in original: nunca aceitar silenciosamente um documento de assinante isolado com o ID determinístico
+    if (subData) {
+      return { valid: false, reason: 'UNEXPECTED_SUBSCRIBER_WITHOUT_OPT_IN', subscriberTombstoned: false };
+    }
+    return { valid: true, subscriberTombstoned: false };
+  }
+
+  // 3. Com opt-in original confirmado: assinante vinculado deve existir, pertencer à inscrição e conter consentimento válido
+  if (!subData) {
+    return { valid: false, reason: 'TRIAD_MISSING_SUBSCRIBER_CONFLICT', subscriberTombstoned: false };
+  }
+  if (
+    String(subData.id || '') !== subId ||
+    cleanEmail(subData.email) !== cleanEmail(expectedEmail) ||
+    subData.consent !== true
+  ) {
+    return { valid: false, reason: 'SUBSCRIBER_IDENTITY_OR_CONSENT_INVALID', subscriberTombstoned: false };
+  }
+
+  // 4. Estado atual do assinante:
+  // - Tombstone ('unsubscribed'): preserva canais revogados sem exigir igualdade com consentimento original
+  // - Ativo: exige canais compatíveis com o opt-in original persistido
+  if (subData.status === 'unsubscribed') {
+    if (subData.receiveEmail !== false || subData.receiveWhatsapp !== false) {
+      return { valid: false, reason: 'INVALID_TOMBSTONE_CHANNELS', subscriberTombstoned: false };
+    }
+    subscriberTombstoned = true;
+  } else {
+    if (
+      (subData.status && subData.status !== 'active') ||
+      subData.receiveEmail !== persistedEmailOptIn ||
+      subData.receiveWhatsapp !== persistedWhatsappOptIn
+    ) {
+      return { valid: false, reason: 'ACTIVE_SUBSCRIBER_CHANNEL_MISMATCH', subscriberTombstoned: false };
+    }
+  }
+
+  return { valid: true, subscriberTombstoned };
+};
+
+/**
+ * Caminho administrativo privilegiado sobre `[DEFAULT]` `db` via `runTransaction`.
+ * Exige sessão administrativa real verificada pelas Rules (`isAuthorizedServerAdminSession`),
+ * inspeciona os 3 documentos da tríade antes de qualquer escrita e valida integralmente
+ * inscrição, permissão e assinante vinculado (inclusive tombstone sem reativação).
+ */
+export const saveAdminRegistrationWithTriadCheckInDb = async (
+  reg: Registration
+): Promise<PublicRegistrationSaveResult> => {
+  const isAdminSession = customAdminTriadAdapterForTests
+    ? customAdminTriadAdapterForTests.isAdminAuthorized()
+    : await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const nowIso = new Date().toISOString();
+  const candidateId = sanitizeRegistrationId(buildRegistrationId(reg.id), 'reg');
+  const candidateCode = sanitizeCode(reg.code);
+  const currentReg: Registration = { ...reg, id: candidateId, code: candidateCode };
+
+  const regPayload = buildRegistrationDoc(currentReg, nowIso);
+  const permPayload = buildPermissionDoc(currentReg, nowIso);
+  const subPayload = buildSubscriberPayloadFromRegistration(currentReg, candidateId, nowIso);
+  const subDocId = validateSubscriberId(buildSubscriberIdFromRegistrationId(candidateId));
+
+  const executeTriadCheck = async (txOps: {
+    get: (
+      collectionName: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers',
+      docId: string
+    ) => Promise<Record<string, unknown> | null>;
+    set: (
+      collectionName: 'registrations' | 'certificate_permissions' | 'newsletter_subscribers',
+      docId: string,
+      data: Record<string, unknown>
+    ) => void;
+  }): Promise<PublicRegistrationSaveResult> => {
+    const [regData, permData, subData] = await Promise.all([
+      txOps.get('registrations', candidateId),
+      txOps.get('certificate_permissions', candidateCode),
+      txOps.get('newsletter_subscribers', subDocId)
+    ]);
+
+    if (permData) {
+      const check = validateExistingRegistrationTriadDocs({
+        candidateId,
+        candidateCode,
+        subId: subDocId,
+        expectedCpf: currentReg.cpf,
+        expectedEmail: currentReg.email,
+        expectedEmailOptIn: Boolean(currentReg.acceptEmailNews),
+        expectedWhatsappOptIn: Boolean(currentReg.acceptWhatsappNews),
+        regData,
+        permData,
+        subData
+      });
+      if (!check.valid) {
+        throw new Error(check.reason || 'TRIAD_INTEGRITY_CONFLICT');
+      }
+      // Tríade íntegra e verificada no servidor (inclusive se sub estiver em tombstone: nunca reativa)
+      return {
+        success: true,
+        alreadyExisted: true,
+        subscriberTombstoned: check.subscriberTombstoned,
+        id: candidateId,
+        code: candidateCode,
+        attemptsUsed: 1
+      };
+    }
+
+    if (regData) {
+      throw new Error('COLISAO_REGISTRATION_ID');
+    }
+    if (subData) {
+      throw new Error('SOBREESCRITA_PROIBIDA');
+    }
+
+    txOps.set('registrations', candidateId, regPayload);
+    txOps.set('certificate_permissions', candidateCode, permPayload);
+    if (subPayload) {
+      txOps.set('newsletter_subscribers', subDocId, subPayload);
+    }
+
+    return {
+      success: true,
+      alreadyExisted: false,
+      subscriberTombstoned: false,
+      id: candidateId,
+      code: candidateCode,
+      attemptsUsed: 1
+    };
+  };
+
+  try {
+    if (customAdminTriadAdapterForTests) {
+      return await customAdminTriadAdapterForTests.runTriadTransaction(executeTriadCheck);
+    }
+
+    const regRef = doc(db, 'registrations', candidateId);
+    const permRef = doc(db, 'certificate_permissions', candidateCode);
+    const subRef = doc(db, 'newsletter_subscribers', subDocId);
+    const refMap = {
+      registrations: regRef,
+      certificate_permissions: permRef,
+      newsletter_subscribers: subRef
+    };
+
+    return await runTransaction(db, async (transaction) =>
+      executeTriadCheck({
+        get: async (col) => {
+          const snap = await transaction.get(refMap[col]);
+          return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+        },
+        set: (col, _docId, data) => {
+          transaction.set(refMap[col], data);
+        }
+      })
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `registrations/${candidateId}`);
+  }
+};
+
+export interface AdminBatchImportItemResult {
+  id: string;
+  code: string;
+  fullName: string;
+  email: string;
+  outcome: 'created' | 'already_existed' | 'failed';
+  registration?: Registration;
+  error?: string;
+}
+
+export interface AdminBatchImportResult {
+  totalAttempted: number;
+  confirmedCreated: Registration[];
+  confirmedExisting: Registration[];
+  failed: Array<{
+    id: string;
+    code: string;
+    fullName: string;
+    email: string;
+    error: string;
+  }>;
+  itemResults: AdminBatchImportItemResult[];
+}
+
+export const persistAdminImportedRegistrationsWithTriadCheckInDb = async (
+  regs: Registration[]
+): Promise<AdminBatchImportResult> => {
+  if (regs.length === 0) {
+    return {
+      totalAttempted: 0,
+      confirmedCreated: [],
+      confirmedExisting: [],
+      failed: [],
+      itemResults: []
+    };
+  }
+
+  const isAdminSession = customAdminTriadAdapterForTests
+    ? customAdminTriadAdapterForTests.isAdminAuthorized()
+    : await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const confirmedCreated: Registration[] = [];
+  const confirmedExisting: Registration[] = [];
+  const failed: AdminBatchImportResult['failed'] = [];
+  const itemResults: AdminBatchImportItemResult[] = [];
+
+  for (const reg of regs) {
+    const candidateId = sanitizeRegistrationId(buildRegistrationId(reg.id), 'reg');
+    const candidateCode = sanitizeCode(reg.code || '');
+    const fullName = (reg.fullName || 'Participante').trim();
+    const email = (reg.email || '').trim().toLowerCase();
+
+    try {
+      const res = await saveAdminRegistrationWithTriadCheckInDb({
+        ...reg,
+        id: candidateId,
+        code: candidateCode
+      });
+      const confirmedReg: Registration = {
+        ...reg,
+        id: res.id,
+        code: res.code
+      };
+      if (res.alreadyExisted) {
+        confirmedExisting.push(confirmedReg);
+        itemResults.push({
+          id: res.id,
+          code: res.code,
+          fullName,
+          email,
+          outcome: 'already_existed',
+          registration: confirmedReg
+        });
+      } else {
+        confirmedCreated.push(confirmedReg);
+        itemResults.push({
+          id: res.id,
+          code: res.code,
+          fullName,
+          email,
+          outcome: 'created',
+          registration: confirmedReg
+        });
+      }
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      failed.push({
+        id: candidateId,
+        code: candidateCode,
+        fullName,
+        email,
+        error: reason
+      });
+      itemResults.push({
+        id: candidateId,
+        code: candidateCode,
+        fullName,
+        email,
+        outcome: 'failed',
+        error: reason
+      });
+    }
+  }
+
+  return {
+    totalAttempted: regs.length,
+    confirmedCreated,
+    confirmedExisting,
+    failed,
+    itemResults
+  };
+};
+
+export interface OfflineQueueSyncedEntry {
+  registration: Registration;
+  alreadyExistedOnServer: boolean;
+  subscriberTombstoned: boolean;
+}
+
+export interface OfflineQueuePendingItem {
+  registration: Registration;
+  reason: string;
+}
+
 export interface OfflineQueueSyncOutcome {
   synced: Registration[];
+  syncedEntries: OfflineQueueSyncedEntry[];
   remainingQueue: Registration[];
+  pendingFailures: OfflineQueuePendingItem[];
+  requiresAdminTriadVerificationCount: number;
   mergedRegistrations: Registration[];
   allSucceeded: boolean;
 }
+
+interface ServerTriadVerificationResult {
+  confirmed: boolean;
+  requiresAdminVerification: boolean;
+  subscriberTombstoned: boolean;
+  serverRegistration?: Registration;
+  reason?: string;
+}
+
+/**
+ * Verificador remoto fechado da tríade no servidor (nunca aceita callback arbitrário nem estado local).
+ * Sem sessão administrativa autorizada (`isAuthorizedServerAdminSession`), não é possível ler
+ * `registrations` nem `newsletter_subscribers` sob as `firestore.rules` vigentes.
+ */
+const verifyIntactRegistrationTriadOnServer = async (
+  item: Registration
+): Promise<ServerTriadVerificationResult> => {
+  const candidateId = sanitizeRegistrationId(buildRegistrationId(item.id), 'reg');
+  const candidateCode = sanitizeCode(item.code || '');
+  if (!candidateCode) {
+    return {
+      confirmed: false,
+      requiresAdminVerification: false,
+      subscriberTombstoned: false,
+      reason: 'INVALID_REGISTRATION_CODE'
+    };
+  }
+
+  try {
+    const isAdminSession = customAdminTriadAdapterForTests
+      ? customAdminTriadAdapterForTests.isAdminAuthorized()
+      : await isAuthorizedServerAdminSession();
+
+    if (!isAdminSession) {
+      return {
+        confirmed: false,
+        requiresAdminVerification: true,
+        subscriberTombstoned: false,
+        reason: 'ADMIN_SESSION_REQUIRED_FOR_TRIAD_VERIFICATION'
+      };
+    }
+
+    const subId = validateSubscriberId(buildSubscriberIdFromRegistrationId(candidateId));
+
+    let regData: Record<string, unknown> | null = null;
+    let permData: Record<string, unknown> | null = null;
+    let subData: Record<string, unknown> | null = null;
+
+    // Lê sempre os 3 documentos da tríade no servidor (inclusive quando a entrada recebida vier sem opt-in),
+    // impedindo contorno por entrada sem consentimento ou aceitação silenciosa de assinante isolado.
+    if (customAdminTriadAdapterForTests) {
+      [regData, permData, subData] = await Promise.all([
+        customAdminTriadAdapterForTests.getServerDoc('registrations', candidateId),
+        customAdminTriadAdapterForTests.getServerDoc('certificate_permissions', candidateCode),
+        customAdminTriadAdapterForTests.getServerDoc('newsletter_subscribers', subId)
+      ]);
+    } else {
+      const [regSnap, permSnap, subSnap] = await Promise.all([
+        getDocFromServer(doc(db, 'registrations', candidateId)),
+        getDocFromServer(doc(db, 'certificate_permissions', candidateCode)),
+        getDocFromServer(doc(db, 'newsletter_subscribers', subId))
+      ]);
+      regData = regSnap.exists() ? (regSnap.data() as Record<string, unknown>) : null;
+      permData = permSnap.exists() ? (permSnap.data() as Record<string, unknown>) : null;
+      subData = subSnap.exists() ? (subSnap.data() as Record<string, unknown>) : null;
+    }
+
+    const check = validateExistingRegistrationTriadDocs({
+      candidateId,
+      candidateCode,
+      subId,
+      expectedCpf: item.cpf,
+      expectedEmail: item.email,
+      expectedEmailOptIn: Boolean(item.acceptEmailNews),
+      expectedWhatsappOptIn: Boolean(item.acceptWhatsappNews),
+      regData,
+      permData,
+      subData
+    });
+
+    if (!check.valid || !regData) {
+      return {
+        confirmed: false,
+        requiresAdminVerification: false,
+        subscriberTombstoned: false,
+        reason: check.reason || 'INCOMPLETE_TRIAD_OR_ISOLATED_DOC'
+      };
+    }
+
+    const serverStatus =
+      regData.status === 'presente' || regData.status === 'cancelada'
+        ? regData.status
+        : 'confirmada';
+
+    return {
+      confirmed: true,
+      requiresAdminVerification: false,
+      subscriberTombstoned: check.subscriberTombstoned,
+      serverRegistration: {
+        ...item,
+        id: candidateId,
+        code: candidateCode,
+        status: serverStatus,
+        certificateIssued: serverStatus === 'presente' ? Boolean(regData.certificateIssued) : false,
+        checkedInAt:
+          serverStatus === 'presente' && typeof regData.checkedInAt === 'string'
+            ? regData.checkedInAt
+            : item.checkedInAt
+      }
+    };
+  } catch (err: unknown) {
+    return {
+      confirmed: false,
+      requiresAdminVerification: false,
+      subscriberTombstoned: false,
+      reason: err instanceof Error ? err.message : String(err)
+    };
+  }
+};
 
 let activeOfflineSyncPromise: Promise<OfflineQueueSyncOutcome> | null = null;
 
@@ -706,9 +1447,11 @@ export const synchronizeOfflineRegistrationQueue = async (
     return activeOfflineSyncPromise;
   }
 
-  activeOfflineSyncPromise = (async (): Promise<OfflineQueueSyncOutcome> => {
+  const syncPromise = (async (): Promise<OfflineQueueSyncOutcome> => {
+    // Garante que activeOfflineSyncPromise esteja atribuída antes da conclusão mesmo sem awaits no loop
+    await Promise.resolve();
     try {
-      // Deduplicate input queue by stable id
+      // Deduplica fila por id sem jamais usar existingRegistrations para descartar itens pendentes
       const uniqueQueueMap = new Map<string, Registration>();
       queuedItems.forEach((item) => {
         if (item?.id && !uniqueQueueMap.has(item.id)) {
@@ -718,20 +1461,49 @@ export const synchronizeOfflineRegistrationQueue = async (
 
       const remainingQueue: Registration[] = [];
       const synced: Registration[] = [];
+      const syncedEntries: OfflineQueueSyncedEntry[] = [];
+      const pendingFailures: OfflineQueuePendingItem[] = [];
+      let requiresAdminTriadVerificationCount = 0;
 
       for (const item of uniqueQueueMap.values()) {
         try {
           const res = await savePublicRegistrationToDb(item);
-          synced.push({
+          const syncedReg: Registration = {
             ...item,
             id: res.id,
             code: res.code,
             status: 'confirmada',
             certificateIssued: false
+          };
+          synced.push(syncedReg);
+          syncedEntries.push({
+            registration: syncedReg,
+            alreadyExistedOnServer: false,
+            subscriberTombstoned: false
           });
         } catch (err) {
-          console.warn(`[Sync Offline] Falha ao sincronizar inscrição ${item.code}:`, err);
-          remainingQueue.push(item);
+          const serverCheck = await verifyIntactRegistrationTriadOnServer(item);
+          if (serverCheck.confirmed && serverCheck.serverRegistration) {
+            synced.push(serverCheck.serverRegistration);
+            syncedEntries.push({
+              registration: serverCheck.serverRegistration,
+              alreadyExistedOnServer: true,
+              subscriberTombstoned: serverCheck.subscriberTombstoned
+            });
+          } else {
+            console.warn(
+              `[Sync Offline] Falha ao sincronizar inscrição ${item.code} (${serverCheck.reason || 'UNCONFIRMED'}):`,
+              err
+            );
+            if (serverCheck.requiresAdminVerification) {
+              requiresAdminTriadVerificationCount += 1;
+            }
+            remainingQueue.push(item);
+            pendingFailures.push({
+              registration: item,
+              reason: serverCheck.reason || (err instanceof Error ? err.message : String(err))
+            });
+          }
         }
       }
 
@@ -751,16 +1523,22 @@ export const synchronizeOfflineRegistrationQueue = async (
 
       return {
         synced,
+        syncedEntries,
         remainingQueue,
+        pendingFailures,
+        requiresAdminTriadVerificationCount,
         mergedRegistrations,
         allSucceeded: remainingQueue.length === 0
       };
     } finally {
-      activeOfflineSyncPromise = null;
+      if (activeOfflineSyncPromise === syncPromise) {
+        activeOfflineSyncPromise = null;
+      }
     }
   })();
 
-  return activeOfflineSyncPromise;
+  activeOfflineSyncPromise = syncPromise;
+  return syncPromise;
 };
 
 export const persistRegistrationAndPermissionInDb = async (reg: Registration): Promise<void> => {
@@ -793,7 +1571,7 @@ export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Pr
   if (regs.length === 0) return;
 
   const nowIso = new Date().toISOString();
-  const chunkSize = 200; // 2 writes per registration => <= 400 ops per batch (<500 limit)
+  const chunkSize = 150; // 2 writes per registration => 300 ops per batch (<= 450 limit, well below 500)
 
   try {
     for (let i = 0; i < regs.length; i += chunkSize) {
@@ -813,17 +1591,19 @@ export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Pr
 };
 
 export const deleteRegistrationInDb = async (reg: Registration): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
-  const regId = sanitizeId(reg.id, 'reg');
+  const regId = sanitizeRegistrationId(reg.id, 'reg');
   const permCode = sanitizeCode(reg.code);
+  const subId = buildSubscriberIdFromRegistrationId(regId);
 
   try {
     const batch = writeBatch(db);
     batch.delete(doc(db, 'registrations', regId));
     batch.delete(doc(db, 'certificate_permissions', permCode));
+    batch.delete(doc(db, 'newsletter_subscribers', subId));
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `registrations/${regId}`);
@@ -1220,8 +2000,16 @@ export const seedInitialDataIfNeeded = async (
   try {
     const regCheckSnap = await getDocs(query(collection(db, 'registrations'), limit(1)));
     if (regCheckSnap.empty && localRegistrations.length > 0) {
-      await persistMultipleRegistrationsInDb(localRegistrations);
-      seededRegistrations = true;
+      const seedResult = await persistAdminImportedRegistrationsWithTriadCheckInDb(localRegistrations);
+      seededRegistrations =
+        seedResult.confirmedCreated.length > 0 || seedResult.confirmedExisting.length > 0;
+      if (seedResult.failed.length > 0) {
+        throw new Error(
+          `SEED_REGISTRATIONS_PARTIAL_FAILURE: ${seedResult.failed
+            .map((f) => `${f.code} (${f.error})`)
+            .join('; ')}`
+        );
+      }
     }
 
     const configSnap = await getDoc(doc(db, 'event_config', 'main'));
@@ -1459,6 +2247,10 @@ export interface NewsletterStorageAdapter {
   subscribe: (sub: NewsletterSubscriber) => Promise<{ isNew: boolean; subscriber: NewsletterSubscriber; unsubscribeToken?: string }>;
   unsubscribe: (emailOrId: string, tokenProof?: string) => Promise<void>;
   deleteSubscriber: (id: string) => Promise<void>;
+  updateSubscriberConsent?: (
+    id: string,
+    changes: { receiveEmail?: boolean; receiveWhatsapp?: boolean }
+  ) => Promise<void>;
 }
 
 let customSocialPostsAdapter: SocialPostsStorageAdapter | null = null;
@@ -2000,66 +2792,200 @@ export const unsubscribeNewsletterInDb = async (
   }
 };
 
-export const deleteSubscriberInDb = async (subscriberId: string): Promise<void> => {
-  if (customNewsletterAdapter) {
-    return customNewsletterAdapter.deleteSubscriber(subscriberId);
-  }
+export interface DeleteSubscriberResult {
+  readonly success: true;
+  readonly subscriberId: string;
+  readonly tombstoneConfirmedAt: string;
+  readonly alreadyTombstoned: boolean;
+}
 
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+export const updateSubscriberConsentInDb = async (
+  subscriberId: string,
+  changes: { receiveEmail?: boolean; receiveWhatsapp?: boolean }
+): Promise<void> => {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
 
-  const cleanId = sanitizeId(subscriberId, 'sub');
+  const cleanId = validateSubscriberId(subscriberId);
+  const subRef = doc(db, 'newsletter_subscribers', cleanId);
+
   try {
-    await deleteDoc(doc(db, 'newsletter_subscribers', cleanId));
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(subRef);
+      if (!snap.exists()) {
+        throw new Error('SUBSCRIBER_NOT_FOUND');
+      }
+
+      const currentData = snap.data() as NewsletterSubscriber;
+
+      if (currentData.status === 'unsubscribed') {
+        throw new Error('TOMBSTONE_MODIFICATION_FORBIDDEN');
+      }
+
+      const currentEmail: boolean | undefined = currentData.receiveEmail;
+      const currentWhatsapp: boolean | undefined = currentData.receiveWhatsapp;
+
+      let nextEmail: boolean | undefined = currentEmail;
+      if (changes.receiveEmail === false) {
+        nextEmail = false;
+      } else if (changes.receiveEmail === true && currentEmail !== true) {
+        nextEmail = currentEmail;
+      }
+
+      let nextWhatsapp: boolean | undefined = currentWhatsapp;
+      if (changes.receiveWhatsapp === false) {
+        nextWhatsapp = false;
+      } else if (changes.receiveWhatsapp === true && currentWhatsapp !== true) {
+        nextWhatsapp = currentWhatsapp;
+      }
+
+      const isFullyRevoked = nextEmail === false && nextWhatsapp === false;
+      const nextStatus = isFullyRevoked ? 'unsubscribed' : (currentData.status || 'active');
+      const nowIso = new Date().toISOString();
+
+      const updatePayload: Record<string, unknown> = {
+        status: nextStatus,
+        updatedAt: nowIso
+      };
+
+      if (nextEmail !== undefined) {
+        updatePayload.receiveEmail = nextEmail;
+      }
+      if (nextWhatsapp !== undefined) {
+        updatePayload.receiveWhatsapp = nextWhatsapp;
+      }
+
+      if (isFullyRevoked) {
+        updatePayload.unsubscribedAt = currentData.unsubscribedAt || nowIso;
+        updatePayload.unsubscribeTokenHash = '';
+      }
+
+      transaction.set(subRef, updatePayload, { merge: true });
+    });
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `newsletter_subscribers/${cleanId}`);
+    handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${cleanId}`);
+  }
+};
+
+export const deleteSubscriberInDb = async (
+  subscriberId: string
+): Promise<DeleteSubscriberResult> => {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  const cleanId = validateSubscriberId(subscriberId);
+  const subRef = doc(db, 'newsletter_subscribers', cleanId);
+
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(subRef);
+      if (!snap.exists()) {
+        throw new Error('SUBSCRIBER_NOT_FOUND');
+      }
+
+      const currentData = snap.data() as NewsletterSubscriber;
+      if (currentData.status === 'unsubscribed') {
+        // Preserva o tombstone existente sem gerar nova data nem reescrever dados
+        const existingTs =
+          validateStrictIsoTimestamp(currentData.unsubscribedAt) ||
+          validateStrictIsoTimestamp(currentData.updatedAt) ||
+          String(currentData.unsubscribedAt || currentData.updatedAt || '');
+        return {
+          success: true as const,
+          subscriberId: cleanId,
+          tombstoneConfirmedAt: existingTs,
+          alreadyTombstoned: true
+        };
+      }
+
+      const nowIso = new Date().toISOString();
+      const tombstonePayload: Record<string, unknown> = {
+        status: 'unsubscribed',
+        receiveEmail: false,
+        receiveWhatsapp: false,
+        unsubscribedAt: nowIso,
+        unsubscribeTokenHash: '',
+        updatedAt: nowIso
+      };
+      transaction.set(subRef, tombstonePayload, { merge: true });
+      return {
+        success: true as const,
+        subscriberId: cleanId,
+        tombstoneConfirmedAt: nowIso,
+        alreadyTombstoned: false
+      };
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `newsletter_subscribers/${cleanId}`);
   }
 };
 
 export const subscribeAdminSubscribers = (
-  onUpdate: (subscribers: NewsletterSubscriber[]) => void
+  onUpdate: (subscribers: NewsletterSubscriber[], meta: SubscribersSnapshotMeta) => void
 ) => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
-    return () => {};
-  }
+  let cancelled = false;
+  let activeUnsub: (() => void) | null = null;
 
-  const q = query(
-    collection(db, 'newsletter_subscribers'),
-    orderBy('subscribedAt', 'desc'),
-    limit(500)
-  );
+  isAuthorizedServerAdminSession()
+    .then((allowed) => {
+      if (cancelled || !allowed) return;
 
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      if (snapshot.empty) return;
-      const list: NewsletterSubscriber[] = snapshot.docs.map((d) => {
-        const data = d.data() as NewsletterSubscriber;
-        return {
-          id: data.id || d.id,
-          email: data.email || '',
-          name: data.name,
-          phone: data.phone,
-          role: data.role,
-          city: data.city,
-          institution: data.institution,
-          subscribedAt: data.subscribedAt || '',
-          receiveWhatsapp: Boolean(data.receiveWhatsapp),
-          receiveEmail: data.receiveEmail !== false,
-          origin: data.origin,
-          status: data.status || 'active',
-          unsubscribedAt: data.unsubscribedAt
-        };
-      });
-      onUpdate(list);
-    },
-    (error) => {
-      console.warn('Aviso ao sincronizar assinantes de newsletter:', error);
-    }
-  );
+      // Consulta integral da coleção sem filtros where, sem orderBy no servidor e sem limit(500)
+      const q = collection(db, 'newsletter_subscribers');
+      activeUnsub = onSnapshot(
+        q,
+        (snapshot) => {
+          const meta: SubscribersSnapshotMeta = {
+            source: snapshot.metadata.fromCache ? 'firestore_cache' : 'firestore_server',
+            isExhaustive: !snapshot.metadata.fromCache
+          };
+
+          if (snapshot.empty) {
+            onUpdate([], meta);
+            return;
+          }
+
+          const list: NewsletterSubscriber[] = snapshot.docs.map((d) => {
+            const data = d.data() as NewsletterSubscriber;
+            return {
+              id: data.id || d.id,
+              email: data.email || '',
+              name: data.name,
+              phone: data.phone,
+              role: data.role,
+              city: data.city,
+              institution: data.institution,
+              subscribedAt: data.subscribedAt || '',
+              receiveWhatsapp: data.receiveWhatsapp,
+              receiveEmail: data.receiveEmail,
+              origin: data.origin,
+              status: data.status || 'active',
+              unsubscribedAt: data.unsubscribedAt,
+              consent: data.consent,
+              updatedAt: data.updatedAt
+            };
+          });
+
+          list.sort((a, b) => (b.subscribedAt || '').localeCompare(a.subscribedAt || ''));
+          onUpdate(list, meta);
+        },
+        (error) => {
+          console.warn('Aviso ao sincronizar assinantes de newsletter:', error);
+        }
+      );
+    })
+    .catch((err) => {
+      console.warn('Sessão administrativa indisponível para listener de assinantes:', err);
+    });
+
+  return () => {
+    cancelled = true;
+    if (activeUnsub) activeUnsub();
+  };
 };
 
 export { deleteDoc };
