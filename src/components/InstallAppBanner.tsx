@@ -71,64 +71,54 @@ export const InstallAppBanner: React.FC<InstallAppBannerProps> = ({
 
   return (
     <aside
-      className="relative z-30 bg-gradient-to-r from-[#0a3641] via-[#0e4452] to-[#028090] text-white border-b-2 border-[#ea7a38] shadow-md transition-all animate-in slide-in-from-top duration-300"
+      className="relative z-30 bg-gradient-to-r from-[#0a3641] via-[#0e4452] to-[#028090] text-white border-b border-[#ea7a38]/80 shadow-sm transition-all animate-in slide-in-from-top duration-300"
       aria-label="Aviso de download do WebApp Oficial"
     >
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-1.5 sm:py-2">
+        <div className="flex items-center justify-between gap-2">
           
-          {/* Information Block */}
-          <div className="flex items-center gap-3 min-w-0">
-            {/* App Icon / Logo */}
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white p-0.5 shadow-md ring-2 ring-sky-300/40 shrink-0 flex items-center justify-center">
-              <img
-                src="/assets/aistudio/Institutional_logo_displayed_ver__4c1d163d_2K__1__2b74545f.jpg"
-                alt="Logo Simpósio SUS"
-                className="w-full h-full object-contain rounded-xl"
-              />
+          {/* Information Block - Compacto, sem a logo */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded-lg bg-teal-500/20 border border-teal-400/30 flex items-center justify-center shrink-0 text-emerald-300">
+              <Smartphone className="w-3.5 h-3.5" />
             </div>
 
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded-full text-[9px] sm:text-[10px] font-bold bg-[#ea7a38] text-white uppercase tracking-wider font-mono">
-                  <Sparkles className="w-2.5 h-2.5" /> WebApp Oficial
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-teal-200 font-semibold">
-                  <WifiOff className="w-3 h-3 text-emerald-400" /> Acesso Offline
-                </span>
-              </div>
+            <div className="min-w-0 flex items-center gap-2">
+              <span className="text-[11px] sm:text-xs font-bold text-white tracking-tight truncate">
+                Instale o App do Simpósio
+              </span>
 
-              <h2 className="text-xs sm:text-sm font-black text-white tracking-tight leading-snug mt-0.5 break-words">
-                Baixe o WebApp no seu Celular ou Computador
-              </h2>
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-500/30">
+                <WifiOff className="w-2.5 h-2.5 text-emerald-400" /> Acesso Offline
+              </span>
 
-              <p className="text-[11px] text-stone-200 line-clamp-1 sm:line-clamp-none">
-                Instale para ter acesso instantâneo à programação, credenciamento e certificado direto na sua tela inicial!
+              <p className="hidden md:block text-[11px] text-teal-100/80 truncate max-w-md">
+                Programação, credenciamento e certificado na tela inicial.
               </p>
             </div>
           </div>
 
-          {/* Action Zone */}
-          <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+          {/* Action Zone - Compacto */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={handleInstallClick}
               disabled={isTriggering}
-              className="inline-flex items-center gap-1.5 px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-[#d96522] via-[#ea7a38] to-[#d96522] hover:brightness-110 active:scale-95 text-white text-xs sm:text-xs font-black shadow-sm transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
+              className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-gradient-to-r from-[#d96522] via-[#ea7a38] to-[#d96522] hover:brightness-110 active:scale-95 text-white text-[11px] sm:text-xs font-bold shadow-sm transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
               title="Instalar ou baixar o WebApp agora"
             >
-              <Download className="w-3.5 h-3.5" />
-              <span>{isTriggering ? 'Abrindo...' : 'Baixar WebApp'}</span>
+              <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+              <span>{isTriggering ? 'Abrindo...' : 'Baixar App'}</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsDismissed(true)}
-              className="p-1.5 sm:p-2 text-stone-300 hover:text-white bg-white/5 hover:bg-white/15 rounded-xl transition-colors cursor-pointer"
-              title="Ocultar barra nesta sessão"
+              className="p-1 sm:p-1.5 text-stone-300 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+              title="Ocultar aviso nesta sessão"
               aria-label="Ocultar aviso de download"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </div>
 

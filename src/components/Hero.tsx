@@ -271,7 +271,7 @@ export const Hero: React.FC<HeroProps> = ({
                         {config.eventDate}
                       </div>
                       <div className="text-[11px] font-medium text-stone-500 mt-0.5 leading-snug">
-                        Quinta-feira · 2026
+                        Terça-feira · 2026
                       </div>
                     </div>
                   </div>

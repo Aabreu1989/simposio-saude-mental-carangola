@@ -25,35 +25,14 @@ export const Footer: React.FC<FooterProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5 lg:gap-7 items-start">
           
-          {/* Brand & SUS Mission */}
-          <div className="lg:col-span-5 space-y-3">
-            <div className="flex items-center gap-3.5">
-              {/* Institutional SUS Logo - Prominently enlarged & visible */}
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden bg-white shadow-lg border-2 border-sky-300 p-0.5 shrink-0 ring-2 ring-sky-500/30 flex items-center justify-center">
-                <img
-                  src="/assets/aistudio/Institutional_logo_displayed_ver__4c1d163d_2K__1__2b74545f.jpg"
-                  alt="Logo Oficial SUS"
-                  className="w-full h-full object-contain rounded-full"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold uppercase tracking-wider bg-[#d96522] text-white shadow-xs">
-                    SUS
-                  </span>
-                  <span className="text-[11px] font-mono text-[#ea7a38] font-bold">
-                    Carangola / MG
-                  </span>
-                </div>
-                <span className="text-base sm:text-lg md:text-xl font-black text-white tracking-tight leading-tight block">
-                  {config.editionTitle}
-                </span>
-                <span className="text-xs text-stone-300 font-medium block mt-0.5">
-                  Microrregião de Carangola · RAPS
-                </span>
-              </div>
-            </div>
+          {/* Event Identity */}
+          <div className="lg:col-span-5 space-y-1.5">
+            <span className="text-base sm:text-lg md:text-xl font-black text-white tracking-tight leading-tight block">
+              {config.editionTitle}
+            </span>
+            <span className="text-xs text-stone-300 font-medium block">
+              Microrregião de Carangola · RAPS
+            </span>
           </div>
 
           {/* Rede de Apoio à Crise */}
@@ -124,12 +103,12 @@ export const Footer: React.FC<FooterProps> = ({
 
         </div>
 
-        {/* Logos dos Serviços da RAPS de Carangola */}
+        {/* Apoio Institucional e Serviços da RAPS */}
         <div className="mt-6 pt-5 border-t border-stone-800/80">
           <h4 className="text-[11px] font-bold uppercase tracking-wider text-stone-300 font-mono mb-3 text-center sm:text-left">
-            Serviços da Rede de Atenção Psicossocial (RAPS) · Carangola
+            APOIO:
           </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
             <div className="bg-[#07242c] rounded-xl p-2.5 border border-white/10 flex flex-col items-center justify-center gap-1.5">
               <img
                 src="/assets/logo-caps-1.jpg"
@@ -163,6 +142,38 @@ export const Footer: React.FC<FooterProps> = ({
               />
               <span className="text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
                 CAPS Infanto Juvenil
+              </span>
+            </div>
+
+            <div className="bg-[#07242c] rounded-xl p-2.5 border border-white/10 flex flex-col items-center justify-center gap-1.5">
+              <div className="h-16 sm:h-20 w-full flex items-center justify-center">
+                <div className="bg-white rounded-lg px-2.5 py-1.5 inline-flex items-center justify-center max-w-full max-h-full">
+                  <img
+                    src="/assets/logo-camara-carangola.png"
+                    alt="Câmara Municipal de Carangola - Poder Legislativo"
+                    loading="lazy"
+                    className="h-12 sm:h-14 w-auto max-w-full object-contain"
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                Câmara Municipal de Carangola
+              </span>
+            </div>
+
+            <div className="bg-[#07242c] rounded-xl p-2.5 border border-white/10 flex flex-col items-center justify-center gap-1.5">
+              <div className="h-16 sm:h-20 w-full flex items-center justify-center">
+                <div className="bg-white rounded-lg px-2.5 py-1.5 inline-flex items-center justify-center max-w-full max-h-full">
+                  <img
+                    src="/assets/logo-secretaria-saude-carangola.jpg"
+                    alt="Secretaria Municipal de Saúde de Carangola - SUS"
+                    loading="lazy"
+                    className="h-12 sm:h-14 w-auto max-w-full object-contain"
+                  />
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                Secretaria Municipal de Saúde de Carangola
               </span>
             </div>
           </div>

@@ -23,6 +23,7 @@ const LinkedInGlyph = ({ className = 'w-3.5 h-3.5' }: { className?: string }) =>
 
 const FILTER_TABS: Array<{ id: 'todos' | SpeakerProfile['sessionGroup']; label: string }> = [
   { id: 'todos', label: 'Todos' },
+  { id: 'abertura', label: 'Abertura & Gestão' },
   { id: 'mesa-1', label: 'Mesa 1 · RAPS' },
   { id: 'mesa-2', label: 'Mesa 2 · Hospital & Urgência' },
   { id: 'mesa-3', label: 'Mesa 3 · Justiça & Direitos' }
