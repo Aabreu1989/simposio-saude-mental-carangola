@@ -71,6 +71,12 @@ import {
   ACTIVE_FIRESTORE_DATABASE_ID
 } from '../src/services/firebaseDb.ts';
 import { validateRegistrationFormData } from '../src/components/RegistrationModal.tsx';
+import {
+  shouldFallbackToRedirectAuth,
+  consumeAdminRedirectResult,
+  fetchAdminRegistrationsFromDb,
+  ADMIN_AUTH_REDIRECT_PENDING_KEY
+} from '../src/services/firebaseDb.ts';
 
 import emailHandler, {
   resetEmailServerStateForTests,
@@ -2930,6 +2936,36 @@ async function runTests() {
       !footerSource.includes('contactEmail') &&
       !footerSource.includes('contactPhone'),
     'Assets de Cristiana Marina e logos dos serviços/Prefeitura no Footer configurados e ampliados corretamente',
+    suite15
+  );
+
+  // 15.9 Login Google 1-clique no Admin, fallback redirect mobile/PWA e fail-closed de recarga
+  let fetchWithoutAuthRejected = false;
+  try {
+    await fetchAdminRegistrationsFromDb();
+  } catch (err) {
+    fetchWithoutAuthRejected = err instanceof Error && err.message === 'ADMIN_AUTH_REQUIRED';
+  }
+  const redirectEmptyResult = await consumeAdminRedirectResult();
+  const adminDashboardSource15 = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf-8');
+  assert(
+    ADMIN_AUTH_REDIRECT_PENDING_KEY === 'simposio_admin_google_redirect_pending' &&
+      shouldFallbackToRedirectAuth({ code: 'auth/popup-blocked' }, false) === true &&
+      shouldFallbackToRedirectAuth({ code: 'auth/operation-not-supported-in-this-environment' }, false) === true &&
+      shouldFallbackToRedirectAuth({ code: 'auth/popup-closed-by-user' }, true) === true &&
+      shouldFallbackToRedirectAuth({ code: 'auth/popup-closed-by-user' }, false) === false &&
+      shouldFallbackToRedirectAuth({ code: 'auth/unauthorized-domain' }, true) === false &&
+      fetchWithoutAuthRejected === true &&
+      redirectEmptyResult.user === null &&
+      redirectEmptyResult.hadPendingRedirect === false &&
+      adminLoginSource.includes('onGoogleAdminLogin') &&
+      adminLoginSource.includes('preferRedirect: true') &&
+      appTsxSource.includes('consumeAdminRedirectResult()') &&
+      appTsxSource.includes('fetchAdminRegistrationsFromDb()') &&
+      adminDashboardSource15.includes('Nuvem desconectada neste aparelho') &&
+      adminDashboardSource15.includes('Modo Celular (Redirecionar)') &&
+      adminDashboardSource15.includes('onRefreshRegistrations'),
+    'Login Google 1-clique, fallback redirect mobile/PWA, recarga fail-closed e alerta de nuvem no topo verificados',
     suite15
   );
 

@@ -10,6 +10,8 @@ import {
   inMemoryPersistence,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInAnonymously,
   signOut,
   onAuthStateChanged,
@@ -605,12 +607,137 @@ export const isAuthorizedServerAdminSession = async (): Promise<boolean> => {
   return adminSnap.exists();
 };
 
-export const signInFirestoreAdmin = async (): Promise<FirebaseAdminUser | null> => {
+export const ADMIN_AUTH_REDIRECT_PENDING_KEY = 'simposio_admin_google_redirect_pending';
+const REDIRECT_PENDING_TTL_MS = 5 * 60 * 1000;
+
+export const isStandalonePwaMode = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const matchStandalone =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(display-mode: standalone)').matches === true;
+    const iosStandalone =
+      (typeof navigator !== 'undefined' &&
+        (navigator as { standalone?: boolean }).standalone === true) ||
+      false;
+    return matchStandalone || iosStandalone;
+  } catch {
+    return false;
+  }
+};
+
+export const isEmbeddedInAppBrowser = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  return /WhatsApp|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent || '');
+};
+
+export const shouldFallbackToRedirectAuth = (
+  error: unknown,
+  standalonePwa = false
+): boolean => {
+  const errObj = error as { code?: string; message?: string };
+  const code = String(errObj?.code || '').toLowerCase();
+  const msg = String(errObj?.message || '').toLowerCase();
+
+  if (
+    code.includes('auth/popup-blocked') ||
+    msg.includes('auth/popup-blocked') ||
+    code.includes('auth/operation-not-supported-in-this-environment') ||
+    msg.includes('auth/operation-not-supported-in-this-environment') ||
+    code.includes('auth/web-storage-unsupported') ||
+    msg.includes('auth/web-storage-unsupported')
+  ) {
+    return true;
+  }
+
+  if (
+    standalonePwa &&
+    (code.includes('auth/popup-closed-by-user') ||
+      msg.includes('popup-closed-by-user') ||
+      code.includes('auth/cancelled-popup-request'))
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const readPendingRedirectFlag = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = window.localStorage?.getItem(ADMIN_AUTH_REDIRECT_PENDING_KEY);
+    if (!raw) return false;
+    const ts = Number(raw);
+    return Number.isFinite(ts) && Date.now() - ts <= REDIRECT_PENDING_TTL_MS;
+  } catch {
+    return false;
+  }
+};
+
+const writePendingRedirectFlag = (): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage?.setItem(ADMIN_AUTH_REDIRECT_PENDING_KEY, String(Date.now()));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const clearPendingRedirectFlag = (): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage?.removeItem(ADMIN_AUTH_REDIRECT_PENDING_KEY);
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const formatGoogleAdminAuthError = (error: unknown): unknown => {
+  const err = error as { code?: string; message?: string };
+  if (
+    err?.code === 'auth/unauthorized-domain' ||
+    err?.message?.includes('auth/unauthorized-domain') ||
+    err?.message?.includes('unauthorized-domain')
+  ) {
+    const domain = typeof window !== 'undefined' ? window.location.hostname : 'domínio atual';
+    const authErr = new Error(
+      `Domínio não autorizado no Firebase Authentication (${domain}). Autorize este domínio em Firebase Console → Authentication → Settings → Authorized domains no projeto ${ACTIVE_FIREBASE_PROJECT_ID}.`
+    );
+    (authErr as { code?: string }).code = 'auth/unauthorized-domain';
+    return authErr;
+  }
+  return error;
+};
+
+export const signInFirestoreAdmin = async (
+  options?: { preferRedirect?: boolean }
+): Promise<FirebaseAdminUser | null> => {
+  if (isEmbeddedInAppBrowser()) {
+    throw new Error(
+      'O Google bloqueia login dentro do navegador interno do WhatsApp/Instagram. Abra este link diretamente no Chrome ou Safari para conectar a conta do gestor.'
+    );
+  }
+
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({
     login_hint: PRIMARY_ADMIN_EMAIL,
     prompt: 'select_account'
   });
+
+  const startRedirect = async (): Promise<null> => {
+    writePendingRedirectFlag();
+    await signInWithRedirect(firestoreAuth, provider);
+    return null;
+  };
+
+  if (options?.preferRedirect) {
+    try {
+      return await startRedirect();
+    } catch (error: unknown) {
+      clearPendingRedirectFlag();
+      throw formatGoogleAdminAuthError(error);
+    }
+  }
 
   try {
     const result = await signInWithPopup(firestoreAuth, provider);
@@ -620,8 +747,18 @@ export const signInFirestoreAdmin = async (): Promise<FirebaseAdminUser | null> 
         `A conta autenticada (${result.user.email || 'sem e-mail'}) não possui permissão de gestor autorizado no Firebase.`
       );
     }
+    clearPendingRedirectFlag();
     return result.user;
   } catch (error: unknown) {
+    const formatted = formatGoogleAdminAuthError(error);
+    if ((formatted as { code?: string })?.code === 'auth/unauthorized-domain') {
+      throw formatted;
+    }
+
+    if (shouldFallbackToRedirectAuth(error, isStandalonePwaMode())) {
+      return await startRedirect();
+    }
+
     const err = error as { code?: string; message?: string };
     if (
       err?.code === 'auth/popup-closed-by-user' ||
@@ -630,19 +767,49 @@ export const signInFirestoreAdmin = async (): Promise<FirebaseAdminUser | null> 
     ) {
       return null;
     }
-    if (
-      err?.code === 'auth/unauthorized-domain' ||
-      err?.message?.includes('auth/unauthorized-domain') ||
-      err?.message?.includes('unauthorized-domain')
-    ) {
-      const domain = typeof window !== 'undefined' ? window.location.hostname : 'domínio atual';
-      const authErr = new Error(
-        `Domínio não autorizado no Firebase Authentication (${domain}). Autorize este domínio em Firebase Console → Authentication → Settings → Authorized domains no projeto ${ACTIVE_FIREBASE_PROJECT_ID}.`
-      );
-      (authErr as { code?: string }).code = 'auth/unauthorized-domain';
-      throw authErr;
+    throw formatted;
+  }
+};
+
+export const consumeAdminRedirectResult = async (): Promise<{
+  user: FirebaseAdminUser | null;
+  hadPendingRedirect: boolean;
+  error?: string;
+}> => {
+  const hadPendingRedirect = readPendingRedirectFlag();
+  clearPendingRedirectFlag();
+
+  try {
+    const result = await getRedirectResult(firestoreAuth);
+    if (result?.user) {
+      if (!isVerifiedAdminUser(result.user)) {
+        await signOut(firestoreAuth);
+        return {
+          user: null,
+          hadPendingRedirect: true,
+          error: `A conta autenticada (${result.user.email || 'sem e-mail'}) não possui permissão de gestor autorizado no Firebase.`
+        };
+      }
+      return { user: result.user, hadPendingRedirect: true };
     }
-    throw error;
+    if (
+      hadPendingRedirect &&
+      firestoreAuth.currentUser &&
+      isVerifiedAdminUser(firestoreAuth.currentUser)
+    ) {
+      return { user: firestoreAuth.currentUser, hadPendingRedirect: true };
+    }
+    return { user: null, hadPendingRedirect };
+  } catch (error: unknown) {
+    const formatted = formatGoogleAdminAuthError(error);
+    return {
+      user: null,
+      hadPendingRedirect,
+      error:
+        formatted instanceof Error
+          ? formatted.message
+          : 'Falha ao concluir autenticação Google por redirecionamento.'
+    };
   }
 };
 
@@ -2074,8 +2241,39 @@ export const subscribeEventConfig = (
   );
 };
 
+const mapFirestoreRegistrationDoc = (
+  docId: string,
+  rawData: Record<string, unknown>
+): Registration => {
+  const data = rawData as unknown as Registration;
+  const status =
+    data.status === 'presente' || data.status === 'cancelada' ? data.status : 'confirmada';
+  return {
+    ...data,
+    id: data.id || docId,
+    status,
+    certificateIssued: status === 'presente' ? Boolean(data.certificateIssued) : false
+  };
+};
+
+export const fetchAdminRegistrationsFromDb = async (): Promise<Registration[]> => {
+  const user = firestoreAuth.currentUser;
+  if (!user || !isVerifiedAdminUser(user)) {
+    throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+  try {
+    const snap = await getDocs(query(collection(db, 'registrations'), orderBy('registeredAt', 'desc')));
+    return snap.docs.map((d) =>
+      mapFirestoreRegistrationDoc(d.id, d.data() as Record<string, unknown>)
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'registrations');
+  }
+};
+
 export const subscribeAdminRegistrations = (
-  onUpdate: (regs: Registration[]) => void
+  onUpdate: (regs: Registration[]) => void,
+  onError?: (error: unknown) => void
 ) => {
   if (!firestoreAuth.currentUser) {
     return () => {};
@@ -2084,20 +2282,14 @@ export const subscribeAdminRegistrations = (
   return onSnapshot(
     q,
     (snapshot) => {
-      const list: Registration[] = snapshot.docs.map((d) => {
-        const data = d.data() as Registration;
-        const status = data.status === 'presente' || data.status === 'cancelada' ? data.status : 'confirmada';
-        return {
-          ...data,
-          id: data.id || d.id,
-          status,
-          certificateIssued: status === 'presente' ? Boolean(data.certificateIssued) : false
-        };
-      });
+      const list: Registration[] = snapshot.docs.map((d) =>
+        mapFirestoreRegistrationDoc(d.id, d.data() as Record<string, unknown>)
+      );
       onUpdate(list);
     },
     (error) => {
       console.warn('Aviso ao sincronizar inscrições do Firestore:', error);
+      onError?.(error);
     }
   );
 };

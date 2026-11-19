@@ -53,6 +53,7 @@ import {
   testFirestoreConnection,
   subscribeAuthState,
   signInFirestoreAdmin,
+  consumeAdminRedirectResult,
   signOutFirestoreAdmin,
   isVerifiedAdminUser,
   seedInitialDataIfNeeded,
@@ -66,6 +67,7 @@ import {
   recordCertificateDownloadInDb,
   saveEventConfigInDb,
   subscribeEventConfig,
+  fetchAdminRegistrationsFromDb,
   subscribeAdminRegistrations,
   subscribeCertificateDownloads,
   saveDownloadMaterialToDb,
@@ -211,6 +213,31 @@ export default function App() {
     testFirestoreConnection().catch((err) => {
       console.warn('Firestore connection test info:', err);
     });
+
+    consumeAdminRedirectResult()
+      .then(({ user, hadPendingRedirect, error }) => {
+        if (user && isVerifiedAdminUser(user)) {
+          setFirebaseUser(user);
+          setFirebaseSyncError(null);
+          try {
+            sessionStorage.setItem('simposio_admin_auth', 'true');
+            localStorage.removeItem('simposio_admin_logged_out');
+          } catch {
+            // ignore storage errors
+          }
+          setIsAdminAuthenticated(true);
+          setCurrentView('admin');
+          if (typeof window !== 'undefined' && window.location.hash !== '#admin') {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search + '#admin');
+          }
+        } else if (error) {
+          setFirebaseSyncError(error);
+          if (hadPendingRedirect) {
+            setCurrentView('admin');
+          }
+        }
+      })
+      .catch(() => {});
 
     const unsubConfig = subscribeEventConfig((remoteCfg) => {
       setConfig((prev) => {
@@ -390,13 +417,34 @@ export default function App() {
         if (isActive) setIsCloudSyncing(false);
       });
 
-    const unsubRegs = subscribeAdminRegistrations((remoteRegs) => {
-      if (!isActive || remoteRegs.length === 0) return;
-      const deletedRegIds = getDeletedRegistrationIds();
-      const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
-      setRegistrations(validRemote);
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
-    });
+    fetchAdminRegistrationsFromDb()
+      .then((remoteRegs) => {
+        if (!isActive || remoteRegs.length === 0) return;
+        const deletedRegIds = getDeletedRegistrationIds();
+        const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
+        setRegistrations(validRemote);
+        saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
+      })
+      .catch((err) => {
+        if (isActive) {
+          console.warn('Aviso ao carregar inscrições iniciais do Firestore:', err);
+        }
+      });
+
+    const unsubRegs = subscribeAdminRegistrations(
+      (remoteRegs) => {
+        if (!isActive || remoteRegs.length === 0) return;
+        const deletedRegIds = getDeletedRegistrationIds();
+        const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
+        setRegistrations(validRemote);
+        saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
+      },
+      (err) => {
+        if (!isActive) return;
+        const msg = err instanceof Error ? err.message : 'Falha de conexão com o Firestore.';
+        setFirebaseSyncError(`Erro ao sincronizar inscrições em tempo real: ${msg}`);
+      }
+    );
 
     const unsubDownloads = subscribeCertificateDownloads((remoteDownloads) => {
       if (!isActive) return;
@@ -431,24 +479,65 @@ export default function App() {
     };
   }, [firebaseUser]);
 
-  const handleConnectFirebaseAdmin = async () => {
+  const handleConnectFirebaseAdmin = async (
+    options?: { preferRedirect?: boolean }
+  ): Promise<boolean> => {
     setFirebaseSyncError(null);
     setIsCloudSyncing(true);
     try {
-      const user = await signInFirestoreAdmin();
+      const user = await signInFirestoreAdmin(options);
       if (user) {
         if (!isVerifiedAdminUser(user)) {
           setFirebaseSyncError(
             `Conta ${user.email || 'selecionada'} sem permissão de gestor. Faça login com farmaciademinas.marketing@gmail.com.`
           );
-        } else {
-          setFirebaseUser(user);
-          setFirebaseSyncError(null);
+          return false;
         }
+        setFirebaseUser(user);
+        setFirebaseSyncError(null);
+        return true;
       }
+      return false;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Falha na autenticação Google.';
       setFirebaseSyncError(message);
+      return false;
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleGoogleAdminLoginFromGate = async (
+    options?: { preferRedirect?: boolean }
+  ): Promise<boolean> => {
+    const ok = await handleConnectFirebaseAdmin(options);
+    if (ok) {
+      try {
+        sessionStorage.setItem('simposio_admin_auth', 'true');
+        localStorage.removeItem('simposio_admin_logged_out');
+      } catch {
+        // ignore storage errors
+      }
+      setIsAdminAuthenticated(true);
+    }
+    return ok;
+  };
+
+  const handleRefreshRegistrationsFromCloud = async (): Promise<number> => {
+    setIsCloudSyncing(true);
+    setFirebaseSyncError(null);
+    try {
+      const remoteRegs = await fetchAdminRegistrationsFromDb();
+      const deletedRegIds = getDeletedRegistrationIds();
+      const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
+      setRegistrations(validRemote);
+      saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
+      return validRemote.length;
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : 'Falha ao buscar inscrições na nuvem.';
+      setFirebaseSyncError(`Não foi possível atualizar inscritos da nuvem: ${message}`);
+      throw err;
     } finally {
       setIsCloudSyncing(false);
     }
@@ -1825,6 +1914,8 @@ export default function App() {
                 }
               }}
               editionTitle={config.editionTitle}
+              onGoogleAdminLogin={handleGoogleAdminLoginFromGate}
+              googleAuthError={firebaseSyncError}
             />
           ) : (
             <AdminDashboard
@@ -1871,6 +1962,7 @@ export default function App() {
               }}
               onConnectFirebaseAdmin={handleConnectFirebaseAdmin}
               onDisconnectFirebaseAdmin={handleDisconnectFirebaseAdmin}
+              onRefreshRegistrations={handleRefreshRegistrationsFromCloud}
             />
           )}
           </Suspense>

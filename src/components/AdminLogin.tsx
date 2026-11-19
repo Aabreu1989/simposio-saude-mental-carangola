@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Lock, User, KeyRound, Eye, EyeOff, ArrowLeft, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { Shield, Lock, User, KeyRound, Eye, EyeOff, ArrowLeft, CheckCircle2, AlertCircle, Sparkles, Cloud } from 'lucide-react';
 import { sha256Hex } from '../services/firebaseDb.ts';
 
 const ADMIN_PASSWORD_SHA256 = '949919aadc7d9deec65baee3b8062415c26508f5a705aa420e534ebe1cd23c0f';
@@ -8,12 +8,16 @@ interface AdminLoginProps {
   onLoginSuccess: (rememberMe: boolean) => void;
   onBackToPublic: () => void;
   editionTitle?: string;
+  onGoogleAdminLogin?: (options?: { preferRedirect?: boolean }) => Promise<boolean>;
+  googleAuthError?: string | null;
 }
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({
   onLoginSuccess,
   onBackToPublic,
-  editionTitle = '1º Simpósio de Saúde Mental da Microrregião de Carangola'
+  editionTitle = '1º Simpósio de Saúde Mental da Microrregião de Carangola',
+  onGoogleAdminLogin,
+  googleAuthError
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,6 +25,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -129,15 +134,73 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
           </div>
 
           {/* Form Body */}
-          <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-5">
+          <div className="p-6 sm:p-8 space-y-5">
             {/* Error Banner */}
-            {errorMessage && (
+            {(errorMessage || googleAuthError) && (
               <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
                 <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <div className="font-semibold">{errorMessage}</div>
+                <div className="font-semibold">{errorMessage || googleAuthError}</div>
               </div>
             )}
 
+            {/* 1-Click Official Google Auth (Syncs Panel + Firestore Inscritos Immediately) */}
+            {onGoogleAdminLogin && (
+              <div className="space-y-2 pb-1">
+                <button
+                  type="button"
+                  disabled={isGoogleLoading || isLoading || isSuccess}
+                  onClick={async () => {
+                    setErrorMessage(null);
+                    setIsGoogleLoading(true);
+                    try {
+                      await onGoogleAdminLogin();
+                    } finally {
+                      setIsGoogleLoading(false);
+                    }
+                  }}
+                  className="w-full py-3 px-4 rounded-xl border-2 border-[#028090]/35 bg-[#f2fbfb] hover:bg-[#e2f5f6] text-[#0a3641] font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60"
+                >
+                  {isGoogleLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-[#0a3641]/30 border-t-[#0a3641] rounded-full animate-spin" />
+                      <span>Conectando conta Google oficial...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Cloud className="w-4 h-4 text-[#028090] shrink-0" />
+                      <span>Entrar com Google Oficial (Sincroniza Inscritos)</span>
+                    </>
+                  )}
+                </button>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    disabled={isGoogleLoading || isLoading || isSuccess}
+                    onClick={async () => {
+                      setErrorMessage(null);
+                      setIsGoogleLoading(true);
+                      try {
+                        await onGoogleAdminLogin({ preferRedirect: true });
+                      } finally {
+                        setIsGoogleLoading(false);
+                      }
+                    }}
+                    className="text-[11px] font-semibold text-[#028090] hover:text-[#0a3641] underline underline-offset-2 cursor-pointer disabled:opacity-60"
+                  >
+                    Usando celular/PWA e o popup não abriu? Entrar via redirecionamento
+                  </button>
+                </div>
+                <div className="relative flex items-center py-2">
+                  <div className="flex-grow border-t border-stone-200" />
+                  <span className="flex-shrink mx-3 text-[10px] font-mono uppercase tracking-wider text-stone-400">
+                    ou entre com usuário e senha
+                  </span>
+                  <div className="flex-grow border-t border-stone-200" />
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5">
             {/* Success Banner */}
             {isSuccess && (
               <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
@@ -265,6 +328,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({
               <span className="font-mono text-stone-400">Acesso Restrito</span>
             </div>
           </form>
+          </div>
         </div>
 
         {/* Footer Info */}

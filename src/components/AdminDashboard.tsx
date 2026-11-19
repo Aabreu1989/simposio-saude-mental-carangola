@@ -150,8 +150,9 @@ interface AdminDashboardProps {
   onDeleteSpeaker?: (id: string) => void;
   onResetSpeakers?: () => void;
   firebaseSyncState?: FirebaseSyncState;
-  onConnectFirebaseAdmin?: () => Promise<void>;
+  onConnectFirebaseAdmin?: (options?: { preferRedirect?: boolean }) => Promise<boolean | void>;
   onDisconnectFirebaseAdmin?: () => Promise<void>;
+  onRefreshRegistrations?: () => Promise<number | void>;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -186,7 +187,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onResetSpeakers,
   firebaseSyncState,
   onConnectFirebaseAdmin,
-  onDisconnectFirebaseAdmin
+  onDisconnectFirebaseAdmin,
+  onRefreshRegistrations
 }) => {
   const [activeTab, setActiveTab] = useState<'analytics' | 'attendees' | 'certificates' | 'materials' | 'posts' | 'notifications' | 'subscribers' | 'customizer' | 'speakers'>('analytics');
   const [customizerSubView, setCustomizerSubView] = useState<'event' | 'badge'>('event');
@@ -212,6 +214,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isSavingMaterial, setIsSavingMaterial] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [downloadingMaterialId, setDownloadingMaterialId] = useState<string | null>(null);
+  const [isRefreshingRegs, setIsRefreshingRegs] = useState(false);
 
   // New PDF Material Form state
   const [newMaterialForm, setNewMaterialForm] = useState({
@@ -1757,6 +1760,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
+        {/* Alerta imediato acima das abas no celular/desktop quando a nuvem ainda não está conectada */}
+        {firebaseSyncState && !(firebaseSyncState.isConnected && firebaseSyncState.isVerifiedAdmin) && (
+          <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 border-t border-amber-400/30 bg-amber-500/15 py-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-start sm:items-center gap-2 text-xs text-amber-100">
+                <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5 sm:mt-0" />
+                <div>
+                  <span className="font-bold">
+                    Nuvem desconectada neste aparelho — conecte o Google para ver os inscritos em tempo real.
+                  </span>
+                  {firebaseSyncState.error && (
+                    <span className="block text-[11px] text-rose-200 mt-0.5 font-medium">
+                      {firebaseSyncState.error}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {onConnectFirebaseAdmin && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onConnectFirebaseAdmin()}
+                    className="px-3 py-1.5 rounded-lg bg-[#ea7a38] hover:bg-[#d96522] text-white text-xs font-extrabold shadow-xs cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Conectar Google (Gestor)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onConnectFirebaseAdmin({ preferRedirect: true })}
+                    className="px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white border border-white/25 text-xs font-bold cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    Modo Celular (Redirecionar)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Tab Navigation: Painel Gestor com Palestrantes Editáveis */}
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 border-t border-white/10 pt-3 pb-3">
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-9 gap-2 sm:gap-2.5">
@@ -2122,26 +2164,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               {firebaseSyncState.isConnected && firebaseSyncState.isVerifiedAdmin ? (
-                onDisconnectFirebaseAdmin && (
-                  <button
-                    type="button"
-                    onClick={onDisconnectFirebaseAdmin}
-                    className="px-3 py-1.5 text-[11px] font-bold text-emerald-900 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer"
-                  >
-                    Encerrar Sessão do Gestor
-                  </button>
-                )
+                <>
+                  {onRefreshRegistrations && (
+                    <button
+                      type="button"
+                      disabled={isRefreshingRegs}
+                      onClick={async () => {
+                        setIsRefreshingRegs(true);
+                        try {
+                          await onRefreshRegistrations();
+                        } finally {
+                          setIsRefreshingRegs(false);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-[#0a3641] bg-white hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingRegs ? 'animate-spin' : ''}`} />
+                      <span>{isRefreshingRegs ? 'Atualizando...' : 'Atualizar Nuvem'}</span>
+                    </button>
+                  )}
+                  {onDisconnectFirebaseAdmin && (
+                    <button
+                      type="button"
+                      onClick={onDisconnectFirebaseAdmin}
+                      className="px-3 py-1.5 text-[11px] font-bold text-emerald-900 bg-white hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer"
+                    >
+                      Encerrar Sessão do Gestor
+                    </button>
+                  )}
+                </>
               ) : (
                 onConnectFirebaseAdmin && (
-                  <button
-                    type="button"
-                    onClick={onConnectFirebaseAdmin}
-                    className="px-4 py-2 text-xs font-extrabold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    Conectar com farmaciademinas.marketing@gmail.com
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onConnectFirebaseAdmin()}
+                      className="px-4 py-2 text-xs font-extrabold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      Conectar com farmaciademinas.marketing@gmail.com
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onConnectFirebaseAdmin({ preferRedirect: true })}
+                      className="px-3 py-2 text-xs font-bold text-[#0a3641] bg-white hover:bg-amber-100 border border-amber-300 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      Modo Celular (Redirecionar)
+                    </button>
+                  </>
                 )
               )}
             </div>
@@ -3193,6 +3264,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {firebaseSyncState?.isVerifiedAdmin && onRefreshRegistrations && (
+                  <button
+                    type="button"
+                    disabled={isRefreshingRegs}
+                    onClick={async () => {
+                      setIsRefreshingRegs(true);
+                      try {
+                        await onRefreshRegistrations();
+                      } finally {
+                        setIsRefreshingRegs(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] active:scale-95 rounded-lg shadow-xs transition-all cursor-pointer disabled:opacity-60"
+                    title="Recarregar lista oficial de inscritos diretamente do Firestore"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-[#ea7a38] ${isRefreshingRegs ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingRegs ? 'Atualizando...' : 'Atualizar da Nuvem'}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
@@ -3429,6 +3520,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     Fechar
                   </button>
                 </div>
+              </div>
+            )}
+
+            {firebaseSyncState && !firebaseSyncState.isVerifiedAdmin && (
+              <div className="p-4 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-950 space-y-3">
+                <div className="flex items-start gap-2.5 text-xs">
+                  <CloudOff className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-extrabold text-sm text-amber-950">
+                      Conecte a conta Google oficial para carregar os inscritos da nuvem
+                    </div>
+                    <p className="mt-0.5 leading-relaxed">
+                      Os inscritos ficam protegidos na nuvem (Firebase). Para visualizá-los neste navegador/celular, conecte a conta oficial <strong className="font-mono">farmaciademinas.marketing@gmail.com</strong>.
+                    </p>
+                  </div>
+                </div>
+                {onConnectFirebaseAdmin && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onConnectFirebaseAdmin()}
+                      className="px-4 py-2 text-xs font-extrabold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl cursor-pointer transition-colors"
+                    >
+                      Conectar com Google Agora
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onConnectFirebaseAdmin({ preferRedirect: true })}
+                      className="px-3.5 py-2 text-xs font-bold text-[#0a3641] bg-white hover:bg-amber-100 border border-amber-300 rounded-xl cursor-pointer transition-colors"
+                    >
+                      Modo Celular (Redirecionar)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3866,7 +3991,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {onConnectFirebaseAdmin && (
                     <button
                       type="button"
-                      onClick={onConnectFirebaseAdmin}
+                      onClick={() => onConnectFirebaseAdmin()}
                       className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs cursor-pointer shrink-0"
                     >
                       <Cloud className="w-3.5 h-3.5 text-[#ea7a38]" />
@@ -4682,7 +4807,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {onConnectFirebaseAdmin && (
                   <button
                     type="button"
-                    onClick={onConnectFirebaseAdmin}
+                    onClick={() => onConnectFirebaseAdmin()}
                     className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-xs cursor-pointer shrink-0"
                   >
                     <Cloud className="w-3.5 h-3.5 text-[#ea7a38]" />
@@ -6037,7 +6162,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {onConnectFirebaseAdmin && (
                   <button
                     type="button"
-                    onClick={onConnectFirebaseAdmin}
+                    onClick={() => onConnectFirebaseAdmin()}
                     className="px-2.5 py-1.5 rounded-lg bg-[#0a3641] text-white font-bold shrink-0 cursor-pointer hover:bg-[#0f4b59]"
                   >
                     Conectar
