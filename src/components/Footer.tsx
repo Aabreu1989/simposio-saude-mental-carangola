@@ -103,110 +103,157 @@ export const Footer: React.FC<FooterProps> = ({
 
         </div>
 
-        {/* Apoio Institucional e Serviços da RAPS */}
-        <div className="mt-6 pt-5 border-t border-stone-800/80">
-          <h4 className="text-[11px] font-bold uppercase tracking-wider text-stone-300 font-mono mb-3 text-center sm:text-left">
-            APOIO:
-          </h4>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-            <div className="bg-[#07242c] rounded-xl p-2 border border-white/10 flex flex-col items-center justify-center gap-1">
-              <img
-                src="/assets/logo-caps-1.jpg"
-                alt="CAPS 1 - Centro de Atenção Psicossocial I Livre Mente"
-                loading="lazy"
-                className="h-10 sm:h-12 w-auto max-w-full object-contain rounded-md"
-              />
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
-                CAPS 1
+        {/* Hierarquia Institucional: Realização, Apoio e Parceiro */}
+        <div className="mt-6 pt-5 border-t border-stone-800/80 space-y-5">
+          {/* Nível 1: Realização */}
+          <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-3.5 sm:p-4">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-1.5 mb-3 text-center sm:text-left">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[#ea7a38] font-mono block">
+                  Realização
+                </span>
+                <h4 className="text-sm sm:text-base font-extrabold text-white tracking-tight mt-0.5">
+                  Superintendência de Saúde Mental de Carangola
+                </h4>
+              </div>
+              <span className="text-[10px] uppercase tracking-wider text-stone-400 font-mono">
+                Serviços da RAPS
               </span>
             </div>
 
-            <div className="bg-[#07242c] rounded-xl p-2 border border-white/10 flex flex-col items-center justify-center gap-1">
-              <img
-                src="/assets/logo-ceco-carangola.png"
-                alt="Centro de Convivência e Cultura de Carangola"
-                loading="lazy"
-                className="h-10 sm:h-12 w-auto max-w-full object-contain rounded-md"
-              />
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
-                Centro de Convivência e Cultura de Carangola
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
+                <img
+                  src="/assets/logo-caps-1.jpg"
+                  alt="CAPS 1 - Centro de Atenção Psicossocial I Livre Mente"
+                  loading="lazy"
+                  className="h-9 sm:h-10 w-auto max-w-full object-contain rounded-md"
+                />
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  CAPS 1
+                </span>
+              </div>
+
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
+                <img
+                  src="/assets/logo-ceco-carangola.png"
+                  alt="Centro de Convivência e Cultura de Carangola"
+                  loading="lazy"
+                  className="h-9 sm:h-10 w-auto max-w-full object-contain rounded-md"
+                />
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  Centro de Convivência e Cultura de Carangola
+                </span>
+              </div>
+
+              <div className="col-span-2 w-[calc(50%-0.25rem)] justify-self-center sm:col-span-1 sm:w-full bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
+                <img
+                  src="/assets/logo-caps-ij.png"
+                  alt="CAPS Infanto Juvenil Tucurupi"
+                  loading="lazy"
+                  className="h-9 sm:h-10 w-auto max-w-full object-contain rounded-md"
+                />
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  CAPS Infanto Juvenil
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Nível 2 (Apoio) e Nível 3 (Parceiro) */}
+          <div>
+            <div className="md:hidden mb-2.5 text-center sm:text-left">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-teal-300 font-mono">
+                Apoio
+              </span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 font-mono">
+                {' '}· Parceiro
               </span>
             </div>
 
-            <div className="bg-[#07242c] rounded-xl p-2 border border-white/10 flex flex-col items-center justify-center gap-1">
-              <img
-                src="/assets/logo-caps-ij.png"
-                alt="CAPS Infanto Juvenil Tucurupi"
-                loading="lazy"
-                className="h-10 sm:h-12 w-auto max-w-full object-contain rounded-md"
-              />
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
-                CAPS Infanto Juvenil
-              </span>
+            <div className="hidden md:grid md:grid-cols-4 gap-3 mb-2.5">
+              <h4 className="md:col-span-3 text-[11px] font-bold uppercase tracking-wider text-teal-300 font-mono">
+                Apoio
+              </h4>
+              <h4 className="md:col-span-1 md:border-l md:border-stone-800/80 md:pl-3 text-[11px] font-bold uppercase tracking-wider text-stone-400 font-mono">
+                Parceiro
+              </h4>
             </div>
 
-            <div className="bg-[#07242c] rounded-xl p-2 border border-white/10 flex flex-col items-center justify-center gap-1">
-              <div className="h-10 sm:h-12 w-full flex items-center justify-center">
-                <div className="bg-white rounded-md px-2 py-1 inline-flex items-center justify-center max-w-full max-h-full">
-                  <img
-                    src="/assets/logo-camara-carangola.png"
-                    alt="Câmara Municipal de Carangola - Poder Legislativo"
-                    loading="lazy"
-                    className="h-8 sm:h-10 w-auto max-w-full object-contain"
-                  />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[82px] md:h-20">
+                <img
+                  src="/assets/aistudio/Logotipo_Municipal_de_Carangola_em_Branco_564e127a.png"
+                  alt="Prefeitura Municipal de Carangola"
+                  loading="lazy"
+                  className="h-9 sm:h-10 w-auto max-w-full object-contain mix-blend-screen"
+                />
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  Prefeitura Municipal de Carangola
+                </span>
+              </div>
+
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[82px] md:h-20">
+                <div className="h-9 sm:h-10 w-full flex items-center justify-center">
+                  <div className="bg-white rounded-md px-2 py-1 inline-flex items-center justify-center max-w-full max-h-full">
+                    <img
+                      src="/assets/logo-secretaria-saude-carangola.jpg"
+                      alt="Secretaria Municipal de Saúde de Carangola - SUS"
+                      loading="lazy"
+                      className="h-7 sm:h-8 w-auto max-w-full object-contain"
+                    />
+                  </div>
+                </div>
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  Secretaria de Saúde de Carangola
+                </span>
+              </div>
+
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[82px] md:h-20">
+                <div className="h-9 sm:h-10 w-full flex items-center justify-center">
+                  <div className="bg-white rounded-md px-2 py-1 inline-flex items-center justify-center max-w-full max-h-full">
+                    <img
+                      src="/assets/logo-camara-carangola.png"
+                      alt="Câmara Municipal de Carangola - Poder Legislativo"
+                      loading="lazy"
+                      className="h-7 sm:h-8 w-auto max-w-full object-contain"
+                    />
+                  </div>
+                </div>
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  Câmara Municipal de Carangola
+                </span>
+              </div>
+
+              <div className="flex md:border-l md:border-stone-800/80 md:pl-3">
+                <div className="w-full bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[82px] md:h-20">
+                  <span className="md:hidden text-[8px] font-bold uppercase tracking-widest text-[#ea7a38] font-mono leading-none">
+                    Parceiro
+                  </span>
+                  <div className="h-9 sm:h-10 w-full flex items-center justify-center">
+                    <div className="bg-white rounded-md px-2 py-1 inline-flex items-center justify-center max-w-full max-h-full">
+                      <img
+                        src="/assets/logo-unicafes-de-origem.png"
+                        alt="Café de Origem - UNICAFES MG"
+                        loading="lazy"
+                        className="h-7 sm:h-8 w-auto max-w-full object-contain"
+                      />
+                    </div>
+                  </div>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                    Café de Origem
+                  </span>
                 </div>
               </div>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
-                Câmara Municipal de Carangola
-              </span>
-            </div>
-
-            <div className="bg-[#07242c] rounded-xl p-2 border border-white/10 flex flex-col items-center justify-center gap-1">
-              <div className="h-10 sm:h-12 w-full flex items-center justify-center">
-                <div className="bg-white rounded-md px-2 py-1 inline-flex items-center justify-center max-w-full max-h-full">
-                  <img
-                    src="/assets/logo-secretaria-saude-carangola.jpg"
-                    alt="Secretaria Municipal de Saúde de Carangola - SUS"
-                    loading="lazy"
-                    className="h-8 sm:h-10 w-auto max-w-full object-contain"
-                  />
-                </div>
-              </div>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
-                Secretaria Municipal de Saúde de Carangola
-              </span>
-            </div>
-
-            <div className="bg-[#07242c] rounded-xl p-2 border border-white/10 flex flex-col items-center justify-center gap-1">
-              <div className="h-10 sm:h-12 w-full flex items-center justify-center">
-                <div className="bg-white rounded-md px-2 py-1 inline-flex items-center justify-center max-w-full max-h-full">
-                  <img
-                    src="/assets/logo-unicafes-de-origem.png"
-                    alt="UNICAFES MG - de origem"
-                    loading="lazy"
-                    className="h-8 sm:h-10 w-auto max-w-full object-contain"
-                  />
-                </div>
-              </div>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
-                UNICAFES MG · de origem
-              </span>
             </div>
           </div>
         </div>
 
         {/* Bottom Bar */}
         <div className="mt-6 pt-4 border-t border-stone-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-stone-400">
-          <div className="flex items-center gap-3 text-center sm:text-left">
-            <img
-              src="/assets/aistudio/Logotipo_Municipal_de_Carangola_em_Branco_564e127a.png"
-              alt="Prefeitura de Carangola"
-              className="h-14 sm:h-16 md:h-20 w-auto object-contain mix-blend-screen opacity-100 hover:scale-105 transition-transform shrink-0"
-            />
-            <span>
-              © 2026 Sistema Único de Saúde (SUS) · Prefeitura Municipal de Carangola - MG.
-            </span>
-          </div>
+          <span className="text-center sm:text-left">
+            © 2026 Sistema Único de Saúde (SUS) · Prefeitura Municipal de Carangola - MG.
+          </span>
 
           {onOpenInstallApp && (
             <button
