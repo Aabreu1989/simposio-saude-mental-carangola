@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Award,
   CheckCircle2,
@@ -11,7 +11,9 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
-  Upload,
+  Link,
+  AlertTriangle,
+  Loader2,
   Eye,
   Clock,
   Users,
@@ -31,6 +33,7 @@ import {
   exportToExcel,
   generatePrintablePDFReport,
   getCertificateDesign,
+  sanitizeCertificateBannerUrl,
   isCertificateAvailableForPublic,
   CERTIFICATE_RELEASE_LABEL
 } from '../utils/helpers.ts';
@@ -38,12 +41,13 @@ import { CertificateSheet } from './CertificateSheet.tsx';
 
 interface AdminCertificateManagerProps {
   config: EventConfig;
-  onUpdateConfig: (newConfig: EventConfig) => void;
+  onUpdateConfig: (newConfig: EventConfig) => Promise<void> | void;
   registrations: Registration[];
   certificateDownloads: CertificateDownloadRecord[];
-  onToggleCertificateIssued: (regId: string) => void;
-  onReleaseAllPresentCertificates: () => number;
+  onToggleCertificateIssued: (regId: string) => Promise<Registration | void> | void;
+  onReleaseAllPresentCertificates: () => Promise<number> | number;
   onPreviewCertificate: (attendee: Registration) => void;
+  isCloudAdminConnected?: boolean;
 }
 
 const DESIGN_PRESETS: Array<{
@@ -117,19 +121,36 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
   certificateDownloads,
   onToggleCertificateIssued,
   onReleaseAllPresentCertificates,
-  onPreviewCertificate
+  onPreviewCertificate,
+  isCloudAdminConnected = false
 }) => {
   const [subView, setSubView] = useState<'tracking' | 'design'>('tracking');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'downloaded' | 'issued_not_downloaded' | 'pending'>('all');
-  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [busyRegId, setBusyRegId] = useState<string | null>(null);
+  const [isReleasingBatch, setIsReleasingBatch] = useState(false);
 
   // Design Editor State
   const [draftDesign, setDraftDesign] = useState<CertificateDesignConfig>(() => getCertificateDesign(config));
+  const [isDesignDirty, setIsDesignDirty] = useState(false);
+  const [isSavingDesign, setIsSavingDesign] = useState(false);
   const [designSaved, setDesignSaved] = useState(false);
   const [previewAttendeeId, setPreviewAttendeeId] = useState<string>(
-    registrations.find((r) => r.code === 'CAR-SM-001')?.id || registrations[0]?.id || ''
+    registrations[0]?.id || ''
   );
+
+  useEffect(() => {
+    if (!isDesignDirty) {
+      setDraftDesign(getCertificateDesign(config));
+    }
+  }, [config, isDesignDirty]);
+
+  const updateDraft = (updater: Partial<CertificateDesignConfig> | ((prev: CertificateDesignConfig) => CertificateDesignConfig)) => {
+    setIsDesignDirty(true);
+    setDesignSaved(false);
+    setDraftDesign((prev) => (typeof updater === 'function' ? updater(prev) : { ...prev, ...updater }));
+  };
 
   const publicAvailable = isCertificateAvailableForPublic();
 
@@ -139,18 +160,24 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
       string,
       { count: number; lastAt?: string; lastMethod?: 'pdf' | 'print' }
     >();
+    const regIdByCode = new Map<string, string>();
+    registrations.forEach((r) => {
+      if (r.code) regIdByCode.set(r.code.toUpperCase(), r.id);
+    });
 
     certificateDownloads.forEach((rec) => {
-      const prev = byRegId.get(rec.registrationId);
+      const targetId = rec.registrationId || regIdByCode.get((rec.code || '').toUpperCase()) || '';
+      if (!targetId) return;
+      const prev = byRegId.get(targetId);
       if (!prev) {
-        byRegId.set(rec.registrationId, {
+        byRegId.set(targetId, {
           count: 1,
           lastAt: rec.downloadedAt,
           lastMethod: rec.method
         });
       } else {
         const isNewer = new Date(rec.downloadedAt).getTime() >= new Date(prev.lastAt || 0).getTime();
-        byRegId.set(rec.registrationId, {
+        byRegId.set(targetId, {
           count: prev.count + 1,
           lastAt: isNewer ? rec.downloadedAt : prev.lastAt,
           lastMethod: isNewer ? rec.method : prev.lastMethod
@@ -229,17 +256,71 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
       .sort((a, b) => new Date(b.lastAt || 0).getTime() - new Date(a.lastAt || 0).getTime());
   }, [registrations, downloadSummary]);
 
-  const showTempNotice = (msg: string) => {
-    setActionNotice(msg);
-    setTimeout(() => setActionNotice(null), 4500);
+  const showTempNotice = (message: string, type: 'success' | 'error' = 'success') => {
+    setActionNotice({ type, message });
+    setTimeout(() => setActionNotice(null), 5000);
   };
 
-  const handleReleaseAllPresent = () => {
-    const updatedCount = onReleaseAllPresentCertificates();
-    if (updatedCount > 0) {
-      showTempNotice(`${updatedCount} certificado(s) liberado(s) para participantes credenciados.`);
-    } else {
-      showTempNotice('Todos os participantes credenciados já possuem certificado liberado.');
+  const handleToggleIndividual = async (reg: Registration) => {
+    if (!isCloudAdminConnected) {
+      showTempNotice(
+        'Conecte a conta Google oficial do gestor no topo do painel para alterar certificados no Firestore.',
+        'error'
+      );
+      return;
+    }
+    if (reg.status !== 'presente' || busyRegId === reg.id) return;
+
+    setBusyRegId(reg.id);
+    setActionNotice(null);
+    try {
+      await onToggleCertificateIssued(reg.id);
+      showTempNotice(
+        reg.certificateIssued
+          ? `Certificado de ${reg.fullName} revogado no Firestore.`
+          : `Certificado de ${reg.fullName} liberado no Firestore.`
+      );
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Falha ao gravar no Firestore.';
+      showTempNotice(
+        raw === 'ADMIN_AUTH_REQUIRED'
+          ? 'Sessão Google expirada ou desconectada. Reconecte antes de alterar certificados.'
+          : `Não foi possível atualizar o certificado: ${raw}`,
+        'error'
+      );
+    } finally {
+      setBusyRegId((curr) => (curr === reg.id ? null : curr));
+    }
+  };
+
+  const handleReleaseAllPresent = async () => {
+    if (!isCloudAdminConnected) {
+      showTempNotice(
+        'Conecte a conta Google oficial do gestor para liberar certificados no Firestore.',
+        'error'
+      );
+      return;
+    }
+    if (isReleasingBatch) return;
+    setIsReleasingBatch(true);
+    setActionNotice(null);
+    try {
+      const updatedCount = await onReleaseAllPresentCertificates();
+      if (updatedCount > 0) {
+        showTempNotice(`${updatedCount} certificado(s) liberado(s) e confirmado(s) no Firestore.`);
+      } else {
+        showTempNotice('Todos os participantes credenciados já possuem certificado liberado.');
+      }
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Falha ao gravar lote no Firestore.';
+      showTempNotice(
+        raw === 'ADMIN_AUTH_REQUIRED'
+          ? 'Sessão Google expirada ou desconectada. Reconecte para liberar em lote.'
+          : `Não foi possível liberar em lote: ${raw}`,
+        'error'
+      );
+    } finally {
+      setIsReleasingBatch(false);
     }
   };
 
@@ -321,48 +402,92 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
     });
   };
 
-  const handleSaveDesign = (e: React.FormEvent) => {
+  const handleSaveDesign = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateConfig({
-      ...config,
-      certificateDesign: draftDesign
-    });
-    setDesignSaved(true);
-    setTimeout(() => setDesignSaved(false), 3500);
-  };
-
-  const handleResetDesign = () => {
-    const reset = { ...INITIAL_CERTIFICATE_DESIGN };
-    setDraftDesign(reset);
-    onUpdateConfig({
-      ...config,
-      certificateDesign: reset
-    });
-    showTempNotice('Design padrão do certificado restaurado com sucesso.');
-  };
-
-  const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 3 * 1024 * 1024) {
-      showTempNotice('A imagem deve ter no máximo 3 MB.');
+    if (!isCloudAdminConnected) {
+      showTempNotice(
+        'Conecte a conta Google oficial do gestor para salvar o design do certificado no Firestore.',
+        'error'
+      );
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setDraftDesign((prev) => ({
-          ...prev,
-          showBannerImage: true,
-          bannerImageUrl: reader.result as string
-        }));
-      }
+
+    const rawBanner = (draftDesign.bannerImageUrl || '').trim();
+    const cleanBanner = sanitizeCertificateBannerUrl(rawBanner);
+    if (draftDesign.showBannerImage && rawBanner && !cleanBanner) {
+      showTempNotice(
+        'URL do banner inválida: informe um ativo do portal (/assets/...) ou link https:// válido (Base64 não é permitido).',
+        'error'
+      );
+      return;
+    }
+
+    const sanitizedDraft: CertificateDesignConfig = {
+      ...draftDesign,
+      bannerImageUrl: cleanBanner,
+      showBannerImage: cleanBanner ? Boolean(draftDesign.showBannerImage) : false
     };
-    reader.readAsDataURL(file);
+
+    setIsSavingDesign(true);
+    setActionNotice(null);
+    setDesignSaved(false);
+    try {
+      await onUpdateConfig({
+        ...config,
+        certificateDesign: sanitizedDraft
+      });
+      setDraftDesign(sanitizedDraft);
+      setIsDesignDirty(false);
+      setDesignSaved(true);
+      showTempNotice('Design do certificado salvo e confirmado no Firestore.');
+      setTimeout(() => setDesignSaved(false), 3500);
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Falha ao salvar design no Firestore.';
+      showTempNotice(
+        raw === 'ADMIN_AUTH_REQUIRED'
+          ? 'Sessão Google expirada ou desconectada. Reconecte para salvar o design.'
+          : `Não foi possível salvar o design: ${raw}`,
+        'error'
+      );
+    } finally {
+      setIsSavingDesign(false);
+    }
+  };
+
+  const handleResetDesign = async () => {
+    if (!isCloudAdminConnected) {
+      showTempNotice(
+        'Conecte a conta Google oficial do gestor para restaurar o design no Firestore.',
+        'error'
+      );
+      return;
+    }
+    const reset = { ...INITIAL_CERTIFICATE_DESIGN };
+    setIsSavingDesign(true);
+    setActionNotice(null);
+    try {
+      await onUpdateConfig({
+        ...config,
+        certificateDesign: reset
+      });
+      setDraftDesign(reset);
+      setIsDesignDirty(false);
+      showTempNotice('Design padrão do certificado restaurado no Firestore.');
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Falha ao restaurar design no Firestore.';
+      showTempNotice(
+        raw === 'ADMIN_AUTH_REQUIRED'
+          ? 'Sessão Google expirada ou desconectada. Reconecte para restaurar.'
+          : `Não foi possível restaurar o design: ${raw}`,
+        'error'
+      );
+    } finally {
+      setIsSavingDesign(false);
+    }
   };
 
   const insertToken = (token: string) => {
-    setDraftDesign((prev) => ({
+    updateDraft((prev) => ({
       ...prev,
       bodyTemplate: `${prev.bodyTemplate} ${token}`.trim()
     }));
@@ -442,10 +567,33 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
         </div>
       </div>
 
+      {!isCloudAdminConnected && (
+        <div
+          role="alert"
+          className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-xs font-semibold text-amber-950 flex items-center gap-2"
+        >
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            Conecte a conta Google oficial do gestor no topo do painel para liberar/revogar certificados ou salvar alterações de design no Firestore.
+          </span>
+        </div>
+      )}
+
       {actionNotice && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-900 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>{actionNotice}</span>
+        <div
+          role={actionNotice.type === 'error' ? 'alert' : 'status'}
+          className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
+            actionNotice.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
+        >
+          {actionNotice.type === 'error' ? (
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          )}
+          <span>{actionNotice.message}</span>
         </div>
       )}
 
@@ -638,11 +786,25 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
 
               <button
                 type="button"
+                disabled={!isCloudAdminConnected || isReleasingBatch}
                 onClick={handleReleaseAllPresent}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 rounded-xl transition-colors cursor-pointer whitespace-nowrap self-start lg:self-auto"
+                title={
+                  !isCloudAdminConnected
+                    ? 'Conecte a conta Google oficial do gestor para liberar certificados na nuvem.'
+                    : 'Liberar certificados para todos os participantes presentes'
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 rounded-xl transition-colors cursor-pointer whitespace-nowrap self-start lg:self-auto disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Liberar Certificados para Todos os Presentes</span>
+                {isReleasingBatch ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4" />
+                )}
+                <span>
+                  {isReleasingBatch
+                    ? 'Salvando no Firestore...'
+                    : 'Liberar Certificados para Todos os Presentes'}
+                </span>
               </button>
             </div>
 
@@ -774,24 +936,32 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                             <div className="inline-flex items-center gap-1.5">
                               <button
                                 type="button"
-                                disabled={!isPresent}
-                                onClick={() => isPresent && onToggleCertificateIssued(reg.id)}
+                                disabled={!isPresent || !isCloudAdminConnected || busyRegId === reg.id}
+                                onClick={() => isPresent && handleToggleIndividual(reg)}
                                 title={
-                                  !isPresent
+                                  !isCloudAdminConnected
+                                    ? 'Conecte a conta Google oficial do gestor para alterar certificados no Firestore.'
+                                    : !isPresent
                                     ? 'Somente participantes com status Credenciado (Presente) podem ter certificado liberado.'
                                     : isIssuedAndPresent
                                     ? 'Revogar acesso ao certificado'
                                     : 'Liberar certificado para participante presente'
                                 }
-                                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors whitespace-nowrap ${
-                                  !isPresent
+                                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  !isPresent || !isCloudAdminConnected
                                     ? 'text-stone-400 bg-stone-100 border-stone-200 cursor-not-allowed'
                                     : isIssuedAndPresent
                                     ? 'text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-200 cursor-pointer'
                                     : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 cursor-pointer'
                                 }`}
                               >
-                                {!isPresent ? 'Requer Check-in' : isIssuedAndPresent ? 'Revogar' : 'Liberar'}
+                                {busyRegId === reg.id
+                                  ? 'Salvando...'
+                                  : !isPresent
+                                  ? 'Requer Check-in'
+                                  : isIssuedAndPresent
+                                  ? 'Revogar'
+                                  : 'Liberar'}
                               </button>
                               <button
                                 type="button"
@@ -862,7 +1032,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => setDraftDesign((prev) => ({ ...prev, ...preset.values }))}
+                    onClick={() => updateDraft((prev) => ({ ...prev, ...preset.values }))}
                     className="p-2.5 text-left rounded-xl border border-stone-200 hover:border-[#0a3641] bg-stone-50 hover:bg-white transition-all cursor-pointer"
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -889,7 +1059,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                     <input
                       type="color"
                       value={draftDesign.primaryColor}
-                      onChange={(e) => setDraftDesign({ ...draftDesign, primaryColor: e.target.value })}
+                      onChange={(e) => updateDraft({ primaryColor: e.target.value })}
                       className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                     />
                     <span className="text-[10px] font-mono text-stone-700">{draftDesign.primaryColor}</span>
@@ -901,7 +1071,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                     <input
                       type="color"
                       value={draftDesign.accentColor}
-                      onChange={(e) => setDraftDesign({ ...draftDesign, accentColor: e.target.value })}
+                      onChange={(e) => updateDraft({ accentColor: e.target.value })}
                       className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                     />
                     <span className="text-[10px] font-mono text-stone-700">{draftDesign.accentColor}</span>
@@ -913,7 +1083,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                     <input
                       type="color"
                       value={draftDesign.secondaryColor}
-                      onChange={(e) => setDraftDesign({ ...draftDesign, secondaryColor: e.target.value })}
+                      onChange={(e) => updateDraft({ secondaryColor: e.target.value })}
                       className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                     />
                     <span className="text-[10px] font-mono text-stone-700">{draftDesign.secondaryColor}</span>
@@ -925,7 +1095,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                     <input
                       type="color"
                       value={draftDesign.backgroundColor}
-                      onChange={(e) => setDraftDesign({ ...draftDesign, backgroundColor: e.target.value })}
+                      onChange={(e) => updateDraft({ backgroundColor: e.target.value })}
                       className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0"
                     />
                     <span className="text-[10px] font-mono text-stone-700">{draftDesign.backgroundColor}</span>
@@ -941,8 +1111,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <select
                   value={draftDesign.layoutTheme}
                   onChange={(e) =>
-                    setDraftDesign({
-                      ...draftDesign,
+                    updateDraft({
                       layoutTheme: e.target.value as CertificateDesignConfig['layoutTheme']
                     })
                   }
@@ -958,8 +1127,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <select
                   value={draftDesign.borderStyle}
                   onChange={(e) =>
-                    setDraftDesign({
-                      ...draftDesign,
+                    updateDraft({
                       borderStyle: e.target.value as CertificateDesignConfig['borderStyle']
                     })
                   }
@@ -975,8 +1143,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <select
                   value={draftDesign.fontFamily}
                   onChange={(e) =>
-                    setDraftDesign({
-                      ...draftDesign,
+                    updateDraft({
                       fontFamily: e.target.value as CertificateDesignConfig['fontFamily']
                     })
                   }
@@ -996,7 +1163,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.institutionTopLine}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, institutionTopLine: e.target.value })}
+                    onChange={(e) => updateDraft({ institutionTopLine: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg"
                   />
                 </div>
@@ -1005,7 +1172,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.badgeLabel}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, badgeLabel: e.target.value })}
+                    onChange={(e) => updateDraft({ badgeLabel: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg"
                   />
                 </div>
@@ -1016,7 +1183,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <input
                   type="text"
                   value={draftDesign.institutionName}
-                  onChange={(e) => setDraftDesign({ ...draftDesign, institutionName: e.target.value })}
+                  onChange={(e) => updateDraft({ institutionName: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg"
                 />
               </div>
@@ -1026,7 +1193,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <input
                   type="text"
                   value={draftDesign.institutionSub}
-                  onChange={(e) => setDraftDesign({ ...draftDesign, institutionSub: e.target.value })}
+                  onChange={(e) => updateDraft({ institutionSub: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg"
                 />
               </div>
@@ -1037,7 +1204,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.mainTitle}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, mainTitle: e.target.value })}
+                    onChange={(e) => updateDraft({ mainTitle: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg font-bold"
                   />
                 </div>
@@ -1046,7 +1213,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.preNameText}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, preNameText: e.target.value })}
+                    onChange={(e) => updateDraft({ preNameText: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg"
                   />
                 </div>
@@ -1060,7 +1227,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <textarea
                   rows={3}
                   value={draftDesign.bodyTemplate}
-                  onChange={(e) => setDraftDesign({ ...draftDesign, bodyTemplate: e.target.value })}
+                  onChange={(e) => updateDraft({ bodyTemplate: e.target.value })}
                   className="w-full px-3 py-2 text-xs border border-stone-300 rounded-lg"
                 />
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
@@ -1082,13 +1249,13 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 <input
                   type="text"
                   value={draftDesign.footerQuote}
-                  onChange={(e) => setDraftDesign({ ...draftDesign, footerQuote: e.target.value })}
+                  onChange={(e) => updateDraft({ footerQuote: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs border border-stone-300 rounded-lg"
                 />
               </div>
             </div>
 
-            {/* Visual Elements & Banner Upload */}
+            {/* Visual Elements & Banner URL */}
             <div className="space-y-3 pt-2 border-t border-stone-100">
               <label className="block text-xs font-bold text-stone-700">Elementos Visuais & Banner</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -1096,7 +1263,16 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="checkbox"
                     checked={draftDesign.showBannerImage}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, showBannerImage: e.target.checked })}
+                    onChange={(e) =>
+                      updateDraft((prev) => ({
+                        ...prev,
+                        showBannerImage: e.target.checked,
+                        bannerImageUrl:
+                          e.target.checked && !prev.bannerImageUrl
+                            ? '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'
+                            : prev.bannerImageUrl
+                      }))
+                    }
                   />
                   <span>Exibir Banner Superior</span>
                 </label>
@@ -1104,7 +1280,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="checkbox"
                     checked={draftDesign.showThematicAxes}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, showThematicAxes: e.target.checked })}
+                    onChange={(e) => updateDraft({ showThematicAxes: e.target.checked })}
                   />
                   <span>Exibir 3 Eixos Temáticos</span>
                 </label>
@@ -1112,7 +1288,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="checkbox"
                     checked={draftDesign.showBottomWaves}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, showBottomWaves: e.target.checked })}
+                    onChange={(e) => updateDraft({ showBottomWaves: e.target.checked })}
                   />
                   <span>Exibir Ondas no Rodapé</span>
                 </label>
@@ -1120,7 +1296,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="checkbox"
                     checked={draftDesign.showQrValidation}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, showQrValidation: e.target.checked })}
+                    onChange={(e) => updateDraft({ showQrValidation: e.target.checked })}
                   />
                   <span>Exibir QR / Autenticação</span>
                 </label>
@@ -1128,7 +1304,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="checkbox"
                     checked={draftDesign.showWatermark}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, showWatermark: e.target.checked })}
+                    onChange={(e) => updateDraft({ showWatermark: e.target.checked })}
                   />
                   <span>Exibir Marca d'Água</span>
                 </label>
@@ -1136,39 +1312,57 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.watermarkText}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, watermarkText: e.target.value })}
+                    onChange={(e) => updateDraft({ watermarkText: e.target.value })}
                     placeholder="Texto marca d'água"
                     className="px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg"
                   />
                 )}
               </div>
 
-              {/* Banner Image Upload */}
+              {/* Banner Asset / URL Selector (no Base64) */}
               {draftDesign.showBannerImage && (
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0a3641] bg-stone-100 hover:bg-stone-200 border border-stone-300 rounded-lg cursor-pointer">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Trocar Imagem / Logo do Banner</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleBannerUpload}
-                      className="hidden"
-                    />
+                <div className="space-y-2 pt-1 p-3 rounded-xl bg-stone-50 border border-stone-200">
+                  <label className="block text-[11px] font-bold text-stone-700 flex items-center gap-1.5">
+                    <Link className="w-3.5 h-3.5 text-[#0a3641]" />
+                    <span>URL ou Ativo Oficial do Portal (sem Base64)</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDraftDesign({
-                        ...draftDesign,
-                        bannerImageUrl: INITIAL_CERTIFICATE_DESIGN.bannerImageUrl
-                      })
-                    }
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-stone-600 hover:text-stone-900 cursor-pointer"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>Usar Flyer Padrão</span>
-                  </button>
+                  <input
+                    type="text"
+                    value={draftDesign.bannerImageUrl}
+                    onChange={(e) => updateDraft({ bannerImageUrl: e.target.value })}
+                    placeholder="/assets/banner-oficial-simposio-saude-mental-carangola.jpg ou https://..."
+                    className="w-full px-3 py-1.5 text-xs font-mono border border-stone-300 rounded-lg bg-white"
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDraft({
+                          showBannerImage: true,
+                          bannerImageUrl: '/assets/banner-oficial-simposio-saude-mental-carangola.jpg'
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#0a3641] bg-white hover:bg-stone-100 border border-stone-300 rounded-lg cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Banner Oficial do Simpósio</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDraft({
+                          showBannerImage: true,
+                          bannerImageUrl: '/assets/logo-sus-oficial.jpg'
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-[#0a3641] bg-white hover:bg-stone-100 border border-stone-300 rounded-lg cursor-pointer"
+                    >
+                      <span>Logo Oficial SUS</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-stone-500 leading-snug">
+                    Aceita apenas caminhos do portal (<code>/assets/...</code>) ou links <code>https://</code> externos.
+                  </p>
                 </div>
               )}
             </div>
@@ -1182,21 +1376,21 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.signature1Name}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, signature1Name: e.target.value })}
+                    onChange={(e) => updateDraft({ signature1Name: e.target.value })}
                     placeholder="Nome"
                     className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg bg-white"
                   />
                   <input
                     type="text"
                     value={draftDesign.signature1Role}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, signature1Role: e.target.value })}
+                    onChange={(e) => updateDraft({ signature1Role: e.target.value })}
                     placeholder="Cargo"
                     className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg bg-white"
                   />
                   <input
                     type="text"
                     value={draftDesign.signature1Org}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, signature1Org: e.target.value })}
+                    onChange={(e) => updateDraft({ signature1Org: e.target.value })}
                     placeholder="Órgão / Setor"
                     className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg bg-white"
                   />
@@ -1207,21 +1401,21 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                   <input
                     type="text"
                     value={draftDesign.signature2Name}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, signature2Name: e.target.value })}
+                    onChange={(e) => updateDraft({ signature2Name: e.target.value })}
                     placeholder="Nome"
                     className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg bg-white"
                   />
                   <input
                     type="text"
                     value={draftDesign.signature2Role}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, signature2Role: e.target.value })}
+                    onChange={(e) => updateDraft({ signature2Role: e.target.value })}
                     placeholder="Cargo"
                     className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg bg-white"
                   />
                   <input
                     type="text"
                     value={draftDesign.signature2Org}
-                    onChange={(e) => setDraftDesign({ ...draftDesign, signature2Org: e.target.value })}
+                    onChange={(e) => updateDraft({ signature2Org: e.target.value })}
                     placeholder="Órgão / Setor"
                     className="w-full px-2.5 py-1.5 text-xs border border-stone-300 rounded-lg bg-white"
                   />
@@ -1233,8 +1427,9 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
             <div className="flex flex-wrap items-center justify-between gap-2 pt-4 border-t border-stone-200">
               <button
                 type="button"
+                disabled={!isCloudAdminConnected || isSavingDesign}
                 onClick={handleResetDesign}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Restaurar Padrão</span>
@@ -1242,10 +1437,15 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
 
               <button
                 type="submit"
-                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-sm transition-colors cursor-pointer"
+                disabled={!isCloudAdminConnected || isSavingDesign}
+                className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#0f4b59] rounded-xl shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Sparkles className="w-4 h-4 text-[#ea7a38]" />
-                <span>Salvar Design do Certificado</span>
+                {isSavingDesign ? (
+                  <Loader2 className="w-4 h-4 text-[#ea7a38] animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-[#ea7a38]" />
+                )}
+                <span>{isSavingDesign ? 'Salvando na Nuvem...' : 'Salvar Design do Certificado'}</span>
               </button>
             </div>
           </form>
@@ -1277,11 +1477,36 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                 </select>
                 <button
                   type="button"
-                  onClick={() => {
-                    onUpdateConfig({ ...config, certificateDesign: draftDesign });
-                    onPreviewCertificate(previewAttendee);
+                  disabled={isSavingDesign}
+                  onClick={async () => {
+                    if (!isCloudAdminConnected) {
+                      showTempNotice(
+                        'Design não salvo no Firestore (conecte a conta Google para gravar). Abrindo pré-visualização atual.',
+                        'error'
+                      );
+                      onPreviewCertificate(previewAttendee);
+                      return;
+                    }
+                    const cleanBanner = sanitizeCertificateBannerUrl(draftDesign.bannerImageUrl);
+                    const sanitizedDraft: CertificateDesignConfig = {
+                      ...draftDesign,
+                      bannerImageUrl: cleanBanner,
+                      showBannerImage: cleanBanner ? Boolean(draftDesign.showBannerImage) : false
+                    };
+                    setIsSavingDesign(true);
+                    try {
+                      await onUpdateConfig({ ...config, certificateDesign: sanitizedDraft });
+                      setIsDesignDirty(false);
+                      onPreviewCertificate(previewAttendee);
+                    } catch (err: unknown) {
+                      const raw =
+                        err instanceof Error ? err.message : 'Falha ao salvar design no Firestore.';
+                      showTempNotice(`Não foi possível salvar antes de testar PDF: ${raw}`, 'error');
+                    } finally {
+                      setIsSavingDesign(false);
+                    }
                   }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#ea7a38] hover:bg-[#d96522] rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#ea7a38] hover:bg-[#d96522] rounded-lg transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Testar PDF</span>

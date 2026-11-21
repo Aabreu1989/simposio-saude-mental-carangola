@@ -8,7 +8,6 @@ import {
   Check,
   CheckCircle,
   ShieldAlert,
-  Eye,
   RotateCcw,
   Loader2,
   Lock
@@ -16,6 +15,7 @@ import {
 import { Registration, EventConfig } from '../types.ts';
 import {
   isCertificateAvailableForPublic,
+  getCertificateDesign,
   CERTIFICATE_RELEASE_LABEL
 } from '../utils/helpers.ts';
 import { openCertificatePrintWindow, downloadCertificateHTML } from '../utils/certificatePdfGenerator.ts';
@@ -44,13 +44,8 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
   onRecordDownload
 }) => {
   const [query, setQuery] = useState('');
-  const demoAttendee =
-    registrations.find((r) => r.status === 'presente' && r.certificateIssued) ||
-    registrations.find((r) => r.code === 'CAR-SM-001') ||
-    registrations[0] ||
-    null;
   const [foundAttendee, setFoundAttendee] = useState<Registration | null>(
-    initialAttendee || demoAttendee
+    initialAttendee || null
   );
   const [livePermission, setLivePermission] = useState<CertificatePermissionRecord | null>(null);
   const [isCheckingDbPermission, setIsCheckingDbPermission] = useState(false);
@@ -59,6 +54,26 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [actionStatus, setActionStatus] = useState<string>('');
 
+  const buildRemoteAttendeeFromPermission = (perm: CertificatePermissionRecord): Registration => ({
+    id: perm.registrationId || `remote-${perm.code}`,
+    code: perm.code,
+    fullName: perm.participantName || `Participante ${perm.code}`,
+    cpf: 'VALIDADO',
+    email: '',
+    phone: '',
+    city: perm.city || 'Carangola',
+    professionalRole: perm.professionalRole || 'Participante SUS',
+    institution: perm.institution || 'SUS Microrregião de Carangola',
+    axisInterest: 'Todos os Eixos',
+    accessibilityNeeds: 'Nenhuma',
+    status: perm.status,
+    registeredAt: perm.updatedAt || new Date().toISOString(),
+    checkedInAt: perm.checkedInAt,
+    certificateIssued: perm.certificateIssued,
+    certificateDownloaded: perm.certificateDownloaded,
+    certificateDownloadCount: perm.certificateDownloadCount
+  });
+
   const performLookup = async (rawQuery: string) => {
     const trimmed = rawQuery.trim();
     if (!trimmed) return;
@@ -66,54 +81,47 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
     setLivePermission(null);
     const cleanQuery = trimmed.replace(/\D/g, '');
     const cleanSearchStr = trimmed.toLowerCase();
+    const looksLikeParticipantCode = trimmed.length >= 3 && /^[a-zA-Z0-9_-]+$/.test(trimmed);
 
-    const localAttendee = registrations.find((reg) => {
-      const regCpfClean = (reg.cpf || '').replace(/\D/g, '');
-      const regCodeMatch = reg.code.toLowerCase() === cleanSearchStr;
-      const regCpfMatch = cleanQuery.length >= 6 && regCpfClean.includes(cleanQuery);
-      const regNameMatch = reg.fullName.toLowerCase().includes(cleanSearchStr);
-      return regCodeMatch || regCpfMatch || regNameMatch;
-    });
+    if (allowManagerAccess) {
+      const localAttendee = registrations.find((reg) => {
+        const regCpfClean = (reg.cpf || '').replace(/\D/g, '');
+        const regCodeMatch = reg.code.toLowerCase() === cleanSearchStr;
+        const regCpfMatch = cleanQuery.length >= 3 && regCpfClean.includes(cleanQuery);
+        const regNameMatch = reg.fullName.toLowerCase().includes(cleanSearchStr);
+        return regCodeMatch || regCpfMatch || regNameMatch;
+      });
 
-    if (localAttendee) {
-      setFoundAttendee(localAttendee);
-      return;
+      if (localAttendee) {
+        setFoundAttendee(localAttendee);
+        return;
+      }
     }
 
-    // Busca cruzada entre dispositivos no Firestore por Número de Participante (código)
-    const looksLikeParticipantCode = trimmed.length >= 3 && /^[a-zA-Z0-9_-]+$/.test(trimmed);
+    // Busca pública autoritativa por Nº de Participante (código CAR-SM-...) no Firestore
     if (looksLikeParticipantCode) {
       setIsCheckingDbPermission(true);
       try {
         const perm = await fetchCertificatePermissionByCode(trimmed);
         if (perm) {
-          const remoteAttendee: Registration = {
-            id: perm.registrationId || `remote-${perm.code}`,
-            code: perm.code,
-            fullName: perm.participantName || `Participante ${perm.code}`,
-            cpf: 'VALIDADO',
-            email: '',
-            phone: '',
-            city: perm.city || 'Carangola',
-            professionalRole: perm.professionalRole || 'Participante SUS',
-            institution: perm.institution || 'SUS Microrregião de Carangola',
-            axisInterest: 'Todos os Eixos',
-            accessibilityNeeds: 'Nenhuma',
-            status: perm.status,
-            registeredAt: perm.updatedAt || new Date().toISOString(),
-            checkedInAt: perm.checkedInAt,
-            certificateIssued: perm.certificateIssued,
-            certificateDownloaded: perm.certificateDownloaded,
-            certificateDownloadCount: perm.certificateDownloadCount
-          };
           setLivePermission(perm);
-          setFoundAttendee(remoteAttendee);
+          setFoundAttendee(buildRemoteAttendeeFromPermission(perm));
           return;
         }
       } catch {
         // fallback below
       } finally {
         setIsCheckingDbPermission(false);
+      }
+
+      if (!allowManagerAccess) {
+        const localByExactCode = registrations.find(
+          (reg) => reg.code.toLowerCase() === cleanSearchStr
+        );
+        if (localByExactCode) {
+          setFoundAttendee(localByExactCode);
+          return;
+        }
       }
     }
 
@@ -129,8 +137,11 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
         setFoundAttendee(initialAttendee);
         setSearched(false);
         setQuery('');
-      } else if (!foundAttendee && demoAttendee) {
-        setFoundAttendee(demoAttendee);
+      } else {
+        setFoundAttendee(null);
+        setLivePermission(null);
+        setSearched(false);
+        setQuery('');
       }
     }
   }, [isOpen, initialAttendee, initialSearchCode]);
@@ -173,10 +184,12 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
     };
   }, [isOpen, foundAttendee?.code, foundAttendee?.status, foundAttendee?.certificateIssued]);
 
-  const effectiveStatus = livePermission ? livePermission.status : foundAttendee?.status;
-  const effectiveCertificateIssued = livePermission
-    ? livePermission.certificateIssued
-    : foundAttendee?.certificateIssued;
+  const effectiveStatus = allowManagerAccess
+    ? (livePermission ? livePermission.status : foundAttendee?.status)
+    : livePermission?.status;
+  const effectiveCertificateIssued = allowManagerAccess
+    ? (livePermission ? livePermission.certificateIssued : foundAttendee?.certificateIssued)
+    : livePermission?.certificateIssued;
 
   // Regra estrita: Somente participantes credenciados ('presente') podem ter certificado liberado e impresso
   const isAccredited = effectiveStatus === 'presente';
@@ -185,6 +198,10 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
     foundAttendee &&
       isAccredited &&
       (allowManagerAccess || (certificateAvailableForPublic && Boolean(effectiveCertificateIssued)))
+  );
+  const canRenderPrintableCertificate = Boolean(canDownloadNow && !isCheckingDbPermission);
+  const canRecordDownloadNow = Boolean(
+    foundAttendee && isAccredited && Boolean(effectiveCertificateIssued)
   );
 
   if (!isOpen) return null;
@@ -195,23 +212,27 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
   };
 
   const handlePrint = () => {
-    if (!foundAttendee || !isAccredited || !canDownloadNow) return;
+    if (!foundAttendee || !canRenderPrintableCertificate) return;
     setActionStatus('Preparando janela oficial de impressão do certificado...');
     const opened = openCertificatePrintWindow(foundAttendee, config);
     if (!opened) {
       window.print();
     }
-    onRecordDownload?.(foundAttendee, 'print');
+    if (canRecordDownloadNow) {
+      onRecordDownload?.(foundAttendee, 'print');
+    }
     setTimeout(() => setActionStatus(''), 5000);
   };
 
   const handleDownload = async () => {
-    if (!foundAttendee || isGeneratingPdf || !isAccredited || !canDownloadNow) return;
+    if (!foundAttendee || isGeneratingPdf || !canRenderPrintableCertificate) return;
 
     const certElement = document.getElementById('certificado-oficial-impressao');
     if (!certElement) {
       downloadCertificateHTML(foundAttendee, config);
-      onRecordDownload?.(foundAttendee, 'pdf');
+      if (canRecordDownloadNow) {
+        onRecordDownload?.(foundAttendee, 'pdf');
+      }
       setDownloaded(true);
       setTimeout(() => setDownloaded(false), 4000);
       return;
@@ -228,6 +249,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
         .replace(/[^a-z0-9]/g, '_');
 
       const filename = `certificado_sus_${cleanName}_${foundAttendee.code}.pdf`;
+      const activeDesign = getCertificateDesign(config);
 
       const options = {
         margin: [0, 0, 0, 0],
@@ -238,7 +260,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
           useCORS: true,
           logging: false,
           letterRendering: true,
-          backgroundColor: config.certificateDesign?.backgroundColor || '#ffffff',
+          backgroundColor: activeDesign.backgroundColor || '#ffffff',
           scrollY: 0,
           scrollX: 0,
           windowWidth: 1122, // 297mm @ 96 DPI
@@ -256,7 +278,9 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
       const html2pdfLib = (html2pdfModule as any).default || html2pdfModule;
       await html2pdfLib().set(options).from(certElement).save();
 
-      onRecordDownload?.(foundAttendee, 'pdf');
+      if (canRecordDownloadNow) {
+        onRecordDownload?.(foundAttendee, 'pdf');
+      }
       setDownloaded(true);
       setActionStatus(`Certificado PDF (${filename}) exportado com sucesso!`);
       setTimeout(() => {
@@ -266,7 +290,9 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
     } catch (err) {
       console.warn('html2pdf falhou, utilizando gerador oficial de contingência:', err);
       downloadCertificateHTML(foundAttendee, config);
-      onRecordDownload?.(foundAttendee, 'pdf');
+      if (canRecordDownloadNow) {
+        onRecordDownload?.(foundAttendee, 'pdf');
+      }
       setDownloaded(true);
       setActionStatus('Arquivo oficial do certificado baixado com sucesso!');
       setTimeout(() => {
@@ -275,14 +301,6 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
       }, 4000);
     } finally {
       setIsGeneratingPdf(false);
-    }
-  };
-
-  const handleLoadDemo = () => {
-    if (demoAttendee) {
-      setFoundAttendee(demoAttendee);
-      setSearched(false);
-      setQuery('');
     }
   };
 
@@ -371,14 +389,6 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                 <label className="block text-xs font-bold text-[#0a3641] uppercase tracking-wider font-mono">
                   Buscar Participante Credenciado:
                 </label>
-                <button
-                  type="button"
-                  onClick={handleLoadDemo}
-                  className="text-xs font-bold text-[#028090] hover:text-[#0a3641] hover:underline flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  <span>Ver Modelo Credenciado (Amanda Silveira)</span>
-                </button>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2.5">
@@ -389,7 +399,11 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                     required
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Digite seu Nº de Participante (ex: CAR-SM-001), CPF ou Nome"
+                    placeholder={
+                      allowManagerAccess
+                        ? 'Digite o Nº de Participante (ex: CAR-SM-...), CPF ou Nome'
+                        : 'Digite seu Nº de Participante (ex: CAR-SM-XXXXXXXX)'
+                    }
                     className="w-full pl-9 pr-4 py-2.5 text-xs sm:text-sm bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0a3641] focus:bg-white transition-all"
                   />
                 </div>
@@ -418,7 +432,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <CheckCircle className="w-3.5 h-3.5" /> Autenticação Digital ICP-SUS
+                    <CheckCircle className="w-3.5 h-3.5" /> Autenticação Digital SUS
                   </>
                 )}
               </span>
@@ -433,18 +447,10 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                 Nenhum certificado localizado para "{query}"
               </h4>
               <p className="text-xs text-stone-600 max-w-md mx-auto leading-relaxed">
-                Verifique se os dígitos do CPF ou o código de inscrição foram preenchidos
-                corretamente. Você também pode clicar no botão{' '}
-                <strong>"Ver Modelo Credenciado"</strong> acima para visualizar o certificado.
+                {allowManagerAccess
+                  ? 'Verifique se o Nº de Participante, CPF ou Nome foram informados corretamente.'
+                  : 'Verifique se o seu Nº de Participante (ex: CAR-SM-..., enviado no comprovante e e-mail de confirmação) foi digitado corretamente.'}
               </p>
-              <button
-                type="button"
-                onClick={handleLoadDemo}
-                className="mt-2 inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#0a3641] bg-[#e2f0f2] hover:bg-[#d0e8eb] rounded-xl transition-colors cursor-pointer"
-              >
-                <Eye className="w-4 h-4" />
-                <span>Carregar Modelo de Exemplo</span>
-              </button>
             </div>
           )}
 
@@ -452,7 +458,43 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
           {foundAttendee && (
             <div className="space-y-5">
               {/* Action Toolbar (no-print) */}
-              {!isAccredited ? (
+              {isCheckingDbPermission ? (
+                <div className="no-print flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-stone-50 border border-stone-200 rounded-2xl">
+                  <div className="flex items-start sm:items-center gap-3 text-xs text-stone-700 font-medium">
+                    <div className="w-10 h-10 rounded-xl bg-stone-100 border border-stone-200 flex items-center justify-center shrink-0">
+                      <Loader2 className="w-5 h-5 text-[#0a3641] animate-spin" />
+                    </div>
+                    <div>
+                      <span className="font-extrabold text-sm block text-[#0a3641]">
+                        Verificando Elegibilidade no Banco de Dados...
+                      </span>
+                      <span className="text-stone-600 leading-relaxed block mt-0.5">
+                        Consultando a situação oficial de <strong>{foundAttendee.code}</strong> no Firestore antes de liberar a impressão.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : !allowManagerAccess && !livePermission ? (
+                <div className="no-print flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-rose-50 border-2 border-rose-300 rounded-2xl">
+                  <div className="flex items-start sm:items-center gap-3 text-xs text-rose-950 font-medium">
+                    <div className="w-10 h-10 rounded-xl bg-rose-100 border border-rose-300 flex items-center justify-center shrink-0">
+                      <Lock className="w-5 h-5 text-rose-700" />
+                    </div>
+                    <div>
+                      <span className="font-extrabold text-sm block text-rose-950">
+                        Permissão Não Confirmada no Servidor
+                      </span>
+                      <span className="text-rose-800 leading-relaxed block mt-0.5">
+                        Não foi possível confirmar a elegibilidade oficial de <strong>{foundAttendee.code}</strong> no banco de dados do Simpósio. Verifique sua conexão ou contate a organização.
+                      </span>
+                    </div>
+                  </div>
+                  <div className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-rose-800 bg-rose-100 border border-rose-300 rounded-xl shrink-0 cursor-not-allowed">
+                    <Lock className="w-4 h-4" />
+                    <span>Impressão Bloqueada</span>
+                  </div>
+                </div>
+              ) : !isAccredited ? (
                 <div className="no-print flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-rose-50 border-2 border-rose-300 rounded-2xl">
                   <div className="flex items-start sm:items-center gap-3 text-xs text-rose-950 font-medium">
                     <div className="w-10 h-10 rounded-xl bg-rose-100 border border-rose-300 flex items-center justify-center shrink-0">
@@ -584,8 +626,8 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                 </div>
               )}
 
-              {/* Shared Live Certificate Sheet — blocked from printing if participant is not accredited */}
-              {isAccredited ? (
+              {/* Shared Live Certificate Sheet — blocked from printing/rendering until authorized */}
+              {canRenderPrintableCertificate ? (
                 <CertificateSheet
                   attendee={foundAttendee}
                   config={config}
@@ -593,7 +635,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                 />
               ) : (
                 <div className="no-print relative rounded-2xl overflow-hidden border border-rose-200 bg-white">
-                  <div className="pointer-events-none select-none blur-[4px] opacity-40">
+                  <div className="pointer-events-none select-none blur-[4px] opacity-35">
                     <CertificateSheet
                       attendee={foundAttendee}
                       config={config}
@@ -603,20 +645,50 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                   <div className="absolute inset-0 flex items-center justify-center p-6 bg-stone-900/20 backdrop-blur-[1px]">
                     <div className="max-w-md bg-white/95 border-2 border-rose-300 rounded-2xl p-6 text-center shadow-xl space-y-2.5">
                       <div className="w-12 h-12 rounded-full bg-rose-100 border border-rose-200 flex items-center justify-center mx-auto">
-                        <Lock className="w-6 h-6 text-rose-600" />
+                        {isCheckingDbPermission ? (
+                          <Loader2 className="w-6 h-6 text-[#0a3641] animate-spin" />
+                        ) : (
+                          <Lock className="w-6 h-6 text-rose-600" />
+                        )}
                       </div>
                       <h4 className="text-base font-extrabold text-[#0a3641]">
-                        Emissão e Impressão Bloqueadas
+                        {isCheckingDbPermission
+                          ? 'Verificando Elegibilidade no Banco de Dados...'
+                          : !allowManagerAccess && !livePermission
+                            ? 'Permissão Não Confirmada no Servidor'
+                            : !isAccredited
+                              ? 'Emissão e Impressão Bloqueadas'
+                              : !allowManagerAccess && !certificateAvailableForPublic
+                                ? 'Download Disponível Após o Término do Evento'
+                                : 'Certificado Aguardando Liberação do Gestor'}
                       </h4>
                       <p className="text-xs text-stone-600 leading-relaxed">
-                        <strong>{foundAttendee.fullName}</strong> ({foundAttendee.code}) está com o status{' '}
-                        <span className="font-bold text-amber-700">
-                          {effectiveStatus === 'cancelada'
-                            ? 'Cancelada'
-                            : 'Fazer Check-in'}
-                        </span>
-                        . A liberação e impressão do certificado só ocorrem após a confirmação do status{' '}
-                        <strong className="text-emerald-700">Credenciado (Presente)</strong> no Painel do Gestor.
+                        {isCheckingDbPermission ? (
+                          <>Consultando a situação oficial de <strong>{foundAttendee.code}</strong> no Firestore...</>
+                        ) : !allowManagerAccess && !livePermission ? (
+                          <>
+                            Não foi possível confirmar a elegibilidade oficial de{' '}
+                            <strong>{foundAttendee.code}</strong> no banco de dados do Simpósio. Verifique sua conexão ou contate a organização.
+                          </>
+                        ) : !isAccredited ? (
+                          <>
+                            <strong>{foundAttendee.fullName}</strong> ({foundAttendee.code}) está com o status{' '}
+                            <span className="font-bold text-amber-700">
+                              {effectiveStatus === 'cancelada' ? 'Cancelada' : 'Fazer Check-in'}
+                            </span>
+                            . A liberação e impressão do certificado só ocorrem após a confirmação do status{' '}
+                            <strong className="text-emerald-700">Credenciado (Presente)</strong> no Painel do Gestor.
+                          </>
+                        ) : !allowManagerAccess && !certificateAvailableForPublic ? (
+                          <>
+                            A presença de <strong>{foundAttendee.fullName}</strong> ({foundAttendee.code}) está confirmada,
+                            mas a impressão e o download público só serão liberados após <strong>{CERTIFICATE_RELEASE_LABEL}</strong>.
+                          </>
+                        ) : (
+                          <>
+                            O certificado de <strong>{foundAttendee.fullName}</strong> ({foundAttendee.code}) ainda está aguardando liberação oficial pela organização do Simpósio.
+                          </>
+                        )}
                       </p>
                     </div>
                   </div>

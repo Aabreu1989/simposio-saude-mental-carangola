@@ -57,7 +57,9 @@ import {
   Link2,
   ExternalLink,
   Edit3,
-  X
+  X,
+  Pin,
+  Ban
 } from 'lucide-react';
 import {
   Registration,
@@ -117,11 +119,14 @@ export interface FirebaseSyncState {
 
 interface AdminDashboardProps {
   config: EventConfig;
-  onUpdateConfig: (newConfig: EventConfig) => void;
-  onResetConfig: () => void;
+  onUpdateConfig: (newConfig: EventConfig) => Promise<void> | void;
+  onResetConfig: () => Promise<void> | void;
   registrations: Registration[];
-  onToggleCheckIn: (id: string) => void;
-  onUpdateRegistrationStatus?: (id: string, newStatus: 'confirmada' | 'presente' | 'cancelada') => void;
+  onToggleCheckIn: (id: string) => Promise<Registration> | Promise<void> | void;
+  onUpdateRegistrationStatus?: (
+    id: string,
+    newStatus: 'confirmada' | 'presente' | 'cancelada'
+  ) => Promise<Registration> | Promise<void> | void;
   onDeleteRegistration?: (id: string) => void;
   onBatchImportRegistrations?: (imported: Registration[]) => Promise<AdminBatchImportResult | void> | void;
   notifications: PushNotificationItem[];
@@ -136,13 +141,14 @@ interface AdminDashboardProps {
   ) => Promise<{ cloudSynced: boolean; requiresAuth?: boolean; error?: string; material: DownloadMaterial }> | void;
   onDeleteMaterial?: (id: string) => Promise<void> | void;
   socialPosts: SocialPost[];
-  onDeletePost?: (id: string) => void;
+  onDeletePost?: (id: string) => Promise<void> | void;
+  onModeratePost?: (id: string, status: 'approved' | 'rejected', pinned?: boolean) => Promise<void> | void;
   evaluations?: EvaluationFeedback[];
   onBackToPublic: () => void;
   onLogout?: () => void;
   certificateDownloads?: CertificateDownloadRecord[];
-  onToggleCertificateIssued?: (id: string) => void;
-  onReleaseAllPresentCertificates?: () => number;
+  onToggleCertificateIssued?: (id: string) => Promise<Registration | void> | void;
+  onReleaseAllPresentCertificates?: () => Promise<number> | number;
   onPreviewCertificate?: (attendee: Registration) => void;
   speakers?: SpeakerProfile[];
   onUpdateSpeaker?: (speaker: SpeakerProfile) => void;
@@ -174,6 +180,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteMaterial,
   socialPosts,
   onDeletePost,
+  onModeratePost,
   onBackToPublic,
   onLogout,
   certificateDownloads = [],
@@ -196,7 +203,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [batchImportReport, setBatchImportReport] = useState<AdminBatchImportResult | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<'all' | 'portal' | 'google_forms'>('all');
   const [postSearch, setPostSearch] = useState('');
-  const [postDeleteNotice, setPostDeleteNotice] = useState<string | null>(null);
+  const [postStatusFilter, setPostStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [postActionFeedback, setPostActionFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [busyPostId, setBusyPostId] = useState<string | null>(null);
   const [postToDelete, setPostToDelete] = useState<SocialPost | null>(null);
   const [attendeeToDelete, setAttendeeToDelete] = useState<Registration | null>(null);
   const [attendeeDeleteNotice, setAttendeeDeleteNotice] = useState<string | null>(null);
@@ -466,6 +475,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Customizer form state
   const [customConfig, setCustomConfig] = useState<EventConfig>({ ...config });
   const [configSavedSuccess, setConfigSavedSuccess] = useState(false);
+  const [configSaveError, setConfigSaveError] = useState<string | null>(null);
+  const [updatingStatusRegId, setUpdatingStatusRegId] = useState<string | null>(null);
+  const [statusUpdateFeedback, setStatusUpdateFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   // Real-time synchronization when platform data updates in same tab or other tabs
   useEffect(() => {
@@ -659,7 +674,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const certificatePendingCount = Math.max(0, totalRegistrations - certificateIssuedCount);
   const certificateRate = totalRegistrations > 0 ? Math.round((certificateIssuedCount / totalRegistrations) * 100) : 0;
   const certificateDownloadedCount = registrations.filter(
-    (r) => r.certificateDownloaded || certificateDownloads.some((d) => d.registrationId === r.id)
+    (r) =>
+      r.certificateDownloaded ||
+      certificateDownloads.some((d) => d.registrationId === r.id || d.code === r.code)
   ).length;
   const certificateDownloadedPct = totalRegistrations > 0 ? Math.round((certificateDownloadedCount / totalRegistrations) * 100) : 0;
 
@@ -703,18 +720,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Filtered Attendees
   const filteredAttendees = registrations.filter((reg) => {
+    const rawSearch = attendeeSearch.trim();
+    const searchLower = rawSearch.toLowerCase();
+    const cleanSearchDigits = rawSearch.replace(/\D/g, '');
     const matchesSearch =
-      attendeeSearch.trim() === '' ||
-      reg.fullName.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
+      rawSearch === '' ||
+      reg.fullName.toLowerCase().includes(searchLower) ||
       (reg.email && reg.email.toLowerCase().includes(attendeeSearch.toLowerCase())) ||
-      reg.code.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
-      reg.cpf.includes(attendeeSearch) ||
-      reg.institution.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
-      reg.city.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
-      reg.professionalRole.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
-      (reg.instagram && reg.instagram.toLowerCase().includes(attendeeSearch.toLowerCase())) ||
-      (reg.linkedin && reg.linkedin.toLowerCase().includes(attendeeSearch.toLowerCase())) ||
-      (reg.otherSocial && reg.otherSocial.toLowerCase().includes(attendeeSearch.toLowerCase()));
+      (reg.email && reg.email.toLowerCase().includes(searchLower)) ||
+      reg.code.toLowerCase().includes(searchLower) ||
+      reg.cpf.includes(rawSearch) ||
+      (cleanSearchDigits.length >= 3 && (reg.cpf || '').replace(/\D/g, '').includes(cleanSearchDigits)) ||
+      reg.institution.toLowerCase().includes(searchLower) ||
+      reg.city.toLowerCase().includes(searchLower) ||
+      reg.professionalRole.toLowerCase().includes(searchLower) ||
+      (reg.instagram && reg.instagram.toLowerCase().includes(searchLower)) ||
+      (reg.linkedin && reg.linkedin.toLowerCase().includes(searchLower)) ||
+      (reg.otherSocial && reg.otherSocial.toLowerCase().includes(searchLower));
 
     const matchesCity =
       filterCity === 'all' ||
@@ -744,7 +766,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   // Filtered Social Posts for Moderation Tab
+  const pendingPostsCount = socialPosts.filter((p) => (p.status || 'pending') === 'pending').length;
+  const approvedPostsCount = socialPosts.filter((p) => p.status === 'approved').length;
+  const rejectedPostsCount = socialPosts.filter((p) => p.status === 'rejected').length;
+
   const filteredPosts = socialPosts.filter((post) => {
+    const normalizedStatus = post.status || 'pending';
+    if (postStatusFilter !== 'all' && normalizedStatus !== postStatusFilter) return false;
     if (!postSearch.trim()) return true;
     const term = postSearch.toLowerCase();
     return (
@@ -924,10 +952,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setAttendeeDeleteNotice(null), 4500);
   };
 
-  const handleDeletePostImmediate = (post: SocialPost) => {
-    onDeletePost?.(post.id);
-    setPostDeleteNotice(`Postagem de "${post.authorName}" excluída imediatamente com sucesso!`);
-    setTimeout(() => setPostDeleteNotice(null), 4000);
+  const formatPostAdminError = (err: unknown, fallback: string): string => {
+    const msg = err instanceof Error ? err.message : String(err || '');
+    if (msg.includes('ADMIN_AUTH_REQUIRED')) {
+      return 'Conecte a conta Google oficial do gestor (farmaciademinas.marketing@gmail.com) no banner acima para confirmar alterações na nuvem.';
+    }
+    if (msg.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(msg) as { error?: string; category?: string };
+        if (parsed.category === 'permission_denied') {
+          return 'Permissão recusada pelo Firestore. Verifique se a conta Google oficial do gestor está autenticada.';
+        }
+        if (parsed.error) return parsed.error;
+      } catch {
+        // usa fallback abaixo
+      }
+    }
+    return msg || fallback;
+  };
+
+  const handleDeletePostImmediate = async (post: SocialPost) => {
+    if (!onDeletePost || busyPostId) return;
+    setBusyPostId(post.id);
+    setPostActionFeedback(null);
+    try {
+      await onDeletePost(post.id);
+      setPostActionFeedback({
+        type: 'success',
+        text: `Postagem de "${post.authorName}" excluída com confirmação remota no Firestore.`
+      });
+      setTimeout(() => setPostActionFeedback(null), 4000);
+    } catch (err) {
+      setPostActionFeedback({
+        type: 'error',
+        text: `Não foi possível excluir a postagem de "${post.authorName}": ${formatPostAdminError(err, 'falha de persistência no Firestore.')}`
+      });
+    } finally {
+      setBusyPostId(null);
+    }
+  };
+
+  const handleModeratePostAction = async (
+    post: SocialPost,
+    status: 'approved' | 'rejected',
+    pinned = false
+  ) => {
+    if (!onModeratePost || busyPostId) return;
+    setBusyPostId(post.id);
+    setPostActionFeedback(null);
+    try {
+      await onModeratePost(post.id, status, pinned);
+      const label =
+        status === 'rejected'
+          ? 'rejeitada e ocultada do mural público'
+          : pinned
+          ? 'aprovada e fixada no topo do mural'
+          : post.status === 'approved' && post.pinned && !pinned
+          ? 'desafixada do topo do mural'
+          : 'aprovada e publicada no mural público';
+      setPostActionFeedback({
+        type: 'success',
+        text: `Postagem de "${post.authorName}" ${label} com confirmação no Firestore.`
+      });
+      setTimeout(() => setPostActionFeedback(null), 4000);
+    } catch (err) {
+      setPostActionFeedback({
+        type: 'error',
+        text: `Não foi possível moderar a postagem de "${post.authorName}": ${formatPostAdminError(err, 'falha de persistência no Firestore.')}`
+      });
+    } finally {
+      setBusyPostId(null);
+    }
   };
 
   const handleTestDownloadMaterial = async (material: DownloadMaterial) => {
@@ -977,7 +1072,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       Data_Inscricao: r.registeredAt,
       Data_Credenciamento: r.checkedInAt || 'Pendente',
       Certificado_Liberado: r.certificateIssued ? 'Sim' : 'Não',
-      Certificado_Baixado_Publico: r.certificateDownloaded ? 'Sim' : 'Não',
+      Certificado_Baixado_Publico:
+        r.certificateDownloaded ||
+        certificateDownloads.some((d) => d.registrationId === r.id || d.code === r.code)
+          ? 'Sim'
+          : 'Não',
       Canal_Origem: r.origin === 'google_forms' ? 'Google Forms (Planilha)' : 'Portal Web Oficial'
     }));
 
@@ -1623,17 +1722,88 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleStatusSelectChange = async (
+    reg: Registration,
+    newStatus: 'confirmada' | 'presente' | 'cancelada'
+  ) => {
+    if (!firebaseSyncState?.isVerifiedAdmin) {
+      setStatusUpdateFeedback({
+        type: 'error',
+        message:
+          'Conecte a conta Google oficial do gestor antes de registrar check-in ou alterar status.'
+      });
+      return;
+    }
+
+    setUpdatingStatusRegId(reg.id);
+    setStatusUpdateFeedback(null);
+    try {
+      if (onUpdateRegistrationStatus) {
+        await onUpdateRegistrationStatus(reg.id, newStatus);
+      } else {
+        await onToggleCheckIn(reg.id);
+      }
+      setStatusUpdateFeedback({
+        type: 'success',
+        message: `Presença/status de ${reg.fullName} confirmado no Firestore.`
+      });
+      setTimeout(() => setStatusUpdateFeedback(null), 4000);
+    } catch (err: unknown) {
+      const rawMsg = err instanceof Error ? err.message : 'Falha ao salvar no Firestore.';
+      const msg =
+        rawMsg === 'ADMIN_AUTH_REQUIRED'
+          ? 'Sessão administrativa Google expirada ou desconectada. Reconecte para registrar o check-in.'
+          : rawMsg;
+      setStatusUpdateFeedback({
+        type: 'error',
+        message: `Não foi possível atualizar ${reg.fullName}: ${msg}`
+      });
+    } finally {
+      setUpdatingStatusRegId((curr) => (curr === reg.id ? null : curr));
+    }
+  };
+
   // Save Event Customizer
-  const handleSaveConfig = (e: React.FormEvent) => {
+  const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateConfig({
-      ...customConfig,
-      emailJsConfig: config.emailJsConfig,
-      certificateDesign: config.certificateDesign,
-      badgeDesign: config.badgeDesign
-    });
-    setConfigSavedSuccess(true);
-    setTimeout(() => setConfigSavedSuccess(false), 3000);
+    setConfigSaveError(null);
+    setConfigSavedSuccess(false);
+    try {
+      await onUpdateConfig({
+        ...customConfig,
+        emailJsConfig: config.emailJsConfig,
+        certificateDesign: config.certificateDesign,
+        badgeDesign: config.badgeDesign
+      });
+      setConfigSavedSuccess(true);
+      setTimeout(() => setConfigSavedSuccess(false), 3000);
+    } catch (err: unknown) {
+      const rawMsg =
+        err instanceof Error ? err.message : 'Falha ao salvar configurações no Firestore.';
+      setConfigSaveError(
+        rawMsg === 'ADMIN_AUTH_REQUIRED'
+          ? 'Conecte a conta Google oficial do gestor para salvar configurações na nuvem.'
+          : rawMsg
+      );
+    }
+  };
+
+  const handleResetConfigClick = async () => {
+    setConfigSaveError(null);
+    setConfigSavedSuccess(false);
+    try {
+      await onResetConfig();
+      setConfigSavedSuccess(true);
+      setTimeout(() => setConfigSavedSuccess(false), 3000);
+    } catch (err: unknown) {
+      const rawMsg =
+        err instanceof Error ? err.message : 'Falha ao restaurar configurações no Firestore.';
+      setConfigSaveError(
+        rawMsg === 'ADMIN_AUTH_REQUIRED'
+          ? 'Conecte a conta Google oficial do gestor para restaurar configurações na nuvem.'
+          : rawMsg
+      );
+    }
   };
 
   return (
@@ -1889,7 +2059,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
                   activeTab === 'certificates' ? 'bg-white text-[#ea7a38]' : 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/30'
                 }`}>
-                  {registrations.filter((r) => r.certificateDownloaded).length}
+                  {certificateDownloadedCount}
                 </span>
               </div>
               <div>
@@ -2226,8 +2396,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             onUpdateConfig={onUpdateConfig}
             registrations={registrations}
             certificateDownloads={certificateDownloads}
-            onToggleCertificateIssued={onToggleCertificateIssued || (() => {})}
-            onReleaseAllPresentCertificates={onReleaseAllPresentCertificates || (() => 0)}
+            isCloudAdminConnected={Boolean(firebaseSyncState?.isVerifiedAdmin)}
+            onToggleCertificateIssued={
+              onToggleCertificateIssued ||
+              (async () => {
+                throw new Error('ADMIN_AUTH_REQUIRED');
+              })
+            }
+            onReleaseAllPresentCertificates={
+              onReleaseAllPresentCertificates ||
+              (async () => {
+                throw new Error('ADMIN_AUTH_REQUIRED');
+              })
+            }
             onPreviewCertificate={onPreviewCertificate || (() => {})}
           />
         )}
@@ -3557,6 +3738,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
+            {statusUpdateFeedback && (
+              <div
+                role={statusUpdateFeedback.type === 'error' ? 'alert' : 'status'}
+                className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 ${
+                  statusUpdateFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : 'bg-rose-50 border-rose-200 text-rose-900'
+                }`}
+              >
+                <span>{statusUpdateFeedback.message}</span>
+                <button
+                  type="button"
+                  onClick={() => setStatusUpdateFeedback(null)}
+                  className="px-2 py-0.5 text-[11px] font-bold rounded hover:bg-black/5 cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+
             {/* Mobile & Tablet View: Responsive Attendee Cards (Smartphones & Tablets) */}
             <div className="block xl:hidden space-y-3">
               {filteredAttendees.length === 0 ? (
@@ -3679,15 +3880,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="flex flex-col gap-1">
                         <select
                           value={reg.status}
+                          disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}
                           onChange={(e) => {
                             const newStatus = e.target.value as 'confirmada' | 'presente' | 'cancelada';
-                            if (onUpdateRegistrationStatus) {
-                              onUpdateRegistrationStatus(reg.id, newStatus);
-                            } else {
-                              onToggleCheckIn(reg.id);
-                            }
+                            handleStatusSelectChange(reg, newStatus);
                           }}
-                          className={`px-3 py-1.5 text-xs font-bold rounded-lg border cursor-pointer focus:outline-none transition-colors ${
+                          title={
+                            !firebaseSyncState?.isVerifiedAdmin
+                              ? 'Conecte a conta Google oficial do gestor para registrar presença no Firestore.'
+                              : 'Alterar status e credenciamento no Firestore'
+                          }
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg border focus:outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                            firebaseSyncState?.isVerifiedAdmin ? 'cursor-pointer' : 'cursor-not-allowed'
+                          } ${
                             reg.status === 'presente'
                               ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                               : reg.status === 'cancelada'
@@ -3817,16 +4022,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <div className="flex flex-col gap-1.5">
                               <select
                                 value={reg.status}
+                                disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}
                                 onChange={(e) => {
                                   const newStatus = e.target.value as 'confirmada' | 'presente' | 'cancelada';
-                                  if (onUpdateRegistrationStatus) {
-                                    onUpdateRegistrationStatus(reg.id, newStatus);
-                                  } else {
-                                    onToggleCheckIn(reg.id);
-                                  }
+                                  handleStatusSelectChange(reg, newStatus);
                                 }}
                                 aria-label="Editar status e presença do participante"
-                                className={`px-2.5 py-1 text-xs font-bold rounded-lg border cursor-pointer focus:outline-none transition-colors ${
+                                title={
+                                  !firebaseSyncState?.isVerifiedAdmin
+                                    ? 'Conecte a conta Google oficial do gestor para registrar presença no Firestore.'
+                                    : 'Alterar status e credenciamento no Firestore'
+                                }
+                                className={`px-2.5 py-1 text-xs font-bold rounded-lg border focus:outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                                  firebaseSyncState?.isVerifiedAdmin ? 'cursor-pointer' : 'cursor-not-allowed'
+                                } ${
                                   reg.status === 'presente'
                                     ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-200'
                                     : reg.status === 'cancelada'
@@ -5013,39 +5222,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="space-y-6">
             
             {/* Top Bar */}
-            <div className={`rounded-2xl border p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors ${theme.card}`}>
-              <div>
-                <div className="text-xs font-bold text-[#ea7a38] uppercase tracking-wider mb-1 font-mono flex items-center gap-1.5">
-                  <MessageCircle className="w-4 h-4 text-[#ea7a38]" />
-                  <span>Moderação Comunitária · SUS Carangola</span>
+            <div className={`rounded-2xl border p-6 space-y-4 transition-colors ${theme.card}`}>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs font-bold text-[#ea7a38] uppercase tracking-wider mb-1 font-mono flex items-center gap-1.5">
+                    <MessageCircle className="w-4 h-4 text-[#ea7a38]" />
+                    <span>Moderação Comunitária · SUS Carangola</span>
+                  </div>
+                  <h3 className={`text-xl font-bold ${theme.textHeading}`}>
+                    Gerenciamento e Moderação de Postagens do Mural
+                  </h3>
+                  <p className={`text-xs mt-0.5 ${theme.textMuted}`}>
+                    Postagens públicas entram como pendentes. Aprove, fixe, rejeite ou exclua com confirmação direta no Firestore.
+                  </p>
                 </div>
-                <h3 className={`text-xl font-bold ${theme.textHeading}`}>
-                  Gerenciamento de Postagens do Mural da Comunidade
-                </h3>
-                <p className={`text-xs mt-0.5 ${theme.textMuted}`}>
-                  Audite as interações sociais do público, visualize fotos anexadas e exclua publicações se necessário.
-                </p>
+
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <div className="relative w-full md:w-72">
+                    <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
+                    <input
+                      type="text"
+                      value={postSearch}
+                      onChange={(e) => setPostSearch(e.target.value)}
+                      placeholder="Buscar postagem por autor, cidade ou texto..."
+                      className={`pl-9 pr-3 py-2 text-xs rounded-xl border focus:outline-none focus:ring-1 transition-colors w-full ${theme.input}`}
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2 w-full md:w-auto">
-                <div className="relative w-full md:w-72">
-                  <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
-                  <input
-                    type="text"
-                    value={postSearch}
-                    onChange={(e) => setPostSearch(e.target.value)}
-                    placeholder="Buscar postagem por autor, cidade ou texto..."
-                    className={`pl-9 pr-3 py-2 text-xs rounded-xl border focus:outline-none focus:ring-1 transition-colors w-full ${theme.input}`}
-                  />
-                </div>
+              {/* Status Filter Pills */}
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-100">
+                {[
+                  { id: 'all' as const, label: `Todas (${socialPosts.length})` },
+                  { id: 'pending' as const, label: `Pendentes (${pendingPostsCount})` },
+                  { id: 'approved' as const, label: `Aprovadas (${approvedPostsCount})` },
+                  { id: 'rejected' as const, label: `Rejeitadas (${rejectedPostsCount})` }
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setPostStatusFilter(opt.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      postStatusFilter === opt.id
+                        ? 'bg-[#0a3641] text-white border-[#0a3641]'
+                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {/* Post Deleted Toast Notice */}
-            {postDeleteNotice && (
-              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center gap-3 text-emerald-900 dark:text-emerald-200 text-xs font-medium animate-fade-in">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>{postDeleteNotice}</span>
+            {/* Post Moderation / Delete Feedback Notice */}
+            {postActionFeedback && (
+              <div
+                role={postActionFeedback.type === 'error' ? 'alert' : 'status'}
+                className={`p-4 border rounded-2xl flex items-center justify-between gap-3 text-xs font-medium animate-fade-in ${
+                  postActionFeedback.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : 'bg-rose-50 border-rose-200 text-rose-900'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  {postActionFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+                  )}
+                  <span>{postActionFeedback.text}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPostActionFeedback(null)}
+                  className="p-1 rounded hover:bg-black/5 cursor-pointer shrink-0"
+                  aria-label="Fechar aviso"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
 
@@ -5054,16 +5309,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className={`p-12 text-center rounded-2xl border ${theme.card} space-y-2`}>
                 <MessageCircle className="w-8 h-8 text-stone-400 mx-auto" />
                 <h4 className={`text-sm font-bold ${theme.textHeading}`}>Nenhuma postagem encontrada</h4>
-                <p className={`text-xs ${theme.textMuted}`}>Tente alterar os termos de busca.</p>
+                <p className={`text-xs ${theme.textMuted}`}>Tente alterar os filtros de status ou os termos de busca.</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {filteredPosts.map((post) => (
+                {filteredPosts.map((post) => {
+                  const postStatus = post.status || 'pending';
+                  const isBusy = busyPostId === post.id;
+                  return (
                   <div
                     key={post.id}
                     className={`rounded-2xl border p-5 flex flex-col justify-between space-y-4 transition-all hover:shadow-md ${theme.card}`}
                   >
                     <div className="space-y-3">
+                      {/* Status & Pin Badges */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            postStatus === 'approved'
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : postStatus === 'rejected'
+                              ? 'bg-rose-50 text-rose-800 border-rose-200'
+                              : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}
+                        >
+                          {postStatus === 'approved'
+                            ? 'Aprovada (Pública)'
+                            : postStatus === 'rejected'
+                            ? 'Rejeitada (Oculta)'
+                            : 'Pendente de Aprovação'}
+                        </span>
+                        {post.pinned && postStatus === 'approved' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                            <Pin className="w-2.5 h-2.5" />
+                            <span>Fixada</span>
+                          </span>
+                        )}
+                      </div>
+
                       {/* Author Header */}
                       <div className="flex items-start justify-between gap-2 border-b pb-3 border-stone-200/50">
                         <div className="flex items-center gap-2.5">
@@ -5109,26 +5392,81 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     {/* Footer Actions */}
-                    <div className={`pt-3 border-t flex items-center justify-between gap-2 ${
+                    <div className={`pt-3 border-t space-y-2.5 ${
                       isDarkMode ? 'border-[#133540]' : 'border-stone-200/70'
                     }`}>
-                      <div className="flex items-center gap-1.5 text-xs text-rose-500 font-semibold font-mono">
-                        <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
-                        <span>{post.likes} {post.likes === 1 ? 'curtida' : 'curtidas'}</span>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-xs text-rose-500 font-semibold font-mono">
+                          <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                          <span>{post.likes} {post.likes === 1 ? 'curtida' : 'curtidas'}</span>
+                        </div>
+                        {isBusy && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-stone-500">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>Salvando...</span>
+                          </span>
+                        )}
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePostImmediate(post)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer transition-colors"
-                        title="Remover esta publicação imediatamente do mural público"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Excluir Post</span>
-                      </button>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        {postStatus !== 'approved' && onModeratePost && (
+                          <button
+                            type="button"
+                            disabled={Boolean(busyPostId)}
+                            onClick={() => handleModeratePostAction(post, 'approved', false)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors disabled:opacity-50"
+                            title="Aprovar e exibir no mural público"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Aprovar</span>
+                          </button>
+                        )}
+
+                        {postStatus === 'approved' && onModeratePost && (
+                          <button
+                            type="button"
+                            disabled={Boolean(busyPostId)}
+                            onClick={() => handleModeratePostAction(post, 'approved', !post.pinned)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border cursor-pointer transition-colors disabled:opacity-50 ${
+                              post.pinned
+                                ? 'text-amber-900 bg-amber-100 hover:bg-amber-200 border-amber-300'
+                                : 'text-stone-700 bg-stone-50 hover:bg-stone-100 border-stone-200'
+                            }`}
+                            title={post.pinned ? 'Remover destaque do topo' : 'Fixar publicação no topo do mural'}
+                          >
+                            <Pin className="w-3.5 h-3.5" />
+                            <span>{post.pinned ? 'Desafixar' : 'Fixar'}</span>
+                          </button>
+                        )}
+
+                        {postStatus !== 'rejected' && onModeratePost && (
+                          <button
+                            type="button"
+                            disabled={Boolean(busyPostId)}
+                            onClick={() => handleModeratePostAction(post, 'rejected', false)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg cursor-pointer transition-colors disabled:opacity-50"
+                            title="Rejeitar e ocultar do mural público"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                            <span>Rejeitar</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={Boolean(busyPostId)}
+                          onClick={() => handleDeletePostImmediate(post)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer transition-colors disabled:opacity-50"
+                          title="Excluir definitivamente esta publicação do Firestore"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Excluir</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -5178,7 +5516,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <ul className={`space-y-1 ${theme.textMuted}`}>
                   <li>✅ Nome completo do participante</li>
                   <li>✅ Número de inscrito (usado também para retirar o certificado)</li>
-                  <li>✅ CPF (pode ser usado como alternativa para retirar o certificado)</li>
+                  <li>✅ CPF (consta no comprovante e na gestão interna; a retirada pública do certificado utiliza o Nº de Participante)</li>
                   <li>✅ Data, horário e local do evento</li>
                   <li>✅ Programação completa</li>
                   <li>✅ Instruções para retirada do certificado</li>
@@ -5847,7 +6185,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <AdminBadgeDesigner
                 config={config}
                 registrations={registrations}
-                onUpdateConfig={onUpdateConfig}
+                onUpdateConfig={(nextCfg) => {
+                  Promise.resolve(onUpdateConfig(nextCfg)).catch((err: unknown) => {
+                    const msg =
+                      err instanceof Error ? err.message : 'Falha ao salvar design do crachá.';
+                    setConfigSaveError(msg);
+                  });
+                }}
               />
             ) : (
               <div className={`rounded-2xl border p-6 space-y-6 transition-colors ${theme.card}`}>
@@ -5869,6 +6213,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
                   )}
                 </div>
+
+                {configSaveError && (
+                  <div
+                    role="alert"
+                    className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-900"
+                  >
+                    {configSaveError}
+                  </div>
+                )}
 
                 <form onSubmit={handleSaveConfig} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -6084,7 +6437,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className={`flex flex-wrap items-center justify-between gap-4 pt-4 border-t transition-colors ${isDarkMode ? 'border-[#133540]' : 'border-stone-200'}`}>
                 <button
                   type="button"
-                  onClick={onResetConfig}
+                  onClick={handleResetConfigClick}
                   className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                     isDarkMode
                       ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border border-[#1a414e]'
@@ -6528,14 +6881,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                disabled={Boolean(busyPostId)}
+                onClick={async () => {
                   const target = postToDelete;
-                  onDeletePost?.(target.id);
                   setPostToDelete(null);
-                  setPostDeleteNotice(`A postagem de "${target.authorName}" foi removida com sucesso do mural.`);
-                  setTimeout(() => setPostDeleteNotice(null), 4000);
+                  await handleDeletePostImmediate(target);
                 }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer inline-flex items-center gap-1.5"
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Confirmar Exclusão</span>

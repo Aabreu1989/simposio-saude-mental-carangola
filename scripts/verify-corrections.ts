@@ -8,12 +8,18 @@ import path from 'path';
 import crypto from 'crypto';
 import { initializeApp, deleteApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { deleteField } from 'firebase/firestore';
 import {
   generateRegistrationCode,
   getOrCreateParticipantRegistrationIdentity,
   clearParticipantAttemptCache,
   buildRegistrationId,
   sanitizeRegistrationId,
+  sanitizeCertificateBannerUrl,
+  generateCertificateHash,
+  getCertificateDesign,
+  formatCertificateBodyText,
+  isCertificateAvailableForPublic,
   validateSubscriberId,
   buildSubscriberIdFromRegistrationId,
   extractRegistrationIdFromSubscriberId,
@@ -29,12 +35,16 @@ import {
   mergeSpeakersWithDefaults,
   INVENTED_POST_IDS,
   getDeletedPostIds,
+  reconcileSocialPostsSnapshot,
+  sanitizePostsForStorage,
+  sortAndFilterPublicSocialPosts,
   addDeletedPostId,
   STORAGE_KEYS
 } from '../src/utils/helpers.ts';
 
 import {
   isVerifiedAdminUser,
+  isAuthorizedServerAdminSession,
   classifyFirestoreError,
   testFirestoreConnection,
   setFirestoreConnectionProbeForTests,
@@ -46,14 +56,23 @@ import {
   persistAdminImportedRegistrationsWithTriadCheckInDb,
   setFirestoreRegistrationAdapterForTests,
   setAdminTriadAdapterForTests,
+  setAdminSessionCheckerForTests,
+  setRegistrationMutationAdapterForTests,
+  setEventConfigAdapterForTests,
+  buildRegistrationUpdatePatch,
+  buildPermissionUpdatePatch,
   synchronizeOfflineRegistrationQueue,
   persistRegistrationAndPermissionInDb,
+  persistMultipleRegistrationsInDb,
   deleteRegistrationInDb,
   saveEventConfigInDb,
   saveSocialPostToDb,
   likeSocialPostInDb,
   deleteSocialPostInDb,
   moderateSocialPostInDb,
+  validateSocialPostInput,
+  ALLOWED_SOCIAL_IMAGE_MIME_TYPES,
+  MAX_SOCIAL_IMAGE_BYTES,
   setSocialPostsAdapterForTests,
   saveNotificationToDb,
   deleteNotificationInDb,
@@ -67,9 +86,12 @@ import {
   generateSecureToken,
   ensureAuthenticatedUser,
   setEnsureAuthObserverForTests,
+  setSignInAnonymouslyForTests,
   ACTIVE_FIREBASE_PROJECT_ID,
-  ACTIVE_FIRESTORE_DATABASE_ID
+  ACTIVE_FIRESTORE_DATABASE_ID,
+  type RegistrationUpdateOperation
 } from '../src/services/firebaseDb.ts';
+import { generateCertificateHTML } from '../src/utils/certificatePdfGenerator.ts';
 import { validateRegistrationFormData } from '../src/components/RegistrationModal.tsx';
 import {
   shouldFallbackToRedirectAuth,
@@ -92,7 +114,7 @@ import emailHandler, {
 import statusHandler from '../api/email/status.ts';
 import mapsHandler from '../api/maps/config.ts';
 import vercelConfig from '../vercel.json' with { type: 'json' };
-import { INITIAL_EVENT_CONFIG, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS, INITIAL_SUBSCRIBERS } from '../src/data/initialData.ts';
+import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS, INITIAL_SUBSCRIBERS } from '../src/data/initialData.ts';
 import type { Registration, SpeakerProfile, SocialPost, PushNotificationItem, NewsletterSubscriber } from '../src/types.ts';
 
 interface TestResult {
@@ -2857,14 +2879,20 @@ async function runTests() {
     suite15
   );
 
-  // 15.6 Fallback seguro de fotografia no Mural sem violar limite de 1000 chars no Firestore
+  // 15.6 Bloqueio fail-closed de Base64 no Mural (Firestore e localStorage) e reconciliação segura
   const firebaseDbSource = fs.readFileSync(path.join(process.cwd(), 'src/services/firebaseDb.ts'), 'utf-8');
   const appTsxSource = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+  const helpersTsSource = fs.readFileSync(path.join(process.cwd(), 'src/utils/helpers.ts'), 'utf-8');
   assert(
     firebaseDbSource.includes("!finalImageUrl.startsWith('data:')") &&
-      firebaseDbSource.includes('imageUrl: finalImageUrl || post.imageUrl') &&
-      appTsxSource.includes('imageUrl: rp.imageUrl || localCopy?.imageUrl'),
-    'Mural bloqueia envio de data:URI base64 >1000 chars ao Firestore e preserva prévia local após snapshot',
+      firebaseDbSource.includes('SOCIAL_IMAGE_UPLOAD_FAILED') &&
+      firebaseDbSource.includes('SOCIAL_AUTH_UNAVAILABLE') &&
+      !firebaseDbSource.includes('imageUrl: finalImageUrl || post.imageUrl') &&
+      appTsxSource.includes('reconcileSocialPostsSnapshot') &&
+      appTsxSource.includes('sanitizePostsForStorage') &&
+      !appTsxSource.includes('imageUrl: rp.imageUrl || localCopy?.imageUrl') &&
+      !helpersTsSource.includes('saveToStorage(STORAGE_KEYS.POSTS'),
+    'Mural bloqueia Base64 no Firestore e localStorage em modo fail-closed (sem fallback silencioso nem ressurreição em snapshot)',
     suite15
   );
 
@@ -4566,6 +4594,916 @@ async function runTests() {
   setAdminTriadAdapterForTests(null);
   setFirestoreRegistrationAdapterForTests(null);
   setNewsletterAdapterForTests(null);
+
+  // =========================================================================
+  // SUITE 17 — BLOCO 1: PERSISTÊNCIA DE POSTS (SOCIALWALL / SOCIAL_POSTS)
+  // =========================================================================
+  const suite17 = 'Suite 17 — Bloco 1: Persistência de Posts (SocialWall)';
+  console.log(`\n▶ ${suite17}`);
+
+  const makeValidSocialPostSample = (overrides: Partial<SocialPost> = {}): SocialPost => ({
+    id: 'post-suite17-valid-1',
+    authorName: 'Enf. Lucia Ferreira',
+    authorRole: 'Enfermeira CAPS I',
+    city: 'Carangola',
+    content: 'Fortalecimento da RAPS na Microrregião de Carangola com cuidado em liberdade.',
+    hashtags: '#1SimposioSaudeMentalCarangola #SUSCarangola',
+    likes: 0,
+    hasLiked: false,
+    createdAt: '19/11/2026 às 10:00',
+    timestamp: 1795082400000,
+    status: 'pending',
+    pinned: false,
+    ...overrides
+  });
+
+  // 17.1 Validação estrita de entrada alinhada a firestore.rules e storage.rules
+  const expectValidationReject = (fn: () => unknown): boolean => {
+    try {
+      fn();
+      return false;
+    } catch (err) {
+      return err instanceof Error && err.message.includes('VALIDATION_ERROR');
+    }
+  };
+
+  const validJpegBlob = new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xe0])], { type: 'image/jpeg' });
+  const validPngBlob = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' });
+  const validWebpBlob = new Blob([new Uint8Array([0x52, 0x49, 0x46, 0x46])], { type: 'image/webp' });
+  const invalidGifBlob = new Blob([new Uint8Array([0x47, 0x49, 0x46, 0x38])], { type: 'image/gif' });
+  const invalidSvgBlob = new Blob(['<svg></svg>'], { type: 'image/svg+xml' });
+  const emptyBlob = new Blob([], { type: 'image/png' });
+  const oversizedBlob = new Blob([new Uint8Array(MAX_SOCIAL_IMAGE_BYTES + 1)], { type: 'image/jpeg' });
+
+  const validatedJpeg = validateSocialPostInput(makeValidSocialPostSample(), validJpegBlob);
+  const validatedPng = validateSocialPostInput(makeValidSocialPostSample(), validPngBlob);
+  const validatedWebp = validateSocialPostInput(makeValidSocialPostSample(), validWebpBlob);
+
+  assert(
+    ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has('image/jpeg') &&
+      ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has('image/jpg') &&
+      ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has('image/png') &&
+      ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has('image/webp') &&
+      !ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has('image/gif') &&
+      !ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has('image/svg+xml') &&
+      MAX_SOCIAL_IMAGE_BYTES === 5 * 1024 * 1024 &&
+      validatedJpeg.blobToUpload === validJpegBlob &&
+      validatedPng.blobToUpload === validPngBlob &&
+      validatedWebp.blobToUpload === validWebpBlob &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample({ authorName: 'A' }))) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample({ authorRole: 'X' }))) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample({ city: 'C' }))) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample({ content: 'O' }))) &&
+      expectValidationReject(() =>
+        validateSocialPostInput(makeValidSocialPostSample({ content: 'x'.repeat(1001) }))
+      ) &&
+      expectValidationReject(() =>
+        validateSocialPostInput(makeValidSocialPostSample({ hashtags: '#'.repeat(301) }))
+      ) &&
+      expectValidationReject(() =>
+        validateSocialPostInput(makeValidSocialPostSample({ imageUrl: `https://example.com/${'a'.repeat(1000)}` }))
+      ) &&
+      expectValidationReject(() =>
+        validateSocialPostInput(makeValidSocialPostSample({ imageUrl: 'data:image/png;base64,!!!invalid!!!' }))
+      ) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample(), invalidGifBlob)) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample(), invalidSvgBlob)) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample(), emptyBlob)) &&
+      expectValidationReject(() => validateSocialPostInput(makeValidSocialPostSample(), oversizedBlob)),
+    '17.1 validateSocialPostInput aplica exatamente os limites de firestore.rules e storage.rules (comprimentos, MIME e 5MB)',
+    suite17
+  );
+
+  // 17.2 Fail-closed na ausência de sessão Firebase Auth real (sem escrita remota e sem falso sucesso)
+  setSocialPostsAdapterForTests(null);
+  setSignInAnonymouslyForTests(async () => null);
+  let saveFailedClosedNoAuth = false;
+  let likeFailedClosedNoAuth = false;
+  try {
+    try {
+      await saveSocialPostToDb(makeValidSocialPostSample());
+    } catch (err) {
+      saveFailedClosedNoAuth =
+        err instanceof Error && err.message.includes('SOCIAL_AUTH_UNAVAILABLE');
+    }
+    try {
+      await likeSocialPostInDb('post-suite17-valid-1', 'voter-local-only');
+    } catch (err) {
+      likeFailedClosedNoAuth =
+        err instanceof Error && err.message.includes('SOCIAL_AUTH_UNAVAILABLE');
+    }
+  } finally {
+    setSignInAnonymouslyForTests(null);
+  }
+  assert(
+    saveFailedClosedNoAuth && likeFailedClosedNoAuth,
+    '17.2 saveSocialPostToDb e likeSocialPostInDb falham de modo fail-closed (SOCIAL_AUTH_UNAVAILABLE) sem sessão Firebase Auth real',
+    suite17
+  );
+
+  // 17.3 Fail-closed administrativo e moderação/exclusão com adapter simulado
+  let deleteNoAdminBlocked17 = false;
+  let moderateNoAdminBlocked17 = false;
+  try {
+    await deleteSocialPostInDb('post-suite17-valid-1');
+  } catch (err) {
+    deleteNoAdminBlocked17 = err instanceof Error && err.message === 'ADMIN_AUTH_REQUIRED';
+  }
+  try {
+    await moderateSocialPostInDb('post-suite17-valid-1', 'approved', true);
+  } catch (err) {
+    moderateNoAdminBlocked17 = err instanceof Error && err.message === 'ADMIN_AUTH_REQUIRED';
+  }
+
+  const s17Store = new Map<string, SocialPost>();
+  setSignInAnonymouslyForTests(async () => 'mock-anon-uid-s17');
+  setSocialPostsAdapterForTests({
+    async savePost(post) {
+      s17Store.set(post.id, { ...post });
+      return post;
+    },
+    async toggleLike(postId) {
+      const existing = s17Store.get(postId);
+      const nextLikes = (existing?.likes || 0) + 1;
+      if (existing) existing.likes = nextLikes;
+      return { likes: nextLikes, hasLiked: true };
+    },
+    async deletePost(postId) {
+      s17Store.delete(postId);
+    },
+    async moderatePost(postId, status, pinned) {
+      const existing = s17Store.get(postId);
+      if (existing) {
+        existing.status = status;
+        existing.pinned = status === 'approved' ? Boolean(pinned) : false;
+      }
+    }
+  });
+
+  // 17.4 Bloqueio de Base64 em localStorage e no payload persistido + forçamento de status 'pending' público
+  const tinyPngBase64 =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  let savedViaAdapter17: SocialPost | null = null;
+  try {
+    savedViaAdapter17 = await saveSocialPostToDb(
+      makeValidSocialPostSample({
+        id: 'post-suite17-photo',
+        imageUrl: tinyPngBase64,
+        status: 'approved', // tentativa pública de auto-aprovação deve ser forçada para pending
+        pinned: true,
+        likes: 99
+      })
+    );
+    await moderateSocialPostInDb('post-suite17-photo', 'approved', true);
+    const afterApprove = { ...s17Store.get('post-suite17-photo')! };
+    await moderateSocialPostInDb('post-suite17-photo', 'rejected', true);
+    const afterReject = { ...s17Store.get('post-suite17-photo')! };
+    await deleteSocialPostInDb('post-suite17-photo');
+    const afterDelete = s17Store.has('post-suite17-photo');
+
+    const sanitizedList = sanitizePostsForStorage([
+      makeValidSocialPostSample({
+        id: 'post-keep-https',
+        imageUrl: 'https://firebasestorage.googleapis.com/v0/b/simposio-carangola/o/foto.jpg'
+      }),
+      makeValidSocialPostSample({
+        id: 'post-strip-b64',
+        imageUrl: tinyPngBase64
+      }),
+      makeValidSocialPostSample({
+        id: 'post-1', // inventado banido
+        status: 'approved'
+      })
+    ]);
+
+    assert(
+      deleteNoAdminBlocked17 &&
+        moderateNoAdminBlocked17 &&
+        savedViaAdapter17 !== null &&
+        savedViaAdapter17.imageUrl === undefined &&
+        savedViaAdapter17.status === 'pending' &&
+        savedViaAdapter17.pinned === false &&
+        savedViaAdapter17.likes === 0 &&
+        afterApprove.status === 'approved' &&
+        afterApprove.pinned === true &&
+        afterReject.status === 'rejected' &&
+        afterReject.pinned === false &&
+        afterDelete === false &&
+        sanitizedList.length === 2 &&
+        sanitizedList.find((p) => p.id === 'post-keep-https')?.imageUrl ===
+          'https://firebasestorage.googleapis.com/v0/b/simposio-carangola/o/foto.jpg' &&
+        sanitizedList.find((p) => p.id === 'post-strip-b64')?.imageUrl === undefined &&
+        !sanitizedList.some((p) => p.id === 'post-1'),
+      '17.3/17.4 Moderação/exclusão exigem admin, criação pública força pending/pinned=false/likes=0 e bloqueia Base64',
+      suite17
+    );
+  } finally {
+    setSocialPostsAdapterForTests(null);
+    setSignInAnonymouslyForTests(null);
+  }
+
+  // 17.5 Reconciliação diferenciando cache (fromCache: true) vs servidor autoritativo (fromCache: false)
+  const localPostA = makeValidSocialPostSample({
+    id: 'post-real-a',
+    status: 'approved',
+    hasLiked: true,
+    timestamp: 1795082400000,
+    imageUrl: 'https://firebasestorage.googleapis.com/v0/b/simposio-carangola/o/a.jpg'
+  });
+  const localPostB = makeValidSocialPostSample({
+    id: 'post-real-b',
+    status: 'pending',
+    hasLiked: false,
+    timestamp: 1795082500000
+  });
+
+  // (a) Servidor autoritativo vazio -> propaga [] sem ressuscitar localOnly
+  const recServerEmpty = reconcileSocialPostsSnapshot([], [localPostA, localPostB], new Set(), {
+    fromCache: false
+  });
+  // (b) Servidor autoritativo sem postA (excluído em outro dispositivo, deletedPostIds local vazio) -> remove postA
+  const recServerPartial = reconcileSocialPostsSnapshot(
+    [{ ...localPostB, hasLiked: undefined }],
+    [localPostA, localPostB],
+    new Set(),
+    { fromCache: false }
+  );
+  // (c) Cache vazio com posts confirmados em memória -> preserva até servidor responder, respeitando deletedPostIds
+  const recCacheEmpty = reconcileSocialPostsSnapshot([], [localPostA, localPostB], new Set(['post-real-a']), {
+    fromCache: true
+  });
+  // (d) Cache com post recém-excluído localmente + post inventado -> suprime ambos e preserva hasLiked do sobrevivente
+  const recCacheStale = reconcileSocialPostsSnapshot(
+    [
+      { ...localPostA, hasLiked: undefined, imageUrl: 'https://firebasestorage.googleapis.com/v0/b/simposio-carangola/o/a.jpg' },
+      { ...localPostB, id: 'post-del-local', status: 'approved' },
+      { ...localPostB, id: 'post-3', status: 'approved' },
+      { ...localPostB, id: 'post-pending-keep', status: 'pending', imageUrl: tinyPngBase64 }
+    ],
+    [localPostA],
+    new Set(['post-del-local']),
+    { fromCache: true }
+  );
+
+  assert(
+    recServerEmpty.length === 0 &&
+      recServerPartial.length === 1 &&
+      recServerPartial[0].id === 'post-real-b' &&
+      recServerPartial[0].status === 'pending' &&
+      recCacheEmpty.length === 1 &&
+      recCacheEmpty[0].id === 'post-real-b' &&
+      recCacheStale.length === 2 &&
+      recCacheStale.some((p) => p.id === 'post-real-a' && p.hasLiked === true) &&
+      recCacheStale.some((p) => p.id === 'post-pending-keep' && p.status === 'pending' && p.imageUrl === undefined) &&
+      !recCacheStale.some((p) => p.id === 'post-del-local' || p.id === 'post-3'),
+    '17.5 reconcileSocialPostsSnapshot distingue cache vs servidor autoritativo, propaga [] e preserva pendentes sem Base64',
+    suite17
+  );
+
+  // 17.6 Filtro público exclusivo (status === 'approved') e ordenação (pinned primeiro, depois mais recente)
+  const mixedForPublic: SocialPost[] = [
+    makeValidSocialPostSample({ id: 'post-pub-old', status: 'approved', pinned: false, timestamp: 1000 }),
+    makeValidSocialPostSample({ id: 'post-pub-pending', status: 'pending', pinned: true, timestamp: 9000 }),
+    makeValidSocialPostSample({ id: 'post-pub-rejected', status: 'rejected', pinned: true, timestamp: 9500 }),
+    makeValidSocialPostSample({ id: 'post-pub-new', status: 'approved', pinned: false, timestamp: 3000 }),
+    makeValidSocialPostSample({ id: 'post-pub-pinned', status: 'approved', pinned: true, timestamp: 2000 }),
+    makeValidSocialPostSample({ id: 'post-2', status: 'approved', pinned: true, timestamp: 9999 }) // inventado banido
+  ];
+  const publicVisible = sortAndFilterPublicSocialPosts(mixedForPublic);
+  assert(
+    publicVisible.length === 3 &&
+      publicVisible[0].id === 'post-pub-pinned' &&
+      publicVisible[1].id === 'post-pub-new' &&
+      publicVisible[2].id === 'post-pub-old' &&
+      publicVisible.every((p) => p.status === 'approved') &&
+      mixedForPublic.some((p) => p.id === 'post-pub-pending' && p.status === 'pending'),
+    '17.6 sortAndFilterPublicSocialPosts exibe exclusivamente status === approved (fixados primeiro) sem alterar/apagar pendentes',
+    suite17
+  );
+
+  // 17.7 Pureza de loadStoredData() para posts (zero escrita em localStorage/BroadcastChannel, sem ressuscitar post-7 nem Base64)
+  const gStorage17 = globalThis as unknown as { localStorage?: unknown };
+  const prevStorage17 = gStorage17.localStorage;
+  const mockDisk17 = new Map<string, string>();
+  const postSetItemCalls17: string[] = [];
+  try {
+    gStorage17.localStorage = {
+      getItem: (k: string) => (mockDisk17.has(k) ? mockDisk17.get(k)! : null),
+      setItem: (k: string, v: string) => {
+        if (k === STORAGE_KEYS.POSTS) postSetItemCalls17.push(v);
+        mockDisk17.set(k, v);
+      },
+      removeItem: (k: string) => {
+        mockDisk17.delete(k);
+      },
+      clear: () => {
+        mockDisk17.clear();
+      }
+    };
+
+    const loadedEmpty17 = loadStoredData();
+    mockDisk17.set(
+      STORAGE_KEYS.POSTS,
+      JSON.stringify([
+        {
+          id: 'post-legacy-nostatus',
+          authorName: 'Participante Real',
+          authorRole: 'Psicóloga',
+          city: 'Carangola',
+          content: 'Relato real sem campo status e com base64 legado.',
+          imageUrl: tinyPngBase64,
+          likes: 1,
+          createdAt: '19/11/2026 às 09:00',
+          timestamp: 1795078800000
+        },
+        {
+          id: 'post-4', // inventado banido
+          authorName: 'Fake',
+          authorRole: 'Fake',
+          city: 'Fake',
+          content: 'Fake',
+          likes: 0,
+          createdAt: '19/11/2026',
+          timestamp: 1795078800001,
+          status: 'approved'
+        }
+      ])
+    );
+    const loadedLegacy17 = loadStoredData();
+
+    assert(
+      loadedEmpty17.posts.length === 0 &&
+        postSetItemCalls17.length === 0 &&
+        loadedLegacy17.posts.length === 1 &&
+        loadedLegacy17.posts[0].id === 'post-legacy-nostatus' &&
+        loadedLegacy17.posts[0].imageUrl === undefined &&
+        loadedLegacy17.posts[0].status === 'pending',
+      '17.7 loadStoredData() é pura para posts (0 chamadas a saveToStorage/BroadcastChannel), não ressuscita post-7, descarta Base64 e não auto-aprova sem status',
+      suite17
+    );
+  } finally {
+    if (prevStorage17 === undefined) {
+      delete gStorage17.localStorage;
+    } else {
+      gStorage17.localStorage = prevStorage17;
+    }
+  }
+
+  // 17.8 Contratos de UI (SocialWall, AdminDashboard, App, initialData)
+  const socialWallSource17 = fs.readFileSync(path.join(process.cwd(), 'src/components/SocialWall.tsx'), 'utf-8');
+  const adminDashSource17 = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf-8');
+  const post7Seed = INITIAL_SOCIAL_POSTS.find((p) => p.id === 'post-7');
+  assert(
+    socialWallSource17.includes('sortAndFilterPublicSocialPosts(posts)') &&
+      socialWallSource17.includes('handleClearImage') &&
+      socialWallSource17.includes('setSelectedImageFile(null)') &&
+      socialWallSource17.includes('accept="image/jpeg,image/png,image/webp"') &&
+      socialWallSource17.includes('await onAddPost(newPost, selectedImageFile || undefined)') &&
+      socialWallSource17.includes('await onLikePost(postId)') &&
+      adminDashSource17.includes('onModeratePost') &&
+      adminDashSource17.includes('await onDeletePost(post.id)') &&
+      adminDashSource17.includes('await onModeratePost(post.id, status, pinned)') &&
+      adminDashSource17.includes('await handleDeletePostImmediate(target)') &&
+      adminDashSource17.includes('postStatusFilter') &&
+      appTsxSource.includes('if (user?.isAnonymous)') &&
+      appTsxSource.includes('await saveSocialPostToDb(post, rawImageFile)') &&
+      appTsxSource.includes('await likeSocialPostInDb(postId, voterId)') &&
+      appTsxSource.includes('await deleteSocialPostInDb(postId)') &&
+      appTsxSource.includes('await moderateSocialPostInDb(postId, status, pinned)') &&
+      Boolean(post7Seed) &&
+      post7Seed?.authorName === 'Amanda Abreu' &&
+      post7Seed?.hasLiked === false &&
+      post7Seed?.status === 'approved' &&
+      post7Seed?.pinned === false &&
+      typeof post7Seed?.timestamp === 'number' &&
+      post7Seed.timestamp <= Date.parse('2026-11-19T23:59:59Z'),
+    '17.8 Contratos de UI do Bloco 1 verificados (SocialWall async/clearImage/MIME, AdminDashboard moderação/exclusão com await, App auth anônima isolada, post-7 consistente)',
+    suite17
+  );
+
+  // 17.9 Integridade inalterada dos 3 arquivos protegidos (firestore.rules, storage.rules, api/email/confirm-registration.ts)
+  const rawStorageRules17 = fs.readFileSync(path.join(process.cwd(), 'storage.rules'), 'utf-8');
+  assert(
+    shaFirestoreRules === 'c742b761a4aaa35e43cfddcd0b6dbae8a19005c2581eaf3a70627679bc54989c' &&
+      shaConfirmEmail === '44168ce4164eb4b6c8a14bb55270a6effd5f9340dc032cf76a5c85972eb7f344' &&
+      rawStorageRules17.includes('match /social_posts/{postId}/{fileName}') &&
+      rawStorageRules17.includes('request.resource.size <= 5 * 1024 * 1024') &&
+      rawStorageRules17.includes("request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')"),
+    '17.9 Arquivos protegidos (firestore.rules, storage.rules, api/email/confirm-registration.ts) preservados integralmente',
+    suite17
+  );
+
+
+  // =========================================================================
+  // SUITE 18: Check-in, Persistência Administrativa, Segurança & Editor de Certificados
+  // =========================================================================
+  const suite18 = 'Suite 18 — Check-in, Segurança & Editor de Certificados';
+  const s18StorageGlobal = globalThis as unknown as { localStorage?: unknown };
+  const s18PrevLocalStorage = s18StorageGlobal.localStorage;
+  const s18SentinelMethodName = (deleteField() as unknown as { _methodName?: string })._methodName;
+  const isDeleteFieldSentinel = (val: unknown): boolean => {
+    if (!val || typeof val !== 'object') return false;
+    const candidate = val as { isEqual?: (other: unknown) => boolean; _methodName?: string };
+    if (typeof candidate.isEqual === 'function') {
+      return candidate.isEqual(deleteField());
+    }
+    return candidate._methodName === s18SentinelMethodName && s18SentinelMethodName !== undefined;
+  };
+
+  try {
+    // -----------------------------------------------------------------------
+    // 18.1: Check-in & Firestore Rules affectedKeys()
+    // -----------------------------------------------------------------------
+    const ALLOWED_REG_UPDATE_KEYS = new Set([
+      'status',
+      'checkedInAt',
+      'certificateIssued',
+      'certificateDownloaded',
+      'certificateDownloadedAt',
+      'certificateDownloadCount',
+      'notes',
+      'updatedAt',
+      'fullName',
+      'city',
+      'professionalRole',
+      'institution',
+      'axisInterest'
+    ]);
+    const ALLOWED_PERM_UPDATE_KEYS = new Set([
+      'status',
+      'certificateIssued',
+      'checkedInAt',
+      'certificateDownloaded',
+      'certificateDownloadCount',
+      'participantName',
+      'city',
+      'professionalRole',
+      'institution',
+      'updatedAt'
+    ]);
+
+    const s18BaseReg = makeSampleRegistration({
+      id: 'reg-s18-01',
+      code: 'CAR-SM-S1801',
+      cpf: '111.222.333-44',
+      status: 'presente',
+      checkedInAt: '2026-12-08T08:15:00.000Z',
+      certificateIssued: true,
+      notes: '  Credenciado na portaria  '
+    });
+    const s18NowIso = '2026-12-08T08:20:00.000Z';
+    const regPatchPresent = buildRegistrationUpdatePatch(s18BaseReg, s18NowIso);
+    const permPatchPresent = buildPermissionUpdatePatch(s18BaseReg, s18NowIso);
+
+    assert(
+      Object.keys(regPatchPresent).every((k) => ALLOWED_REG_UPDATE_KEYS.has(k)) &&
+        regPatchPresent.status === 'presente' &&
+        regPatchPresent.certificateIssued === true &&
+        regPatchPresent.checkedInAt === '2026-12-08T08:15:00.000Z' &&
+        regPatchPresent.notes === 'Credenciado na portaria',
+      '18.1 buildRegistrationUpdatePatch respeita estritamente affectedKeys() de firestore.rules para check-in',
+      suite18
+    );
+
+    assert(
+      Object.keys(permPatchPresent).every((k) => ALLOWED_PERM_UPDATE_KEYS.has(k)) &&
+        permPatchPresent.status === 'presente' &&
+        permPatchPresent.certificateIssued === true &&
+        permPatchPresent.checkedInAt === '2026-12-08T08:15:00.000Z',
+      '18.1 buildPermissionUpdatePatch respeita estritamente affectedKeys() de certificate_permissions',
+      suite18
+    );
+
+    const s18RevertedReg = {
+      ...s18BaseReg,
+      status: 'confirmada' as const,
+      certificateIssued: true, // even if stale true, patch must enforce false
+      checkedInAt: '2026-12-08T08:15:00.000Z'
+    };
+    const regPatchReverted = buildRegistrationUpdatePatch(s18RevertedReg, s18NowIso);
+    const permPatchReverted = buildPermissionUpdatePatch(s18RevertedReg, s18NowIso);
+    assert(
+      regPatchReverted.status === 'confirmada' &&
+        regPatchReverted.certificateIssued === false &&
+        isDeleteFieldSentinel(regPatchReverted.checkedInAt) &&
+        permPatchReverted.status === 'confirmada' &&
+        permPatchReverted.certificateIssued === false &&
+        isDeleteFieldSentinel(permPatchReverted.checkedInAt),
+      '18.1 reversão de presente -> confirmada força certificateIssued: false e usa deleteField() em checkedInAt',
+      suite18
+    );
+
+    const s18CancelledReg = {
+      ...s18BaseReg,
+      status: 'cancelada' as const,
+      certificateIssued: true
+    };
+    const regPatchCancelled = buildRegistrationUpdatePatch(s18CancelledReg, s18NowIso);
+    const permPatchCancelled = buildPermissionUpdatePatch(s18CancelledReg, s18NowIso);
+    assert(
+      regPatchCancelled.status === 'cancelada' &&
+        regPatchCancelled.certificateIssued === false &&
+        isDeleteFieldSentinel(regPatchCancelled.checkedInAt) &&
+        permPatchCancelled.certificateIssued === false &&
+        isDeleteFieldSentinel(permPatchCancelled.checkedInAt),
+      '18.1 alteração para cancelada força certificateIssued: false e remove checkedInAt com deleteField()',
+      suite18
+    );
+
+    setAdminSessionCheckerForTests(null);
+    let unauthPersistBlocked = false;
+    try {
+      await persistRegistrationAndPermissionInDb(s18BaseReg);
+    } catch (err: any) {
+      unauthPersistBlocked = err?.message === 'ADMIN_AUTH_REQUIRED';
+    }
+    let unauthBatchBlocked = false;
+    try {
+      await persistMultipleRegistrationsInDb([s18BaseReg]);
+    } catch (err: any) {
+      unauthBatchBlocked = err?.message === 'ADMIN_AUTH_REQUIRED';
+    }
+    assert(
+      unauthPersistBlocked && unauthBatchBlocked,
+      '18.1 persistRegistrationAndPermissionInDb e persistMultipleRegistrationsInDb bloqueiam escrita sem sessão admin',
+      suite18
+    );
+
+    const capturedOps: RegistrationUpdateOperation[] = [];
+    setAdminSessionCheckerForTests(async () => true);
+    setRegistrationMutationAdapterForTests({
+      getPermissionExists: async (code: string) => code === 'CAR-SM-S1801',
+      commitRegistrationUpdates: async (ops: RegistrationUpdateOperation[]) => {
+        capturedOps.push(...ops);
+      }
+    });
+
+    await persistRegistrationAndPermissionInDb(s18BaseReg);
+    const s18MissingPermReg = makeSampleRegistration({
+      id: 'reg-s18-02',
+      code: 'CAR-SM-S1802',
+      status: 'presente',
+      checkedInAt: '2026-12-08T09:00:00.000Z',
+      certificateIssued: true
+    });
+    await persistMultipleRegistrationsInDb([s18BaseReg, s18MissingPermReg]);
+
+    const opSingle = capturedOps[0];
+    const opBatchMissingPerm = capturedOps.find((o) => o.permCode === 'CAR-SM-S1802');
+    assert(
+      capturedOps.length === 3 &&
+        Boolean(opSingle) &&
+        opSingle.permExists === true &&
+        Object.keys(opSingle.regUpdatePatch).every((k) => ALLOWED_REG_UPDATE_KEYS.has(k)) &&
+        Object.keys(opSingle.permUpdatePatch).every((k) => ALLOWED_PERM_UPDATE_KEYS.has(k)) &&
+        Boolean(opBatchMissingPerm) &&
+        opBatchMissingPerm!.permExists === false &&
+        opBatchMissingPerm!.permCreatePayloadIfMissing.code === 'CAR-SM-S1802' &&
+        opBatchMissingPerm!.permCreatePayloadIfMissing.registrationId === 'reg-s18-02' &&
+        opBatchMissingPerm!.permCreatePayloadIfMissing.status === 'presente' &&
+        opBatchMissingPerm!.permCreatePayloadIfMissing.certificateIssued === true,
+      '18.1 transações unitária e em lote usam update patch estrito quando permission existe e fallback válido quando ausente',
+      suite18
+    );
+
+    setRegistrationMutationAdapterForTests(null);
+
+    // -----------------------------------------------------------------------
+    // 18.2: Admin Auth, React 19 Safety, Remote-First & snapshot.empty
+    // -----------------------------------------------------------------------
+    setAdminSessionCheckerForTests(null);
+    const unauthCheck = await isAuthorizedServerAdminSession();
+    let unauthFetchRejected = false;
+    try {
+      await fetchAdminRegistrationsFromDb();
+    } catch (err: any) {
+      unauthFetchRejected = err?.message === 'ADMIN_AUTH_REQUIRED';
+    }
+    setAdminSessionCheckerForTests(async () => true);
+    const authCheck = await isAuthorizedServerAdminSession();
+    setAdminSessionCheckerForTests(null);
+
+    assert(
+      unauthCheck === false && unauthFetchRejected && authCheck === true,
+      '18.2 isAuthorizedServerAdminSession nega sessão ausente, exige auth em fetchAdminRegistrationsFromDb e aceita checker autorizado (/admins/{uid})',
+      suite18
+    );
+
+    const appSrc = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+    const firebaseDbSrc = fs.readFileSync(path.join(process.cwd(), 'src/services/firebaseDb.ts'), 'utf-8');
+    const adminDashSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf-8');
+    const adminCertMgrSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminCertificateManager.tsx'), 'utf-8');
+
+    const checkAppHandlerRemoteFirst = (fnName: string, expectedAwait: string): boolean => {
+      const idx = appSrc.indexOf(`const ${fnName} = async`);
+      if (idx === -1) return false;
+      const slice = appSrc.slice(idx, idx + 900);
+      const awaitIdx = slice.indexOf(`await ${expectedAwait}`);
+      const applyIdx = slice.indexOf('applyRegistrationsState');
+      const cfgIdx = slice.indexOf('setConfig(');
+      const stateMutIdx = applyIdx !== -1 ? applyIdx : cfgIdx;
+      return awaitIdx !== -1 && stateMutIdx !== -1 && awaitIdx < stateMutIdx;
+    };
+
+    assert(
+      checkAppHandlerRemoteFirst('handleToggleCheckIn', 'persistRegistrationAndPermissionInDb') &&
+        checkAppHandlerRemoteFirst('handleUpdateRegistrationStatus', 'persistRegistrationAndPermissionInDb') &&
+        checkAppHandlerRemoteFirst('handleToggleCertificateIssued', 'persistRegistrationAndPermissionInDb') &&
+        checkAppHandlerRemoteFirst('handleReleaseAllPresentCertificates', 'persistMultipleRegistrationsInDb') &&
+        checkAppHandlerRemoteFirst('handleUpdateConfig', 'saveEventConfigInDb') &&
+        checkAppHandlerRemoteFirst('handleResetConfig', 'saveEventConfigInDb') &&
+        !appSrc.includes('let updatedReg: Registration | undefined') &&
+        appSrc.includes('signOutFirestoreAdmin().catch'),
+      '18.2 App.tsx executa handlers administrativos async com await remoto antes de mutar estado/storage e chama signOutFirestoreAdmin no logout',
+      suite18
+    );
+
+    const subRegsBlockStart = firebaseDbSrc.indexOf('export const subscribeAdminRegistrations');
+    const subRegsBlock = firebaseDbSrc.slice(subRegsBlockStart, subRegsBlockStart + 700);
+    const appSubRegsIdx = appSrc.indexOf('const unsubRegs = subscribeAdminRegistrations(');
+    const appSubRegsBlock = appSrc.slice(appSubRegsIdx, appSubRegsIdx + 500);
+    assert(
+      !subRegsBlock.includes('if (snapshot.empty) return') &&
+        !appSubRegsBlock.includes('if (remoteRegs.length === 0) return') &&
+        !appSubRegsBlock.includes('remoteRegs.length > 0'),
+      '18.2 subscribeAdminRegistrations e App.tsx propagam snapshot vazio ([]) sem ignorar snapshot.empty',
+      suite18
+    );
+
+    assert(
+      adminDashSrc.includes('disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}') &&
+        adminDashSrc.includes('handleStatusSelectChange(reg, newStatus)') &&
+        adminDashSrc.includes('statusUpdateFeedback') &&
+        adminDashSrc.includes('configSaveError') &&
+        adminCertMgrSrc.includes('isCloudAdminConnected') &&
+        adminCertMgrSrc.includes('disabled={!isCloudAdminConnected || isReleasingBatch}') &&
+        adminCertMgrSrc.includes('disabled={!isPresent || !isCloudAdminConnected || busyRegId === reg.id}') &&
+        adminCertMgrSrc.includes('disabled={!isCloudAdminConnected || isSavingDesign}'),
+      '18.2 AdminDashboard e AdminCertificateManager bloqueiam mutações quando desconectados e exibem feedback explícito de erro',
+      suite18
+    );
+
+    // -----------------------------------------------------------------------
+    // 18.3: Certificate Security & Print Protection
+    // -----------------------------------------------------------------------
+    const certModalSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/CertificateModal.tsx'), 'utf-8');
+    const indexCssSrc = fs.readFileSync(path.join(process.cwd(), 'src/index.css'), 'utf-8');
+    const printCssIdx = indexCssSrc.indexOf('.print-certificate-container');
+    const printCssClosingIdx = printCssIdx !== -1 ? indexCssSrc.indexOf('}', printCssIdx + 30) : -1;
+    const printCssBlock =
+      printCssIdx !== -1 && printCssClosingIdx !== -1
+        ? indexCssSrc.slice(printCssIdx, printCssClosingIdx + 1)
+        : '';
+    const recordDlIdx = appSrc.indexOf('const handleRecordCertificateDownload');
+    const recordDlBlock = appSrc.slice(recordDlIdx, recordDlIdx + 1200);
+
+    assert(
+      certModalSrc.includes('{canRenderPrintableCertificate ? (') &&
+        certModalSrc.includes('id="certificado-oficial-impressao"') &&
+        certModalSrc.includes('id="certificado-bloqueado-preview"') &&
+        certModalSrc.indexOf('id="certificado-oficial-impressao"') >
+          certModalSrc.indexOf('{canRenderPrintableCertificate ? (') &&
+        certModalSrc.includes(': livePermission?.status') &&
+        certModalSrc.includes('Permissão Não Confirmada no Servidor') &&
+        !certModalSrc.includes('demoAttendee') &&
+        !certModalSrc.includes('Amanda Silveira'),
+      '18.3 CertificateModal blinda #certificado-oficial-impressao com canRenderPrintableCertificate, aplica fail-closed no modo público e remove demo fictícia',
+      suite18
+    );
+
+    assert(
+      isCertificateAvailableForPublic(Date.parse('2026-12-08T16:29:59-03:00')) === false &&
+        isCertificateAvailableForPublic(Date.parse('2026-12-08T16:30:00-03:00')) === true &&
+        !printCssBlock.includes('border: none !important') &&
+        !printCssBlock.includes('padding: 0 !important') &&
+        recordDlBlock.includes("if (attendee.status !== 'presente' || !attendee.certificateIssued)") &&
+        !recordDlBlock.includes('certificateIssued: true'),
+      '18.3 respeita janela temporal oficial (16h30), preserva bordas/padding no @media print e nunca auto-promove certificateIssued em download',
+      suite18
+    );
+
+    // -----------------------------------------------------------------------
+    // 18.4: Search, Non-PII Hash & Download Metrics
+    // -----------------------------------------------------------------------
+    const hashWithCpf = generateCertificateHash('CAR-SM-TEST99', '111.222.333-44');
+    const hashWithoutCpf = generateCertificateHash('car-sm-test99', 'VALIDADO');
+    assert(
+      hashWithCpf === hashWithoutCpf &&
+        /^SUS-MG-CAR-SM-TEST99-[A-F0-9]{8}$/.test(hashWithCpf) &&
+        !hashWithCpf.includes('1112') &&
+        !hashWithCpf.includes('3344') &&
+        !hashWithCpf.includes('3334'),
+      '18.4 generateCertificateHash é determinístico por código e nunca vaza dígitos de CPF',
+      suite18
+    );
+
+    assert(
+      adminDashSrc.includes("(cleanSearchDigits.length >= 3 && (reg.cpf || '').replace(/\\D/g, '').includes(cleanSearchDigits))") &&
+        adminDashSrc.includes('const certificateDownloadedCount') &&
+        adminDashSrc.includes('{certificateDownloadedCount}') &&
+        certModalSrc.includes('Nº de Participante'),
+      '18.4 busca admin normaliza dígitos do CPF, badge lateral usa certificateDownloadedCount e busca pública orienta por Nº de Participante',
+      suite18
+    );
+
+    // -----------------------------------------------------------------------
+    // 18.5: Certificate Editor & XSS Escaping
+    // -----------------------------------------------------------------------
+    assert(
+      sanitizeCertificateBannerUrl('/assets/banner-oficial-simposio-saude-mental-carangola.jpg') ===
+        '/assets/banner-oficial-simposio-saude-mental-carangola.jpg' &&
+        sanitizeCertificateBannerUrl('https://simposio-saude-mental-carangola.vercel.app/assets/logo.png') ===
+          'https://simposio-saude-mental-carangola.vercel.app/assets/logo.png' &&
+        sanitizeCertificateBannerUrl('data:image/png;base64,AAAABBBB') === '' &&
+        sanitizeCertificateBannerUrl('javascript:alert(1)') === '' &&
+        sanitizeCertificateBannerUrl('/assets/WhatsApp_Image_1234.jpg') === '' &&
+        sanitizeCertificateBannerUrl('//evil.example/banner.png') === '' &&
+        sanitizeCertificateBannerUrl(`https://example.com/${'a'.repeat(500)}`) === '',
+      '18.5 sanitizeCertificateBannerUrl aceita apenas paths locais seguros ou http/https e bloqueia Base64, javascript:, protocol-relative e URLs gigantes',
+      suite18
+    );
+
+    const customDesignInput = {
+      ...INITIAL_CERTIFICATE_DESIGN,
+      mainTitle: 'CERTIFICADO DE HONRA RAPS',
+      badgeLabel: 'MESA DE ABERTURA · SUS',
+      footerQuote: 'Cuidar em liberdade é compromisso ético.',
+      primaryColor: '#123456',
+      accentColor: '#abcdef',
+      secondaryColor: '#0f766e',
+      backgroundColor: '#fdfcf8',
+      showBannerImage: true,
+      bannerImageUrl: '/assets/banner-oficial-simposio-saude-mental-carangola.jpg',
+      showBottomWaves: false
+    };
+    const preservedDesign = getCertificateDesign({
+      ...INITIAL_EVENT_CONFIG,
+      certificateDesign: customDesignInput
+    });
+    const sanitizedRejectedBannerDesign = getCertificateDesign({
+      ...INITIAL_EVENT_CONFIG,
+      certificateDesign: {
+        ...customDesignInput,
+        showBannerImage: true,
+        bannerImageUrl: 'data:image/png;base64,INVALIDO'
+      }
+    });
+    assert(
+      preservedDesign.mainTitle === 'CERTIFICADO DE HONRA RAPS' &&
+        preservedDesign.badgeLabel === 'MESA DE ABERTURA · SUS' &&
+        preservedDesign.footerQuote === 'Cuidar em liberdade é compromisso ético.' &&
+        preservedDesign.primaryColor === '#123456' &&
+        preservedDesign.showBannerImage === true &&
+        preservedDesign.showBottomWaves === false &&
+        sanitizedRejectedBannerDesign.bannerImageUrl === '' &&
+        sanitizedRejectedBannerDesign.showBannerImage === false,
+      '18.5 getCertificateDesign preserva personalizações válidas e desativa showBannerImage quando a URL é inválida',
+      suite18
+    );
+
+    const s18Store = new Map<string, string>();
+    s18Store.set(
+      STORAGE_KEYS.CONFIG,
+      JSON.stringify({
+        ...INITIAL_EVENT_CONFIG,
+        certificateDesign: customDesignInput
+      })
+    );
+    s18StorageGlobal.localStorage = {
+      getItem: (k: string) => s18Store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        s18Store.set(k, v);
+      },
+      removeItem: (k: string) => {
+        s18Store.delete(k);
+      },
+      clear: () => {
+        s18Store.clear();
+      }
+    };
+    const loadedFromStorage = loadStoredData();
+    assert(
+      loadedFromStorage.config.certificateDesign?.mainTitle === 'CERTIFICADO DE HONRA RAPS' &&
+        loadedFromStorage.config.certificateDesign?.badgeLabel === 'MESA DE ABERTURA · SUS' &&
+        loadedFromStorage.config.certificateDesign?.footerQuote === 'Cuidar em liberdade é compromisso ético.' &&
+        loadedFromStorage.config.certificateDesign?.primaryColor === '#123456',
+      '18.5 loadStoredData preserva campos editados em certificateDesign sem sobrescrita hardcoded',
+      suite18
+    );
+
+    // Test saveEventConfigInDb via adapter
+    setAdminSessionCheckerForTests(null);
+    let configUnauthBlocked = false;
+    try {
+      await saveEventConfigInDb(INITIAL_EVENT_CONFIG);
+    } catch (err: any) {
+      configUnauthBlocked = err?.message === 'ADMIN_AUTH_REQUIRED';
+    }
+
+    const savedConfigs: Record<string, unknown>[] = [];
+    setAdminSessionCheckerForTests(async () => true);
+    setEventConfigAdapterForTests({
+      saveConfig: async (payload: Record<string, unknown>) => {
+        savedConfigs.push(payload);
+      }
+    });
+    await saveEventConfigInDb({
+      ...INITIAL_EVENT_CONFIG,
+      certificateDesign: {
+        ...customDesignInput,
+        showBannerImage: true,
+        bannerImageUrl: 'data:image/jpeg;base64,ABC123'
+      }
+    });
+    await saveEventConfigInDb({
+      ...INITIAL_EVENT_CONFIG,
+      certificateDesign: customDesignInput
+    });
+    const cfgBase64Stripped = savedConfigs[0]?.certificateDesign as Record<string, unknown> | undefined;
+    const cfgValidUrlSaved = savedConfigs[1]?.certificateDesign as Record<string, unknown> | undefined;
+    assert(
+      configUnauthBlocked &&
+        Boolean(cfgBase64Stripped) &&
+        cfgBase64Stripped!.bannerImageUrl === '' &&
+        cfgBase64Stripped!.showBannerImage === false &&
+        Boolean(cfgValidUrlSaved) &&
+        cfgValidUrlSaved!.bannerImageUrl === '/assets/banner-oficial-simposio-saude-mental-carangola.jpg' &&
+        cfgValidUrlSaved!.showBannerImage === true,
+      '18.5 saveEventConfigInDb exige sessão admin, remove Base64 de bannerImageUrl e persiste URLs válidas',
+      suite18
+    );
+    setEventConfigAdapterForTests(null);
+    setAdminSessionCheckerForTests(null);
+
+    const xssPayload = '<script>alert(1)</script>';
+    const xssHtml = generateCertificateHTML(
+      {
+        ...s18BaseReg,
+        fullName: `Participante ${xssPayload}`,
+        city: `Carangola ${xssPayload}`
+      },
+      {
+        ...INITIAL_EVENT_CONFIG,
+        certificateDesign: {
+          ...customDesignInput,
+          mainTitle: `CERTIFICADO ${xssPayload}`,
+          badgeLabel: `BADGE ${xssPayload}`,
+          footerQuote: `CITAÇÃO ${xssPayload}`
+        }
+      }
+    );
+    const certSheetSrc = fs.readFileSync(path.join(process.cwd(), 'src/components/CertificateSheet.tsx'), 'utf-8');
+    const formattedBody = formatCertificateBodyText(
+      'Evento {evento} em {local} com {carga_horaria}.',
+      INITIAL_EVENT_CONFIG
+    );
+    assert(
+      !xssHtml.includes(xssPayload) &&
+        xssHtml.includes('&lt;script&gt;alert(1)&lt;/script&gt;') &&
+        xssHtml.includes('Autenticação Digital SUS') &&
+        xssHtml.includes('banner-oficial-simposio-saude-mental-carangola.jpg') &&
+        !xssHtml.includes('<div class="bottom-waves-strip">') &&
+        formattedBody.includes('8 (oito) horas') &&
+        !adminCertMgrSrc.includes('FileReader') &&
+        !adminCertMgrSrc.includes('readAsDataURL') &&
+        certSheetSrc.includes('design.badgeLabel') &&
+        certSheetSrc.includes('design.footerQuote') &&
+        certSheetSrc.includes('design.showBannerImage') &&
+        certSheetSrc.includes('design.showBottomWaves') &&
+        certSheetSrc.includes('design.layoutTheme') &&
+        certSheetSrc.includes('design.fontFamily') &&
+        certSheetSrc.includes('design.borderStyle'),
+      '18.5 generateCertificateHTML e CertificateSheet refletem todos os controles de design e escapam payloads XSS',
+      suite18
+    );
+
+    // -----------------------------------------------------------------------
+    // 18.6: Protected Files Integrity (SHA-256 bit-a-bit)
+    // -----------------------------------------------------------------------
+    const fileSha256 = (relPath: string): string =>
+      crypto
+        .createHash('sha256')
+        .update(fs.readFileSync(path.join(process.cwd(), relPath)))
+        .digest('hex')
+        .toUpperCase();
+
+    assert(
+      fileSha256('firestore.rules') === 'C742B761A4AAA35E43CFDDCD0B6DBAE8A19005C2581EAF3A70627679BC54989C' &&
+        fileSha256('storage.rules') === '290FD2E779E5C5B8FFCB0FB8838DF8CCB7333F1ED9DB3C435509FE5649500B48' &&
+        fileSha256('api/email/confirm-registration.ts') === '44168CE4164EB4B6C8A14BB55270A6EFFD5F9340DC032CF76A5C85972EB7F344',
+      '18.6 arquivos protegidos (firestore.rules, storage.rules, api/email/confirm-registration.ts) mantêm SHA-256 bit-a-bit idêntico',
+      suite18
+    );
+  } finally {
+    setAdminSessionCheckerForTests(null);
+    setRegistrationMutationAdapterForTests(null);
+    setEventConfigAdapterForTests(null);
+    if (s18PrevLocalStorage === undefined) {
+      delete s18StorageGlobal.localStorage;
+    } else {
+      s18StorageGlobal.localStorage = s18PrevLocalStorage;
+    }
+  }
 
 
   console.log('\n======================================================');

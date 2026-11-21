@@ -26,6 +26,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   collection,
   onSnapshot,
   writeBatch,
@@ -58,10 +59,12 @@ import {
   generateRegistrationCode,
   buildRegistrationId,
   sanitizeRegistrationId,
+  sanitizeCertificateBannerUrl,
   validateSubscriberId,
   buildSubscriberIdFromRegistrationId,
   validateStrictIsoTimestamp,
-  SubscribersSnapshotMeta
+  SubscribersSnapshotMeta,
+  type SocialPostsSnapshotMeta
 } from '../utils/helpers.ts';
 
 const app = getApps().some((a) => a.name === '[DEFAULT]') ? getApp() : initializeApp(firebaseConfig);
@@ -437,6 +440,14 @@ export const setEnsureAuthObserverForTests = (observer: ((uid: string) => void) 
   ensureAuthObserverForTests = observer;
 };
 
+let customSignInAnonymouslyForTests: (() => Promise<string | null>) | null = null;
+
+export const setSignInAnonymouslyForTests = (
+  fn: (() => Promise<string | null>) | null
+): void => {
+  customSignInAnonymouslyForTests = fn;
+};
+
 export const ensureAuthenticatedUser = async (): Promise<string> => {
   if (firestoreAuth.currentUser) {
     const uid = firestoreAuth.currentUser.uid;
@@ -449,6 +460,14 @@ export const ensureAuthenticatedUser = async (): Promise<string> => {
 
   pendingAnonAuthPromise = (async () => {
     try {
+      if (customSignInAnonymouslyForTests) {
+        const mockedUid = await customSignInAnonymouslyForTests();
+        if (mockedUid) {
+          ensureAuthObserverForTests?.(mockedUid);
+          return mockedUid;
+        }
+        throw new Error('MOCK_ANON_AUTH_UNAVAILABLE');
+      }
       const cred = await signInAnonymously(firestoreAuth);
       ensureAuthObserverForTests?.(cred.user.uid);
       return cred.user.uid;
@@ -581,12 +600,114 @@ export const isVerifiedAdminUser = (
   return AUTHORIZED_ADMIN_EMAILS.some((adm) => adm.toLowerCase() === userEmail);
 };
 
+let customAdminSessionCheckerForTests: (() => Promise<boolean>) | null = null;
+
+export const setAdminSessionCheckerForTests = (checker: (() => Promise<boolean>) | null): void => {
+  customAdminSessionCheckerForTests = checker;
+};
+
+export interface RegistrationUpdateOperation {
+  regId: string;
+  permCode: string;
+  permExists: boolean;
+  regUpdatePatch: Record<string, unknown>;
+  permUpdatePatch: Record<string, unknown>;
+  permCreatePayloadIfMissing: Record<string, unknown>;
+}
+
+export interface RegistrationMutationAdapter {
+  getPermissionExists: (code: string) => Promise<boolean>;
+  commitRegistrationUpdates: (ops: RegistrationUpdateOperation[]) => Promise<void>;
+}
+
+let customRegistrationMutationAdapterForTests: RegistrationMutationAdapter | null = null;
+
+export const setRegistrationMutationAdapterForTests = (
+  adapter: RegistrationMutationAdapter | null
+): void => {
+  customRegistrationMutationAdapterForTests = adapter;
+};
+
+export interface EventConfigStorageAdapter {
+  saveConfig: (payload: Record<string, unknown>) => Promise<void>;
+}
+
+let customEventConfigAdapterForTests: EventConfigStorageAdapter | null = null;
+
+export const setEventConfigAdapterForTests = (adapter: EventConfigStorageAdapter | null): void => {
+  customEventConfigAdapterForTests = adapter;
+};
+
+export const buildRegistrationUpdatePatch = (
+  reg: Registration,
+  nowIso: string
+): Record<string, unknown> => {
+  const status = reg.status === 'presente' || reg.status === 'cancelada' ? reg.status : 'confirmada';
+  const certificateIssued = status === 'presente' ? Boolean(reg.certificateIssued) : false;
+
+  const patch: Record<string, unknown> = {
+    status,
+    certificateIssued,
+    checkedInAt:
+      status === 'presente' && reg.checkedInAt
+        ? String(reg.checkedInAt).slice(0, 40)
+        : deleteField(),
+    updatedAt: nowIso.slice(0, 40)
+  };
+
+  if (typeof reg.certificateDownloaded === 'boolean') {
+    patch.certificateDownloaded = reg.certificateDownloaded;
+  }
+  if (reg.certificateDownloadedAt) {
+    patch.certificateDownloadedAt = String(reg.certificateDownloadedAt).slice(0, 40);
+  }
+  if (typeof reg.certificateDownloadCount === 'number' && reg.certificateDownloadCount >= 0) {
+    patch.certificateDownloadCount = reg.certificateDownloadCount;
+  }
+  if (typeof reg.notes === 'string') {
+    patch.notes = reg.notes.trim().slice(0, 500);
+  }
+
+  return patch;
+};
+
+export const buildPermissionUpdatePatch = (
+  reg: Registration,
+  nowIso: string
+): Record<string, unknown> => {
+  const status = reg.status === 'presente' || reg.status === 'cancelada' ? reg.status : 'confirmada';
+  const certificateIssued = status === 'presente' ? Boolean(reg.certificateIssued) : false;
+
+  const patch: Record<string, unknown> = {
+    status,
+    certificateIssued,
+    checkedInAt:
+      status === 'presente' && reg.checkedInAt
+        ? String(reg.checkedInAt).slice(0, 40)
+        : deleteField(),
+    updatedAt: nowIso.slice(0, 40)
+  };
+
+  if (typeof reg.certificateDownloaded === 'boolean') {
+    patch.certificateDownloaded = reg.certificateDownloaded;
+  }
+  if (typeof reg.certificateDownloadCount === 'number' && reg.certificateDownloadCount >= 0) {
+    patch.certificateDownloadCount = reg.certificateDownloadCount;
+  }
+
+  return patch;
+};
+
 /**
  * Verificação assíncrona alinhada integralmente a `isAdmin()` das firestore.rules:
  * verifica token JWT real (`email_verified`), allowlist oficial e documento `/admins/{uid}` no servidor.
  * Usada exclusivamente no caminho administrativo sobre `[DEFAULT]` `db`.
  */
 export const isAuthorizedServerAdminSession = async (): Promise<boolean> => {
+  if (customAdminSessionCheckerForTests) {
+    return customAdminSessionCheckerForTests();
+  }
+
   await firestoreAuth.authStateReady();
   const user = firestoreAuth.currentUser;
   if (!user || (user as { isLocalFallback?: boolean }).isLocalFallback) {
@@ -1709,21 +1830,43 @@ export const synchronizeOfflineRegistrationQueue = async (
 };
 
 export const persistRegistrationAndPermissionInDb = async (reg: Registration): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
 
   const nowIso = new Date().toISOString();
-  const regPayload = buildRegistrationDoc(reg, nowIso);
-  const permPayload = buildPermissionDoc(reg, nowIso);
-  const regId = String(regPayload.id);
-  const permCode = String(permPayload.code);
+  const regId = sanitizeRegistrationId(reg.id, 'reg');
+  const permCode = sanitizeCode(reg.code);
+  const regUpdatePatch = buildRegistrationUpdatePatch(reg, nowIso);
+  const permUpdatePatch = buildPermissionUpdatePatch(reg, nowIso);
+  const permCreatePayloadIfMissing = buildPermissionDoc(reg, nowIso);
 
   try {
+    if (customRegistrationMutationAdapterForTests) {
+      const permExists = await customRegistrationMutationAdapterForTests.getPermissionExists(permCode);
+      await customRegistrationMutationAdapterForTests.commitRegistrationUpdates([
+        {
+          regId,
+          permCode,
+          permExists,
+          regUpdatePatch,
+          permUpdatePatch,
+          permCreatePayloadIfMissing
+        }
+      ]);
+      return;
+    }
+
+    const permRef = doc(db, 'certificate_permissions', permCode);
+    const permSnap = await getDoc(permRef);
     const batch = writeBatch(db);
-    batch.set(doc(db, 'registrations', regId), regPayload);
-    batch.set(doc(db, 'certificate_permissions', permCode), permPayload);
+    batch.update(doc(db, 'registrations', regId), regUpdatePatch);
+    if (permSnap.exists()) {
+      batch.update(permRef, permUpdatePatch);
+    } else {
+      batch.set(permRef, permCreatePayloadIfMissing);
+    }
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `registrations/${regId}`);
@@ -1731,8 +1874,8 @@ export const persistRegistrationAndPermissionInDb = async (reg: Registration): P
 };
 
 export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
   if (regs.length === 0) return;
@@ -1743,12 +1886,45 @@ export const persistMultipleRegistrationsInDb = async (regs: Registration[]): Pr
   try {
     for (let i = 0; i < regs.length; i += chunkSize) {
       const slice = regs.slice(i, i + chunkSize);
+
+      if (customRegistrationMutationAdapterForTests) {
+        const adapter = customRegistrationMutationAdapterForTests;
+        const ops: RegistrationUpdateOperation[] = await Promise.all(
+          slice.map(async (reg) => {
+            const permCode = sanitizeCode(reg.code);
+            const permExists = await adapter.getPermissionExists(permCode);
+            return {
+              regId: sanitizeRegistrationId(reg.id, 'reg'),
+              permCode,
+              permExists,
+              regUpdatePatch: buildRegistrationUpdatePatch(reg, nowIso),
+              permUpdatePatch: buildPermissionUpdatePatch(reg, nowIso),
+              permCreatePayloadIfMissing: buildPermissionDoc(reg, nowIso)
+            };
+          })
+        );
+        await adapter.commitRegistrationUpdates(ops);
+        continue;
+      }
+
+      const permChecks = await Promise.all(
+        slice.map(async (reg) => {
+          const permCode = sanitizeCode(reg.code);
+          const permRef = doc(db, 'certificate_permissions', permCode);
+          const permSnap = await getDoc(permRef);
+          return { reg, permCode, permRef, exists: permSnap.exists() };
+        })
+      );
+
       const batch = writeBatch(db);
-      slice.forEach((reg) => {
-        const regPayload = buildRegistrationDoc(reg, nowIso);
-        const permPayload = buildPermissionDoc(reg, nowIso);
-        batch.set(doc(db, 'registrations', String(regPayload.id)), regPayload);
-        batch.set(doc(db, 'certificate_permissions', String(permPayload.code)), permPayload);
+      permChecks.forEach(({ reg, permRef, exists }) => {
+        const regId = sanitizeRegistrationId(reg.id, 'reg');
+        batch.update(doc(db, 'registrations', regId), buildRegistrationUpdatePatch(reg, nowIso));
+        if (exists) {
+          batch.update(permRef, buildPermissionUpdatePatch(reg, nowIso));
+        } else {
+          batch.set(permRef, buildPermissionDoc(reg, nowIso));
+        }
       });
       await batch.commit();
     }
@@ -1813,21 +1989,18 @@ export const recordCertificateDownloadInDb = async (
       certificateDownloadCount: (attendee.certificateDownloadCount || 0) + 1
     };
 
-    if (isVerifiedAdminUser(firestoreAuth.currentUser)) {
+    const isAdminSession = await isAuthorizedServerAdminSession();
+    if (isAdminSession) {
       await persistRegistrationAndPermissionInDb(updatedReg);
     } else {
       const permRef = doc(db, 'certificate_permissions', code);
       const permSnap = await getDoc(permRef);
       if (permSnap.exists() && permSnap.data()?.status === 'presente' && permSnap.data()?.certificateIssued === true) {
-        await setDoc(
-          permRef,
-          {
-            certificateDownloaded: true,
-            certificateDownloadCount: (permSnap.data()?.certificateDownloadCount || 0) + 1,
-            updatedAt: nowIso
-          },
-          { merge: true }
-        );
+        await updateDoc(permRef, {
+          certificateDownloaded: true,
+          certificateDownloadCount: (permSnap.data()?.certificateDownloadCount || 0) + 1,
+          updatedAt: nowIso
+        });
       }
     }
   } catch (error) {
@@ -1868,9 +2041,19 @@ export const fetchCertificatePermissionByCode = async (
 };
 
 export const saveEventConfigInDb = async (config: EventConfig): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
+  }
+
+  let sanitizedCertDesign: Record<string, unknown> | undefined;
+  if (config.certificateDesign) {
+    const cleanBannerUrl = sanitizeCertificateBannerUrl(config.certificateDesign.bannerImageUrl);
+    sanitizedCertDesign = stripUndefined({
+      ...(config.certificateDesign as unknown as Record<string, unknown>),
+      bannerImageUrl: cleanBannerUrl,
+      showBannerImage: cleanBannerUrl ? Boolean(config.certificateDesign.showBannerImage) : false
+    });
   }
 
   const nowIso = new Date().toISOString();
@@ -1893,13 +2076,17 @@ export const saveEventConfigInDb = async (config: EventConfig): Promise<void> =>
     googleFormsUrl: (config.googleFormsUrl || '').slice(0, 400),
     googleSheetsSyncUrl: (config.googleSheetsSyncUrl || '').slice(0, 400),
     enableGoogleFormsOption: Boolean(config.enableGoogleFormsOption),
-    certificateDesign: config.certificateDesign ? stripUndefined(config.certificateDesign as unknown as Record<string, unknown>) : undefined,
+    certificateDesign: sanitizedCertDesign,
     badgeDesign: config.badgeDesign ? stripUndefined(config.badgeDesign as unknown as Record<string, unknown>) : undefined,
     emailJsConfig: config.emailJsConfig ? stripUndefined(config.emailJsConfig as unknown as Record<string, unknown>) : undefined,
     updatedAt: nowIso
   });
 
   try {
+    if (customEventConfigAdapterForTests) {
+      await customEventConfigAdapterForTests.saveConfig(payload);
+      return;
+    }
     await setDoc(doc(db, 'event_config', 'main'), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'event_config/main');
@@ -2257,8 +2444,8 @@ const mapFirestoreRegistrationDoc = (
 };
 
 export const fetchAdminRegistrationsFromDb = async (): Promise<Registration[]> => {
-  const user = firestoreAuth.currentUser;
-  if (!user || !isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
   try {
@@ -2465,6 +2652,15 @@ export const setNewsletterAdapterForTests = (adapter: NewsletterStorageAdapter |
 // 1. SOCIAL WALL: FIRESTORE & FIREBASE STORAGE INTEGRATION
 // ============================================================================
 
+export const ALLOWED_SOCIAL_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp'
+]);
+
+export const MAX_SOCIAL_IMAGE_BYTES = 5 * 1024 * 1024;
+
 const dataUrlToBlob = (dataUrl: string): Blob | null => {
   try {
     const parts = dataUrl.split(',');
@@ -2482,105 +2678,203 @@ const dataUrlToBlob = (dataUrl: string): Blob | null => {
   }
 };
 
+export const validateSocialPostInput = (
+  post: SocialPost,
+  rawImageFile?: File | Blob | null
+): {
+  authorName: string;
+  authorRole: string;
+  city: string;
+  content: string;
+  hashtags: string;
+  blobToUpload: Blob | null;
+} => {
+  const authorName = (post.authorName || '').trim();
+  const authorRole = (post.authorRole || 'Participante do Simpósio').trim();
+  const city = (post.city || 'Carangola').trim();
+  const content = (post.content || '').trim();
+  const hashtags = (post.hashtags || '').trim();
+
+  if (authorName.length < 2 || authorName.length > 120) {
+    throw new Error('VALIDATION_ERROR: Informe seu nome com pelo menos 2 caracteres (máximo 120).');
+  }
+  if (authorRole.length < 2 || authorRole.length > 120) {
+    throw new Error('VALIDATION_ERROR: Informe o cargo/função com pelo menos 2 caracteres (máximo 120).');
+  }
+  if (city.length < 2 || city.length > 100) {
+    throw new Error('VALIDATION_ERROR: Informe o município com pelo menos 2 caracteres (máximo 100).');
+  }
+  if (content.length < 2 || content.length > 1000) {
+    throw new Error('VALIDATION_ERROR: A mensagem deve ter entre 2 e 1000 caracteres.');
+  }
+  if (hashtags.length > 300) {
+    throw new Error('VALIDATION_ERROR: As hashtags excedem o limite de 300 caracteres.');
+  }
+
+  let blobToUpload: Blob | null = rawImageFile || null;
+  if (!blobToUpload && post.imageUrl?.startsWith('data:')) {
+    blobToUpload = dataUrlToBlob(post.imageUrl);
+    if (!blobToUpload) {
+      throw new Error('VALIDATION_ERROR: A imagem selecionada está corrompida ou em formato inválido.');
+    }
+  } else if (post.imageUrl && !post.imageUrl.startsWith('data:') && post.imageUrl.length > 1000) {
+    throw new Error('VALIDATION_ERROR: A URL da imagem excede o limite de 1000 caracteres.');
+  }
+
+  if (blobToUpload) {
+    if (blobToUpload.size <= 0) {
+      throw new Error('VALIDATION_ERROR: O arquivo de imagem selecionado está vazio.');
+    }
+    if (blobToUpload.size > MAX_SOCIAL_IMAGE_BYTES) {
+      throw new Error('VALIDATION_ERROR: A imagem selecionada excede o limite máximo permitido de 5MB.');
+    }
+    const normalizedMime = (blobToUpload.type || '').toLowerCase().trim();
+    if (!ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has(normalizedMime)) {
+      throw new Error(
+        'VALIDATION_ERROR: Formato de imagem não suportado. Utilize apenas JPEG, PNG ou WebP.'
+      );
+    }
+  }
+
+  return { authorName, authorRole, city, content, hashtags, blobToUpload };
+};
+
 export const saveSocialPostToDb = async (
   post: SocialPost,
   rawImageFile?: File | Blob
 ): Promise<SocialPost> => {
   await ensureAuthenticatedUser();
 
+  const validated = validateSocialPostInput(post, rawImageFile);
   const id = sanitizeId(post.id, 'post');
   const nowIso = new Date().toISOString();
-  const isAdmin = isVerifiedAdminUser(firestoreAuth.currentUser);
+
+  if (customSocialPostsAdapter) {
+    const isAdmin = isVerifiedAdminUser(firestoreAuth.currentUser);
+    const initialStatus = isAdmin ? (post.status || 'approved') : 'pending';
+    const initialPinned = isAdmin ? Boolean(post.pinned) : false;
+    const initialLikes = isAdmin ? Math.max(0, Math.round(Number(post.likes) || 0)) : 0;
+    const safeAdapterImageUrl =
+      post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl : undefined;
+
+    const sanitizedPost: SocialPost = {
+      ...post,
+      id,
+      authorName: validated.authorName,
+      authorRole: validated.authorRole,
+      city: validated.city,
+      content: validated.content,
+      hashtags: validated.hashtags,
+      imageUrl: safeAdapterImageUrl,
+      status: initialStatus as 'approved' | 'pending' | 'rejected',
+      pinned: initialPinned,
+      likes: initialLikes
+    };
+
+    return customSocialPostsAdapter.savePost(sanitizedPost, rawImageFile);
+  }
+
+  // Fail-closed: exige sessão Firebase Auth real (anônima ou admin) antes de qualquer escrita em Storage/Firestore
+  if (!firestoreAuth.currentUser?.uid) {
+    throw new Error(
+      'SOCIAL_AUTH_UNAVAILABLE: Não foi possível autenticar sua sessão no servidor para publicar no mural. Tente novamente.'
+    );
+  }
+
+  const isAdmin = await isAuthorizedServerAdminSession();
 
   // Regra de Moderação e Integridade do Social Wall:
   // Publicações públicas nascem OBRIGATORIAMENTE com status pending, pinned false e likes 0.
   // Somente administradores autorizados podem moderar, aprovar, rejeitar ou fixar.
-  const initialStatus = isAdmin ? (post.status || 'approved') : 'pending';
+  const initialStatus: 'approved' | 'pending' | 'rejected' = isAdmin
+    ? (post.status === 'approved' || post.status === 'pending' || post.status === 'rejected'
+        ? post.status
+        : 'approved')
+    : 'pending';
   const initialPinned = isAdmin ? Boolean(post.pinned) : false;
   const initialLikes = isAdmin ? Math.max(0, Math.round(Number(post.likes) || 0)) : 0;
 
-  const sanitizedPost: SocialPost = {
-    ...post,
-    id,
-    status: initialStatus as 'approved' | 'pending' | 'rejected',
-    pinned: initialPinned,
-    likes: initialLikes
-  };
-
-  if (customSocialPostsAdapter) {
-    return customSocialPostsAdapter.savePost(sanitizedPost, rawImageFile);
-  }
-
-  let finalImageUrl = post.imageUrl;
+  let finalImageUrl =
+    post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl.trim() : undefined;
   let storagePath: string | undefined = post.storagePath;
 
-  // Resolve upload to Firebase Storage if an image file or base64 is present
-  let blobToUpload: Blob | null = rawImageFile || null;
-  if (!blobToUpload && post.imageUrl?.startsWith('data:image/')) {
-    blobToUpload = dataUrlToBlob(post.imageUrl);
-  }
-
-  if (blobToUpload) {
-    if (blobToUpload.size === 0) {
-      throw new Error('O arquivo de imagem selecionado está vazio.');
-    }
-    if (blobToUpload.size > 5 * 1024 * 1024) {
-      throw new Error('A imagem selecionada excede o limite máximo permitido de 5MB.');
-    }
-    const mimeType = blobToUpload.type || 'image/jpeg';
-    if (!mimeType.startsWith('image/')) {
-      throw new Error('O arquivo selecionado não é uma imagem válida.');
-    }
+  // Fail-closed: se há imagem anexada, o upload no Firebase Storage precisa confirmar antes de gravar no Firestore
+  if (validated.blobToUpload) {
+    const mimeType = validated.blobToUpload.type.toLowerCase().trim();
+    const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
+    const cleanPath = `social_posts/${id}/${Date.now()}_img.${ext}`;
+    const fileRef = storageRef(storage, cleanPath);
 
     try {
-      const ext = mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg';
-      const cleanPath = `social_posts/${id}/${Date.now()}_img.${ext}`;
-      const fileRef = storageRef(storage, cleanPath);
-      const snapshot = await uploadBytes(fileRef, blobToUpload, {
+      const snapshot = await uploadBytes(fileRef, validated.blobToUpload, {
         contentType: mimeType,
-        customMetadata: { postId: id, author: post.authorName }
+        customMetadata: { postId: id, author: validated.authorName }
       });
-      finalImageUrl = await getDownloadURL(snapshot.ref);
+      const downloadUrl = await getDownloadURL(snapshot.ref);
+      if (!downloadUrl || downloadUrl.startsWith('data:') || downloadUrl.length > 1000) {
+        throw new Error('URL de download inválida retornada pelo Storage.');
+      }
+      finalImageUrl = downloadUrl;
       storagePath = cleanPath;
     } catch (storageErr) {
-      console.warn('Aviso: Falha ao enviar foto para Firebase Storage, mantendo post em texto puro:', storageErr);
-      finalImageUrl = undefined;
+      const detail = storageErr instanceof Error ? storageErr.message : String(storageErr);
+      throw new Error(
+        `SOCIAL_IMAGE_UPLOAD_FAILED: Não foi possível enviar a foto para o servidor (${detail}). A publicação não foi gravada.`
+      );
     }
   }
 
+  const timestampNum = Number(post.timestamp) || Date.now();
+  const createdAtStr = (post.createdAt || nowIso).slice(0, 60);
   const payload: Record<string, unknown> = {
     id,
-    authorName: (post.authorName || 'Participante').trim().slice(0, 120),
-    authorRole: (post.authorRole || 'Participante do Simpósio').trim().slice(0, 120),
-    city: (post.city || 'Carangola').trim().slice(0, 100),
-    content: (post.content || '').trim().slice(0, 1000),
-    hashtags: (post.hashtags || '').trim().slice(0, 300),
+    authorName: validated.authorName.slice(0, 120),
+    authorRole: validated.authorRole.slice(0, 120),
+    city: validated.city.slice(0, 100),
+    content: validated.content.slice(0, 1000),
+    hashtags: validated.hashtags.slice(0, 300),
     likes: initialLikes,
-    createdAt: post.createdAt || nowIso,
-    timestamp: Number(post.timestamp) || Date.now(),
+    createdAt: createdAtStr,
+    timestamp: timestampNum,
     status: initialStatus,
     pinned: initialPinned,
     updatedAt: nowIso
   };
 
-  if (finalImageUrl && !finalImageUrl.startsWith('data:')) payload.imageUrl = finalImageUrl;
-  if (storagePath) payload.storagePath = storagePath;
-  if (post.imageFileName) payload.imageFileName = post.imageFileName.slice(0, 160);
+  if (finalImageUrl && !finalImageUrl.startsWith('data:')) {
+    payload.imageUrl = finalImageUrl;
+  }
+  if (storagePath) {
+    payload.storagePath = storagePath.slice(0, 300);
+  }
+  if (post.imageFileName) {
+    payload.imageFileName = post.imageFileName.slice(0, 160);
+  }
 
   try {
-    await setDoc(doc(db, 'social_posts', id), payload, { merge: true });
+    await setDoc(doc(db, 'social_posts', id), payload);
     return {
       ...post,
       id,
-      status: initialStatus as 'approved' | 'pending' | 'rejected',
+      authorName: validated.authorName,
+      authorRole: validated.authorRole,
+      city: validated.city,
+      content: validated.content,
+      hashtags: validated.hashtags,
+      createdAt: createdAtStr,
+      timestamp: timestampNum,
+      status: initialStatus,
       pinned: initialPinned,
       likes: initialLikes,
-      imageUrl: finalImageUrl || post.imageUrl,
+      hasLiked: false,
+      imageUrl: finalImageUrl && !finalImageUrl.startsWith('data:') ? finalImageUrl : undefined,
       storagePath
     };
   } catch (error) {
+    if (isAdmin && storagePath) {
+      await deleteObject(storageRef(storage, storagePath)).catch(() => {});
+    }
     handleFirestoreError(error, OperationType.WRITE, `social_posts/${id}`);
-    return post;
   }
 };
 
@@ -2588,17 +2882,23 @@ export const likeSocialPostInDb = async (
   postId: string,
   voterId: string
 ): Promise<{ success: boolean; likes: number; hasLiked: boolean }> => {
-  const ensuredUid = await ensureAuthenticatedUser();
+  await ensureAuthenticatedUser();
 
   if (customSocialPostsAdapter) {
     const res = await customSocialPostsAdapter.toggleLike(postId, voterId);
     return { success: true, ...res };
   }
 
+  // Fail-closed: exige sessão Firebase Auth real vinculada ao request.auth.uid exigido pelas Rules
+  const activeUser = firestoreAuth.currentUser;
+  if (!activeUser?.uid) {
+    throw new Error(
+      'SOCIAL_AUTH_UNAVAILABLE: Sessão autenticada indisponível no Firebase para registrar curtida.'
+    );
+  }
+
   const cleanPostId = sanitizeId(postId, 'post');
-  // Vincula a identidade do votante ao usuário autenticado ou ao identificador fornecido
-  const currentUid = firestoreAuth.currentUser?.uid || ensuredUid;
-  const cleanVoterId = sanitizeId(currentUid || voterId, 'voter');
+  const cleanVoterId = sanitizeId(activeUser.uid, 'voter');
 
   try {
     const likeDocRef = doc(db, 'social_posts', cleanPostId, 'likes', cleanVoterId);
@@ -2611,9 +2911,11 @@ export const likeSocialPostInDb = async (
         transaction.get(postDocRef)
       ]);
 
-      const currentLikes = postSnap.exists()
-        ? Math.max(0, Number(postSnap.data()?.likes) || 0)
-        : 0;
+      if (!postSnap.exists()) {
+        throw new Error('POST_NOT_FOUND');
+      }
+
+      const currentLikes = Math.max(0, Number(postSnap.data()?.likes) || 0);
       const nowIso = new Date().toISOString();
 
       if (likeSnap.exists()) {
@@ -2637,8 +2939,7 @@ export const likeSocialPostInDb = async (
 
     return result;
   } catch (error) {
-    console.warn('Aviso: Falha ao sincronizar curtida no Firestore (modo offline/fallback ativo):', error);
-    return { success: false, likes: 0, hasLiked: false };
+    handleFirestoreError(error, OperationType.WRITE, `social_posts/${cleanPostId}/likes/${cleanVoterId}`);
   }
 };
 
@@ -2647,8 +2948,8 @@ export const deleteSocialPostInDb = async (postId: string): Promise<void> => {
     return customSocialPostsAdapter.deletePost(postId);
   }
 
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
 
@@ -2662,18 +2963,17 @@ export const deleteSocialPostInDb = async (postId: string): Promise<void> => {
         try {
           await deleteObject(storageRef(storage, data.storagePath));
         } catch {
-          // ignore storage delete errors
+          // objeto já pode ter sido removido do Storage
         }
       }
-      try {
-        const likesSnap = await getDocs(collection(db, 'social_posts', cleanId, 'likes'));
-        if (!likesSnap.empty) {
+      const likesSnap = await getDocs(collection(db, 'social_posts', cleanId, 'likes'));
+      if (!likesSnap.empty) {
+        const likeDocs = likesSnap.docs;
+        for (let i = 0; i < likeDocs.length; i += 400) {
           const batch = writeBatch(db);
-          likesSnap.forEach((d) => batch.delete(d.ref));
+          likeDocs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
           await batch.commit();
         }
-      } catch {
-        // ignore likes cleanup error
       }
     }
     await deleteDoc(postRef);
@@ -2691,33 +2991,47 @@ export const moderateSocialPostInDb = async (
     return customSocialPostsAdapter.moderatePost(postId, status, pinned);
   }
 
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const isAdminSession = await isAuthorizedServerAdminSession();
+  if (!isAdminSession) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
 
   const cleanId = sanitizeId(postId, 'post');
+  const nowIso = new Date().toISOString();
+  const moderatorEmail = firestoreAuth.currentUser?.email || 'admin';
   try {
     await updateDoc(doc(db, 'social_posts', cleanId), {
       status,
-      pinned,
-      moderatedAt: new Date().toISOString(),
-      moderatedBy: user?.email || 'admin',
-      updatedAt: new Date().toISOString()
+      pinned: status === 'approved' ? Boolean(pinned) : false,
+      moderatedAt: nowIso,
+      moderatedBy: moderatorEmail.slice(0, 120),
+      updatedAt: nowIso
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `social_posts/${cleanId}`);
   }
 };
 
-export const subscribeSocialPosts = (onUpdate: (posts: SocialPost[]) => void) => {
+export const subscribeSocialPosts = (
+  onUpdate: (posts: SocialPost[], meta: SocialPostsSnapshotMeta) => void
+) => {
   const q = query(collection(db, 'social_posts'), orderBy('timestamp', 'desc'), limit(100));
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) return;
+      const meta: SocialPostsSnapshotMeta = {
+        fromCache: snapshot.metadata.fromCache
+      };
       const list: SocialPost[] = snapshot.docs.map((d) => {
         const data = d.data() as SocialPost;
+        const normalizedStatus: SocialPost['status'] =
+          data.status === 'approved' || data.status === 'pending' || data.status === 'rejected'
+            ? data.status
+            : 'pending';
+        const safeImageUrl =
+          typeof data.imageUrl === 'string' && !data.imageUrl.startsWith('data:')
+            ? data.imageUrl
+            : undefined;
         return {
           id: data.id || d.id,
           authorName: data.authorName || 'Participante',
@@ -2725,17 +3039,19 @@ export const subscribeSocialPosts = (onUpdate: (posts: SocialPost[]) => void) =>
           city: data.city || 'Carangola',
           content: data.content || '',
           hashtags: data.hashtags,
-          imageUrl: data.imageUrl,
+          imageUrl: safeImageUrl,
           storagePath: data.storagePath,
           imageFileName: data.imageFileName,
           likes: Math.max(0, Number(data.likes) || 0),
           createdAt: data.createdAt || '',
           timestamp: Number(data.timestamp) || Date.now(),
           pinned: Boolean(data.pinned),
-          status: data.status || 'approved'
+          status: normalizedStatus,
+          moderatedAt: data.moderatedAt,
+          moderatedBy: data.moderatedBy
         };
       });
-      onUpdate(list);
+      onUpdate(list, meta);
     },
     (error) => {
       console.warn('Aviso ao sincronizar postagens do SocialWall do Firestore:', error);

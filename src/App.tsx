@@ -37,6 +37,8 @@ import {
   broadcastRealtimeUpdate,
   mergeSpeakersWithDefaults,
   INVENTED_POST_IDS,
+  reconcileSocialPostsSnapshot,
+  sanitizePostsForStorage,
   buildSubscriberIdFromRegistrationId,
   hydrateConfirmedTombstonesMap,
   reconcileSubscribersSnapshot,
@@ -44,6 +46,7 @@ import {
   removeConfirmedSubscriberTombstoneHint,
   validateStrictIsoTimestamp,
   enqueueSerialQueueTask,
+  sanitizeCertificateBannerUrl,
   type ConfirmedTombstoneEntry,
   type StorageSaveResult,
   type SubscribersSnapshotMeta
@@ -56,6 +59,7 @@ import {
   consumeAdminRedirectResult,
   signOutFirestoreAdmin,
   isVerifiedAdminUser,
+  isAuthorizedServerAdminSession,
   seedInitialDataIfNeeded,
   savePublicRegistrationToDb,
   synchronizeOfflineRegistrationQueue,
@@ -81,6 +85,7 @@ import {
   saveSocialPostToDb,
   likeSocialPostInDb,
   deleteSocialPostInDb,
+  moderateSocialPostInDb,
   subscribeSocialPosts,
   ensureAuthenticatedUser,
   saveNotificationToDb,
@@ -90,7 +95,8 @@ import {
   deleteSubscriberInDb,
   subscribeAdminSubscribers,
   PRIMARY_ADMIN_EMAIL,
-  type FirebaseAdminUser
+  type FirebaseAdminUser,
+  firestoreAuth
 } from './services/firebaseDb.ts';
 import { INITIAL_BADGE_DESIGN, INITIAL_CERTIFICATE_DESIGN } from './data/initialData.ts';
 import type { User } from 'firebase/auth';
@@ -147,8 +153,20 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'public' | 'admin' | 'inscricao'>(getInitialView);
   const [config, setConfig] = useState<EventConfig>(initialData.config);
   const [registrations, setRegistrations] = useState<Registration[]>(initialData.registrations);
+  const registrationsRef = useRef<Registration[]>(initialData.registrations);
+  const applyRegistrationsState = useCallback(
+    (nextRegs: Registration[], options: { persist?: boolean } = { persist: true }) => {
+      registrationsRef.current = nextRegs;
+      setRegistrations(nextRegs);
+      if (options.persist) {
+        saveToStorage(STORAGE_KEYS.REGISTRATIONS, nextRegs);
+      }
+    },
+    []
+  );
   const [materials, setMaterials] = useState<DownloadMaterial[]>(initialData.materials);
   const [posts, setPosts] = useState<SocialPost[]>(initialData.posts);
+  const likingPostIdsRef = useRef<Set<string>>(new Set());
   const [notifications, setNotifications] = useState<PushNotificationItem[]>(initialData.notifications);
   const [subscribers, setSubscribers] = useState<NewsletterSubscriber[]>(initialData.subscribers);
   const subscribersRef = useRef<NewsletterSubscriber[]>(initialData.subscribers);
@@ -191,8 +209,9 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
-  // Firebase Firestore auth & cloud sync state (Authorized official manager: farmaciademinas.marketing@gmail.com)
+  // Firebase Firestore auth & cloud sync state (Authorized official manager: farmaciademinas.marketing@gmail.com or /admins/{uid})
   const [firebaseUser, setFirebaseUser] = useState<FirebaseAdminUser | null>(null);
+  const [isServerAuthorizedAdmin, setIsServerAuthorizedAdmin] = useState<boolean>(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
   const [firebaseSyncError, setFirebaseSyncError] = useState<string | null>(null);
 
@@ -215,22 +234,39 @@ export default function App() {
     });
 
     consumeAdminRedirectResult()
-      .then(({ user, hadPendingRedirect, error }) => {
-        if (user && isVerifiedAdminUser(user)) {
-          setFirebaseUser(user);
-          setFirebaseSyncError(null);
-          try {
-            sessionStorage.setItem('simposio_admin_auth', 'true');
-            localStorage.removeItem('simposio_admin_logged_out');
-          } catch {
-            // ignore storage errors
+      .then(async ({ user, hadPendingRedirect, error }) => {
+        if (user) {
+          const authorized = await isAuthorizedServerAdminSession().catch(() =>
+            isVerifiedAdminUser(user)
+          );
+          if (authorized) {
+            setFirebaseUser(user);
+            setIsServerAuthorizedAdmin(true);
+            setFirebaseSyncError(null);
+            try {
+              sessionStorage.setItem('simposio_admin_auth', 'true');
+              localStorage.removeItem('simposio_admin_logged_out');
+            } catch {
+              // ignore storage errors
+            }
+            setIsAdminAuthenticated(true);
+            setCurrentView('admin');
+            if (typeof window !== 'undefined' && window.location.hash !== '#admin') {
+              window.history.replaceState(null, '', window.location.pathname + window.location.search + '#admin');
+            }
+            return;
           }
-          setIsAdminAuthenticated(true);
-          setCurrentView('admin');
-          if (typeof window !== 'undefined' && window.location.hash !== '#admin') {
-            window.history.replaceState(null, '', window.location.pathname + window.location.search + '#admin');
+          setIsServerAuthorizedAdmin(false);
+          setFirebaseSyncError(
+            `A conta ${user.email || 'conectada'} não possui permissão de gestor autorizada.`
+          );
+          if (hadPendingRedirect) {
+            setCurrentView('admin');
           }
-        } else if (error) {
+          return;
+        }
+        if (error) {
+          setIsServerAuthorizedAdmin(false);
           setFirebaseSyncError(error);
           if (hadPendingRedirect) {
             setCurrentView('admin');
@@ -241,15 +277,22 @@ export default function App() {
 
     const unsubConfig = subscribeEventConfig((remoteCfg) => {
       setConfig((prev) => {
+        const mergedCertDesign = {
+          ...INITIAL_CERTIFICATE_DESIGN,
+          ...(prev.certificateDesign || {}),
+          ...(remoteCfg.certificateDesign || {})
+        };
+        mergedCertDesign.bannerImageUrl = sanitizeCertificateBannerUrl(
+          mergedCertDesign.bannerImageUrl
+        );
+        if (!mergedCertDesign.bannerImageUrl) {
+          mergedCertDesign.showBannerImage = false;
+        }
         const merged: EventConfig = {
           ...prev,
           ...remoteCfg,
           emailJsConfig: remoteCfg.emailJsConfig || prev.emailJsConfig,
-          certificateDesign: {
-            ...INITIAL_CERTIFICATE_DESIGN,
-            ...(prev.certificateDesign || {}),
-            ...(remoteCfg.certificateDesign || {})
-          },
+          certificateDesign: mergedCertDesign,
           badgeDesign: {
             ...INITIAL_BADGE_DESIGN,
             ...(prev.badgeDesign || {}),
@@ -318,14 +361,40 @@ export default function App() {
     });
 
     const unsubAuth = subscribeAuthState((user) => {
-      setFirebaseUser(user);
-      if (user && !isVerifiedAdminUser(user)) {
-        setFirebaseSyncError(
-          `A conta ${user.email || 'conectada'} não é o gestor autorizado (farmaciademinas.marketing@gmail.com).`
-        );
-      } else {
+      if (user?.isAnonymous) {
+        // Sessão anônima do Mural Social não é login administrativo e não deve poluir o banner do gestor
+        setFirebaseUser(null);
         setFirebaseSyncError(null);
+        return;
       }
+      setFirebaseUser(user);
+      if (!user || user.isAnonymous) {
+        setIsServerAuthorizedAdmin(false);
+        setFirebaseSyncError(null);
+        return;
+      }
+      isAuthorizedServerAdminSession()
+        .then((authorized) => {
+          setIsServerAuthorizedAdmin(authorized);
+          if (!authorized) {
+            setFirebaseSyncError(
+              `A conta ${user.email || 'conectada'} não possui permissão de gestor autorizada.`
+            );
+          } else {
+            setFirebaseSyncError(null);
+          }
+        })
+        .catch(() => {
+          const fallbackOk = isVerifiedAdminUser(user);
+          setIsServerAuthorizedAdmin(fallbackOk);
+          if (!fallbackOk) {
+            setFirebaseSyncError(
+              `A conta ${user.email || 'conectada'} não possui permissão de gestor autorizada.`
+            );
+          } else {
+            setFirebaseSyncError(null);
+          }
+        });
     });
 
     const unsubSpeakers = subscribeSpeakers((remoteSpeakers) => {
@@ -338,29 +407,24 @@ export default function App() {
       }
     });
 
-    const unsubPosts = subscribeSocialPosts((remotePosts) => {
+    const unsubPosts = subscribeSocialPosts((remotePosts, meta) => {
       const deletedIds = getDeletedPostIds();
-      remotePosts.forEach((p) => {
-        if (p && INVENTED_POST_IDS.has(p.id)) {
-          deleteSocialPostInDb(p.id).catch(() => {});
-        }
-      });
-      const validRemote = remotePosts.filter((p) => !deletedIds.has(p.id) && !INVENTED_POST_IDS.has(p.id));
-      setPosts((prev) => {
-        const prevMap = new Map(prev.map((p) => [p.id, p]));
-        const enrichedRemote = validRemote.map((rp) => {
-          const localCopy = prevMap.get(rp.id);
-          return {
-            ...rp,
-            imageUrl: rp.imageUrl || localCopy?.imageUrl,
-            hasLiked: rp.hasLiked ?? localCopy?.hasLiked
-          };
+      if (isVerifiedAdminUser(firestoreAuth.currentUser)) {
+        remotePosts.forEach((p) => {
+          if (p && INVENTED_POST_IDS.has(p.id)) {
+            deleteSocialPostInDb(p.id).catch(() => {});
+          }
         });
-        const remoteIds = new Set(enrichedRemote.map((p) => p.id));
-        const localOnly = prev.filter((p) => !remoteIds.has(p.id) && !deletedIds.has(p.id) && !INVENTED_POST_IDS.has(p.id));
-        const combined = [...enrichedRemote, ...localOnly].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-        saveToStorage(STORAGE_KEYS.POSTS, combined);
-        return combined;
+      }
+      setPosts((prev) => {
+        const reconciled = reconcileSocialPostsSnapshot(
+          remotePosts,
+          prev,
+          deletedIds,
+          meta
+        );
+        saveToStorage(STORAGE_KEYS.POSTS, sanitizePostsForStorage(reconciled));
+        return reconciled;
       });
     });
 
@@ -383,7 +447,7 @@ export default function App() {
 
   // Subscribe to Firestore registrations & downloads when verified admin is connected
   useEffect(() => {
-    if (!isVerifiedAdminUser(firebaseUser)) return;
+    if (!isServerAuthorizedAdmin) return;
 
     let isActive = true;
     setIsCloudSyncing(true);
@@ -419,11 +483,10 @@ export default function App() {
 
     fetchAdminRegistrationsFromDb()
       .then((remoteRegs) => {
-        if (!isActive || remoteRegs.length === 0) return;
+        if (!isActive) return;
         const deletedRegIds = getDeletedRegistrationIds();
         const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
-        setRegistrations(validRemote);
-        saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
+        applyRegistrationsState(validRemote, { persist: true });
       })
       .catch((err) => {
         if (isActive) {
@@ -433,11 +496,10 @@ export default function App() {
 
     const unsubRegs = subscribeAdminRegistrations(
       (remoteRegs) => {
-        if (!isActive || remoteRegs.length === 0) return;
+        if (!isActive) return;
         const deletedRegIds = getDeletedRegistrationIds();
         const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
-        setRegistrations(validRemote);
-        saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
+        applyRegistrationsState(validRemote, { persist: true });
       },
       (err) => {
         if (!isActive) return;
@@ -477,7 +539,7 @@ export default function App() {
       unsubDownloads();
       unsubSubscribers();
     };
-  }, [firebaseUser]);
+  }, [firebaseUser, isServerAuthorizedAdmin, applyRegistrationsState]);
 
   const handleConnectFirebaseAdmin = async (
     options?: { preferRedirect?: boolean }
@@ -487,13 +549,18 @@ export default function App() {
     try {
       const user = await signInFirestoreAdmin(options);
       if (user) {
-        if (!isVerifiedAdminUser(user)) {
+        setFirebaseUser(user);
+        const authorized = await isAuthorizedServerAdminSession().catch(() =>
+          isVerifiedAdminUser(user)
+        );
+        if (!authorized) {
+          setIsServerAuthorizedAdmin(false);
           setFirebaseSyncError(
-            `Conta ${user.email || 'selecionada'} sem permissão de gestor. Faça login com farmaciademinas.marketing@gmail.com.`
+            `Conta ${user.email || 'selecionada'} sem permissão de gestor. Faça login com ${PRIMARY_ADMIN_EMAIL} ou conta cadastrada em /admins.`
           );
           return false;
         }
-        setFirebaseUser(user);
+        setIsServerAuthorizedAdmin(true);
         setFirebaseSyncError(null);
         return true;
       }
@@ -530,8 +597,7 @@ export default function App() {
       const remoteRegs = await fetchAdminRegistrationsFromDb();
       const deletedRegIds = getDeletedRegistrationIds();
       const validRemote = remoteRegs.filter((r) => !deletedRegIds.has(r.id));
-      setRegistrations(validRemote);
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, validRemote);
+      applyRegistrationsState(validRemote, { persist: true });
       return validRemote.length;
     } catch (err: unknown) {
       const message =
@@ -547,6 +613,7 @@ export default function App() {
     try {
       await signOutFirestoreAdmin();
       setFirebaseUser(null);
+      setIsServerAuthorizedAdmin(false);
     } catch (err) {
       console.warn('Erro ao desconectar Firebase Auth:', err);
     }
@@ -580,6 +647,9 @@ export default function App() {
 
   const handleAdminLogout = () => {
     setIsAdminAuthenticated(false);
+    setFirebaseUser(null);
+    setIsServerAuthorizedAdmin(false);
+    signOutFirestoreAdmin().catch(() => {});
     try {
       localStorage.setItem('simposio_admin_logged_out', 'true');
       localStorage.removeItem('simposio_admin_remember');
@@ -622,9 +692,12 @@ export default function App() {
     setIsCertificateOpen(true);
   };
 
-  const handleRecordCertificateDownload = (attendee: Registration, method: 'pdf' | 'print') => {
-    // Regra estrita: somente Credenciado (Presente) pode baixar/registrar certificado
-    if (attendee.status !== 'presente') {
+  const handleRecordCertificateDownload = async (
+    attendee: Registration,
+    method: 'pdf' | 'print'
+  ): Promise<void> => {
+    // Regra estrita: somente Credenciado (Presente) com certificado oficialmente liberado registra download
+    if (attendee.status !== 'presente' || !attendee.certificateIssued) {
       return;
     }
 
@@ -642,81 +715,78 @@ export default function App() {
       method
     };
 
-    setCertificateDownloads((prev) => {
-      const updated = [record, ...prev];
-      saveToStorage(STORAGE_KEYS.CERT_DOWNLOADS, updated);
-      return updated;
-    });
+    try {
+      await recordCertificateDownloadInDb(attendee, record);
 
-    setRegistrations((prev) => {
-      const updated = prev.map((r) =>
-        r.id === attendee.id && r.status === 'presente'
+      setCertificateDownloads((prev) => {
+        const updated = [record, ...prev];
+        saveToStorage(STORAGE_KEYS.CERT_DOWNLOADS, updated);
+        return updated;
+      });
+
+      const nextRegs = registrationsRef.current.map((r) =>
+        r.id === attendee.id && r.status === 'presente' && r.certificateIssued
           ? {
               ...r,
-              certificateIssued: true,
               certificateDownloaded: true,
               certificateDownloadedAt: nowIso,
               certificateDownloadCount: (r.certificateDownloadCount || 0) + 1
             }
           : r
       );
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      return updated;
-    });
-
-    recordCertificateDownloadInDb(attendee, record).catch((err) => {
+      applyRegistrationsState(nextRegs, { persist: true });
+    } catch (err) {
       console.warn('Aviso ao gravar download de certificado no Firestore:', err);
-    });
-  };
-
-  const handleToggleCertificateIssued = (regId: string) => {
-    let changedReg: Registration | null = null;
-    setRegistrations((prev) => {
-      const updated = prev.map((r) => {
-        if (r.id === regId) {
-          // Estrito: participantes que ainda constam como Fazer Check-in ou Cancelada nunca podem liberar certificado
-          const nextIssued = r.status === 'presente' ? !r.certificateIssued : false;
-          changedReg = { ...r, certificateIssued: nextIssued };
-          return changedReg;
-        }
-        return r;
-      });
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      return updated;
-    });
-
-    if (changedReg) {
-      persistRegistrationAndPermissionInDb(changedReg).catch((err) => {
-        setFirebaseSyncError('Erro ao salvar permissão de certificado no banco de dados.');
-        console.warn(err);
-      });
+      setFirebaseSyncError('Não foi possível registrar a emissão do certificado no banco de dados.');
     }
   };
 
-  const handleReleaseAllPresentCertificates = (): number => {
-    let releasedCount = 0;
-    const changedRegs: Registration[] = [];
-    setRegistrations((prev) => {
-      const updated = prev.map((r) => {
-        if (r.status === 'presente' && !r.certificateIssued) {
-          releasedCount += 1;
-          const nextReg = { ...r, certificateIssued: true };
-          changedRegs.push(nextReg);
-          return nextReg;
-        }
-        return r;
-      });
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      return updated;
-    });
-
-    if (changedRegs.length > 0) {
-      persistMultipleRegistrationsInDb(changedRegs).catch((err) => {
-        console.warn('Erro ao liberar certificados em lote no Firestore:', err);
-      });
+  const handleToggleCertificateIssued = async (regId: string): Promise<Registration> => {
+    const current = registrationsRef.current.find((r) => r.id === regId);
+    if (!current) {
+      throw new Error('REGISTRATION_NOT_FOUND');
+    }
+    if (current.status !== 'presente') {
+      throw new Error('PARTICIPANT_NOT_PRESENT');
     }
 
-    return releasedCount;
+    const nextReg: Registration = {
+      ...current,
+      certificateIssued: !current.certificateIssued
+    };
+
+    try {
+      await persistRegistrationAndPermissionInDb(nextReg);
+      const nextRegs = registrationsRef.current.map((r) => (r.id === regId ? nextReg : r));
+      applyRegistrationsState(nextRegs, { persist: true });
+      setFirebaseSyncError(null);
+      return nextReg;
+    } catch (err) {
+      setFirebaseSyncError('Erro ao salvar permissão de certificado no banco de dados.');
+      throw err;
+    }
+  };
+
+  const handleReleaseAllPresentCertificates = async (): Promise<number> => {
+    const changedRegs: Registration[] = registrationsRef.current
+      .filter((r) => r.status === 'presente' && !r.certificateIssued)
+      .map((r) => ({ ...r, certificateIssued: true }));
+
+    if (changedRegs.length === 0) {
+      return 0;
+    }
+
+    try {
+      await persistMultipleRegistrationsInDb(changedRegs);
+      const changedById = new Map(changedRegs.map((r) => [r.id, r]));
+      const nextRegs = registrationsRef.current.map((r) => changedById.get(r.id) || r);
+      applyRegistrationsState(nextRegs, { persist: true });
+      setFirebaseSyncError(null);
+      return changedRegs.length;
+    } catch (err) {
+      setFirebaseSyncError('Erro ao liberar certificados em lote no banco de dados.');
+      throw err;
+    }
   };
 
   // Synchronize URL hash (#inscricao / #admin / #certificado?code=... / section anchors) with corresponding view & modals
@@ -778,7 +848,9 @@ export default function App() {
     const syncSliceFromStorage = (changedKey?: string | null) => {
       const fresh = loadStoredData();
       if (!changedKey || changedKey === STORAGE_KEYS.CONFIG) setConfig(fresh.config);
-      if (!changedKey || changedKey === STORAGE_KEYS.REGISTRATIONS) setRegistrations(fresh.registrations);
+      if (!changedKey || changedKey === STORAGE_KEYS.REGISTRATIONS) {
+        applyRegistrationsState(fresh.registrations, { persist: false });
+      }
       if (!changedKey || changedKey === STORAGE_KEYS.MATERIALS) setMaterials(fresh.materials);
       if (!changedKey || changedKey === STORAGE_KEYS.POSTS) setPosts(fresh.posts);
       if (!changedKey || changedKey === STORAGE_KEYS.NOTIFICATIONS) setNotifications(fresh.notifications);
@@ -894,8 +966,7 @@ export default function App() {
       );
 
       if (outcome.synced.length > 0) {
-        setRegistrations(outcome.mergedRegistrations);
-        saveToStorage(STORAGE_KEYS.REGISTRATIONS, outcome.mergedRegistrations);
+        applyRegistrationsState(outcome.mergedRegistrations, { persist: true });
         const latestSynced = outcome.synced[0];
         setLastRegistered(latestSynced);
         saveToStorage(STORAGE_KEYS.LAST_REGISTERED, latestSynced);
@@ -988,9 +1059,13 @@ export default function App() {
         id: saveRes.id,
         code: saveRes.code
       };
-      const updated = [confirmedReg, ...registrations.filter((r) => r.id !== confirmedReg.id && r.code !== confirmedReg.code)];
-      setRegistrations(updated);
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
+      const updated = [
+        confirmedReg,
+        ...registrationsRef.current.filter(
+          (r) => r.id !== confirmedReg.id && r.code !== confirmedReg.code
+        )
+      ];
+      applyRegistrationsState(updated, { persist: true });
       setLastRegistered(confirmedReg);
       saveToStorage(STORAGE_KEYS.LAST_REGISTERED, confirmedReg);
 
@@ -1044,59 +1119,56 @@ export default function App() {
     }
   };
 
-  const handleToggleCheckIn = (regId: string) => {
-    let updatedTarget: Registration | null = null;
-    setRegistrations((prev) => {
-      const updated = prev.map((r) => {
-        if (r.id === regId) {
-          const isNowPresent = r.status !== 'presente';
-          updatedTarget = {
-            ...r,
-            status: isNowPresent ? ('presente' as const) : ('confirmada' as const),
-            checkedInAt: isNowPresent ? new Date().toISOString() : undefined,
-            certificateIssued: isNowPresent
-          };
-          return updatedTarget;
-        }
-        return r;
-      });
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      return updated;
-    });
+  const handleToggleCheckIn = async (regId: string): Promise<Registration> => {
+    const current = registrationsRef.current.find((r) => r.id === regId);
+    if (!current) {
+      throw new Error('REGISTRATION_NOT_FOUND');
+    }
+    const isNowPresent = current.status !== 'presente';
+    const nextReg: Registration = {
+      ...current,
+      status: isNowPresent ? ('presente' as const) : ('confirmada' as const),
+      checkedInAt: isNowPresent ? new Date().toISOString() : undefined,
+      certificateIssued: isNowPresent
+    };
 
-    if (updatedTarget) {
-      persistRegistrationAndPermissionInDb(updatedTarget).catch((err) => {
-        setFirebaseSyncError('Erro ao persistir Status & Presença no banco de dados.');
-        console.warn(err);
-      });
+    try {
+      await persistRegistrationAndPermissionInDb(nextReg);
+      const nextRegs = registrationsRef.current.map((r) => (r.id === regId ? nextReg : r));
+      applyRegistrationsState(nextRegs, { persist: true });
+      setFirebaseSyncError(null);
+      return nextReg;
+    } catch (err) {
+      setFirebaseSyncError('Erro ao persistir Status & Presença no banco de dados.');
+      throw err;
     }
   };
 
-  const handleUpdateRegistrationStatus = (id: string, newStatus: 'confirmada' | 'presente' | 'cancelada') => {
-    let updatedTarget: Registration | null = null;
-    setRegistrations((prev) => {
-      const updated = prev.map((r) => {
-        if (r.id === id) {
-          const isPresent = newStatus === 'presente';
-          updatedTarget = {
-            ...r,
-            status: newStatus,
-            checkedInAt: isPresent ? (r.checkedInAt || new Date().toISOString()) : undefined,
-            certificateIssued: isPresent
-          };
-          return updatedTarget;
-        }
-        return r;
-      });
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      return updated;
-    });
+  const handleUpdateRegistrationStatus = async (
+    id: string,
+    newStatus: 'confirmada' | 'presente' | 'cancelada'
+  ): Promise<Registration> => {
+    const current = registrationsRef.current.find((r) => r.id === id);
+    if (!current) {
+      throw new Error('REGISTRATION_NOT_FOUND');
+    }
+    const isPresent = newStatus === 'presente';
+    const nextReg: Registration = {
+      ...current,
+      status: newStatus,
+      checkedInAt: isPresent ? (current.checkedInAt || new Date().toISOString()) : undefined,
+      certificateIssued: isPresent
+    };
 
-    if (updatedTarget) {
-      persistRegistrationAndPermissionInDb(updatedTarget).catch((err) => {
-        setFirebaseSyncError('Erro ao persistir Status & Presença no banco de dados.');
-        console.warn(err);
-      });
+    try {
+      await persistRegistrationAndPermissionInDb(nextReg);
+      const nextRegs = registrationsRef.current.map((r) => (r.id === id ? nextReg : r));
+      applyRegistrationsState(nextRegs, { persist: true });
+      setFirebaseSyncError(null);
+      return nextReg;
+    } catch (err) {
+      setFirebaseSyncError('Erro ao persistir Status & Presença no banco de dados.');
+      throw err;
     }
   };
 
@@ -1104,13 +1176,12 @@ export default function App() {
     // 1. Permanently register deleted ID so it cannot be resurrected by snapshots or reloads
     addDeletedRegistrationId(id);
 
-    const targetReg = registrations.find((r) => r.id === id);
+    const targetReg = registrationsRef.current.find((r) => r.id === id);
 
-    setRegistrations((prev) => {
-      const updated = prev.filter((r) => r.id !== id);
-      saveToStorage(STORAGE_KEYS.REGISTRATIONS, updated);
-      return updated;
-    });
+    applyRegistrationsState(
+      registrationsRef.current.filter((r) => r.id !== id),
+      { persist: true }
+    );
     setOfflineQueue((prev) => {
       const updated = prev.filter((r) => r.id !== id);
       saveToStorage(STORAGE_KEYS.OFFLINE_QUEUE, updated);
@@ -1200,11 +1271,8 @@ export default function App() {
     }
 
     if (notesUpdatedExisting.length > 0) {
-      setRegistrations((prev) => {
-        const merged = prev.map((r) => updatedNotesById.get(r.id) || r);
-        saveToStorage(STORAGE_KEYS.REGISTRATIONS, merged);
-        return merged;
-      });
+      const nextNotesRegs = registrationsRef.current.map((r) => updatedNotesById.get(r.id) || r);
+      applyRegistrationsState(nextNotesRegs, { persist: true });
       persistMultipleRegistrationsInDb(notesUpdatedExisting).catch((err) => {
         console.warn('Aviso ao atualizar observações de inscritos existentes:', err);
       });
@@ -1225,13 +1293,10 @@ export default function App() {
       const confirmedRegs = [...importResult.confirmedCreated, ...importResult.confirmedExisting];
 
       if (confirmedRegs.length > 0) {
-        setRegistrations((prev) => {
-          const seenIds = new Set(prev.map((r) => r.id));
-          const toAppend = confirmedRegs.filter((r) => !seenIds.has(r.id));
-          const merged = [...prev, ...toAppend];
-          saveToStorage(STORAGE_KEYS.REGISTRATIONS, merged);
-          return merged;
-        });
+        const seenIds = new Set(registrationsRef.current.map((r) => r.id));
+        const toAppend = confirmedRegs.filter((r) => !seenIds.has(r.id));
+        const merged = [...registrationsRef.current, ...toAppend];
+        applyRegistrationsState(merged, { persist: true });
 
         const newSubs = importResult.confirmedCreated
           .filter((reg) => Boolean(reg.acceptEmailNews || reg.acceptWhatsappNews))
@@ -1321,66 +1386,76 @@ export default function App() {
     }
   };
 
-  // Handlers for Social Wall
-  const handleAddSocialPost = async (post: SocialPost, rawImageFile?: File | Blob) => {
-    const updated = [post, ...posts];
-    setPosts(updated);
-    saveToStorage(STORAGE_KEYS.POSTS, updated);
-
-    try {
-      const persisted = await saveSocialPostToDb(post, rawImageFile);
-      setPosts((prev) => prev.map((p) => (p.id === post.id ? persisted : p)));
-    } catch (err) {
-      console.warn('Post salvo localmente, falha na sincronização cloud:', err);
-    }
-  };
-
-  const handleLikePost = async (postId: string) => {
-    let voterId = await ensureAuthenticatedUser();
-
+  // Handlers for Social Wall (confirmação remota obrigatória antes de alterar estado/localStorage)
+  const handleAddSocialPost = async (
+    post: SocialPost,
+    rawImageFile?: File | Blob
+  ): Promise<SocialPost> => {
+    const persisted = await saveSocialPostToDb(post, rawImageFile);
     setPosts((prev) => {
-      const updated = prev.map((p) => {
-        if (p.id === postId) {
-          const hasLiked = !p.hasLiked;
-          return {
-            ...p,
-            hasLiked,
-            likes: hasLiked ? p.likes + 1 : Math.max(0, p.likes - 1)
-          };
-        }
-        return p;
-      });
-      saveToStorage(STORAGE_KEYS.POSTS, updated);
-      return updated;
+      const next = [persisted, ...prev.filter((p) => p.id !== persisted.id)].sort(
+        (a, b) => (b.timestamp || 0) - (a.timestamp || 0)
+      );
+      saveToStorage(STORAGE_KEYS.POSTS, sanitizePostsForStorage(next));
+      return next;
     });
+    return persisted;
+  };
 
+  const handleLikePost = async (postId: string): Promise<void> => {
+    if (likingPostIdsRef.current.has(postId)) return;
+    likingPostIdsRef.current.add(postId);
     try {
+      const voterId = await ensureAuthenticatedUser();
       const res = await likeSocialPostInDb(postId, voterId);
-      if (res.success) {
-        setPosts((prev) =>
-          prev.map((p) =>
-            p.id === postId ? { ...p, likes: res.likes, hasLiked: res.hasLiked } : p
-          )
-        );
+      if (!res.success) {
+        throw new Error('Não foi possível confirmar sua curtida no servidor.');
       }
-    } catch (err) {
-      console.warn('Aviso ao sincronizar curtida no Firestore:', err);
+      setPosts((prev) => {
+        const updated = prev.map((p) =>
+          p.id === postId ? { ...p, likes: res.likes, hasLiked: res.hasLiked } : p
+        );
+        saveToStorage(STORAGE_KEYS.POSTS, sanitizePostsForStorage(updated));
+        return updated;
+      });
+    } finally {
+      likingPostIdsRef.current.delete(postId);
     }
   };
 
-  const handleDeletePost = async (postId: string) => {
+  const handleDeletePost = async (postId: string): Promise<void> => {
+    await deleteSocialPostInDb(postId);
     addDeletedPostId(postId);
     setPosts((prev) => {
       const updated = prev.filter((p) => p.id !== postId);
-      saveToStorage(STORAGE_KEYS.POSTS, updated);
+      saveToStorage(STORAGE_KEYS.POSTS, sanitizePostsForStorage(updated));
       return updated;
     });
+  };
 
-    try {
-      await deleteSocialPostInDb(postId);
-    } catch (err) {
-      console.warn('Erro ao deletar post no Firestore:', err);
-    }
+  const handleModeratePost = async (
+    postId: string,
+    status: 'approved' | 'rejected',
+    pinned = false
+  ): Promise<void> => {
+    await moderateSocialPostInDb(postId, status, pinned);
+    const moderatedAt = new Date().toISOString();
+    const moderatedBy = firebaseUser?.email || 'admin';
+    setPosts((prev) => {
+      const updated = prev.map((p) =>
+        p.id === postId
+          ? {
+              ...p,
+              status,
+              pinned: status === 'approved' ? Boolean(pinned) : false,
+              moderatedAt,
+              moderatedBy
+            }
+          : p
+      );
+      saveToStorage(STORAGE_KEYS.POSTS, sanitizePostsForStorage(updated));
+      return updated;
+    });
   };
 
   // Handlers for Notifications & Newsletter
@@ -1602,20 +1677,28 @@ export default function App() {
   };
 
   // Event Config Updates (for reuse in future events, certificate & badge design)
-  const handleUpdateConfig = (newConfig: EventConfig) => {
-    setConfig(newConfig);
-    saveToStorage(STORAGE_KEYS.CONFIG, newConfig);
-    saveEventConfigInDb(newConfig).catch((err) => {
-      console.warn('Aviso ao persistir configurações no Firestore:', err);
-    });
+  const handleUpdateConfig = async (newConfig: EventConfig): Promise<void> => {
+    try {
+      await saveEventConfigInDb(newConfig);
+      setConfig(newConfig);
+      saveToStorage(STORAGE_KEYS.CONFIG, newConfig);
+      setFirebaseSyncError(null);
+    } catch (err) {
+      setFirebaseSyncError('Erro ao salvar configurações do evento no banco de dados.');
+      throw err;
+    }
   };
 
-  const handleResetConfig = () => {
-    setConfig(INITIAL_EVENT_CONFIG);
-    saveToStorage(STORAGE_KEYS.CONFIG, INITIAL_EVENT_CONFIG);
-    saveEventConfigInDb(INITIAL_EVENT_CONFIG).catch((err) => {
-      console.warn('Aviso ao restaurar configurações no Firestore:', err);
-    });
+  const handleResetConfig = async (): Promise<void> => {
+    try {
+      await saveEventConfigInDb(INITIAL_EVENT_CONFIG);
+      setConfig(INITIAL_EVENT_CONFIG);
+      saveToStorage(STORAGE_KEYS.CONFIG, INITIAL_EVENT_CONFIG);
+      setFirebaseSyncError(null);
+    } catch (err) {
+      setFirebaseSyncError('Erro ao restaurar configurações do evento no banco de dados.');
+      throw err;
+    }
   };
 
   // Speakers Handlers (fully editable in Admin Dashboard)
@@ -1942,6 +2025,7 @@ export default function App() {
               onDeleteMaterial={handleDeleteMaterial}
               socialPosts={posts}
               onDeletePost={handleDeletePost}
+              onModeratePost={handleModeratePost}
               onBackToPublic={() => {
                 setCurrentView('public');
                 if (window.location.hash === '#admin') {
@@ -1956,7 +2040,7 @@ export default function App() {
               firebaseSyncState={{
                 isConnected: Boolean(firebaseUser),
                 userEmail: firebaseUser?.email || null,
-                isVerifiedAdmin: isVerifiedAdminUser(firebaseUser),
+                isVerifiedAdmin: isServerAuthorizedAdmin,
                 isSyncing: isCloudSyncing,
                 error: firebaseSyncError
               }}

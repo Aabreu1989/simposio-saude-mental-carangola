@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Share2,
   Heart,
@@ -15,10 +15,18 @@ import {
   X,
   Loader2,
   Send,
-  Clock
+  Clock,
+  AlertCircle,
+  Pin
 } from 'lucide-react';
 import { EventConfig, SocialPost } from '../types.ts';
 import { DEFAULT_EVENT_HASHTAGS, INITIAL_EVENT_CONFIG } from '../data/initialData.ts';
+import { sortAndFilterPublicSocialPosts } from '../utils/helpers.ts';
+import {
+  ALLOWED_SOCIAL_IMAGE_MIME_TYPES,
+  MAX_SOCIAL_IMAGE_BYTES,
+  generateSecureToken
+} from '../services/firebaseDb.ts';
 import {
   ShareFormat,
   buildShareCaption,
@@ -42,10 +50,32 @@ const InstagramIcon = ({ className = 'w-3.5 h-3.5' }: { className?: string }) =>
 
 interface SocialWallProps {
   posts: SocialPost[];
-  onAddPost: (post: SocialPost, rawImageFile?: File | Blob) => void;
-  onLikePost: (postId: string) => void;
+  onAddPost: (post: SocialPost, rawImageFile?: File | Blob) => Promise<SocialPost | void> | void;
+  onLikePost: (postId: string) => Promise<void> | void;
   config?: EventConfig;
 }
+
+const formatSocialErrorMessage = (err: unknown, fallback: string): string => {
+  if (err instanceof Error) {
+    const raw = err.message || '';
+    if (raw.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw) as { error?: string; category?: string };
+        if (parsed.category === 'offline') {
+          return 'Sem conexão com o servidor no momento. Verifique sua internet e tente novamente.';
+        }
+        if (parsed.category === 'permission_denied') {
+          return 'O servidor recusou a operação por restrição de permissão ou validação.';
+        }
+        if (parsed.error) return parsed.error;
+      } catch {
+        // usa raw abaixo
+      }
+    }
+    return raw.replace(/^(VALIDATION_ERROR|SOCIAL_AUTH_UNAVAILABLE|SOCIAL_IMAGE_UPLOAD_FAILED):\s*/i, '') || fallback;
+  }
+  return fallback;
+};
 
 const POSTS_PER_PAGE = 8;
 
@@ -103,6 +133,11 @@ export const SocialWall: React.FC<SocialWallProps> = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const [isSubmittingPost, setIsSubmittingPost] = useState(false);
+  const [submitPostError, setSubmitPostError] = useState<string | null>(null);
+  const [wallNotice, setWallNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [likingPostIds, setLikingPostIds] = useState<Record<string, boolean>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Share Studio Modal state
   const [shareStudioOpen, setShareStudioOpen] = useState(false);
@@ -114,9 +149,9 @@ export const SocialWall: React.FC<SocialWallProps> = ({
   const [isGeneratingCard, setIsGeneratingCard] = useState(false);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
-  // Sort strictly newest-first by timestamp
+  // Exibir exclusivamente postagens aprovadas (fixadas primeiro, depois mais recentes)
   const sortedPosts = useMemo(() => {
-    return [...posts].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    return sortAndFilterPublicSocialPosts(posts);
   }, [posts]);
 
   const totalPages = Math.max(1, Math.ceil(sortedPosts.length / POSTS_PER_PAGE));
@@ -189,45 +224,91 @@ export const SocialWall: React.FC<SocialWallProps> = ({
     setGeneratedBlob(null);
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleClearImage = () => {
+    setImagePreview(null);
+    setSelectedImageFile(null);
     setImageUploadError(null);
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        setImageUploadError('A imagem selecionada excede o limite máximo permitido de 5MB.');
-        return;
-      }
-      if (!file.type.startsWith('image/')) {
-        setImageUploadError('Formato de arquivo inválido. Selecione uma imagem JPEG, PNG ou WebP.');
-        return;
-      }
-      setSelectedImageFile(file);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
-  const handleSubmitPost = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!authorName.trim() || !content.trim()) return;
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImageUploadError(null);
+    setSubmitPostError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const finalHashtags = mergeRequiredHashtags(hashtagsField);
+    if (file.size <= 0) {
+      handleClearImage();
+      setImageUploadError('O arquivo de imagem selecionado está vazio.');
+      return;
+    }
+    if (file.size > MAX_SOCIAL_IMAGE_BYTES) {
+      handleClearImage();
+      setImageUploadError('A imagem selecionada excede o limite máximo permitido de 5MB.');
+      return;
+    }
+    const normalizedType = (file.type || '').toLowerCase().trim();
+    if (!ALLOWED_SOCIAL_IMAGE_MIME_TYPES.has(normalizedType)) {
+      handleClearImage();
+      setImageUploadError('Formato de arquivo inválido. Selecione uma imagem JPEG, PNG ou WebP.');
+      return;
+    }
+    setSelectedImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImagePreview(typeof reader.result === 'string' ? reader.result : null);
+    };
+    reader.onerror = () => {
+      handleClearImage();
+      setImageUploadError('Não foi possível ler a imagem selecionada.');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitPost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSubmittingPost) return;
+
+    setSubmitPostError(null);
+    const trimmedName = authorName.trim();
+    const trimmedRole = authorRole.trim() || 'Participante do Simpósio';
+    const trimmedCity = city.trim() || 'Carangola';
+    const trimmedContent = content.trim();
+
+    if (trimmedName.length < 2 || trimmedName.length > 120) {
+      setSubmitPostError('Informe seu nome com pelo menos 2 caracteres.');
+      return;
+    }
+    if (trimmedRole.length < 2 || trimmedRole.length > 120) {
+      setSubmitPostError('Informe o cargo/função com pelo menos 2 caracteres.');
+      return;
+    }
+    if (trimmedCity.length < 2 || trimmedCity.length > 100) {
+      setSubmitPostError('Informe o município com pelo menos 2 caracteres.');
+      return;
+    }
+    if (trimmedContent.length < 2 || trimmedContent.length > 1000) {
+      setSubmitPostError('Sua mensagem deve ter entre 2 e 1000 caracteres.');
+      return;
+    }
+
+    const finalHashtags = mergeRequiredHashtags(hashtagsField).slice(0, 300);
 
     const now = new Date();
     const dateStr = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
+    // Nunca inclui Base64 em imageUrl: a foto segue apenas em selectedImageFile para upload no Storage
     const newPost: SocialPost = {
-      id: `post-${Date.now()}`,
-      authorName: authorName.trim(),
-      authorRole: authorRole.trim() || 'Participante do Simpósio',
-      city: city.trim() || 'Carangola',
-      content: content.trim(),
+      id: `post-${Date.now()}-${generateSecureToken().slice(0, 6)}`,
+      authorName: trimmedName,
+      authorRole: trimmedRole,
+      city: trimmedCity,
+      content: trimmedContent,
       hashtags: finalHashtags,
-      imageUrl: imagePreview || undefined,
+      imageUrl: undefined,
       imageFileName: selectedImageFile?.name,
       likes: 0,
       hasLiked: false,
@@ -237,17 +318,58 @@ export const SocialWall: React.FC<SocialWallProps> = ({
       pinned: false
     };
 
-    onAddPost(newPost, selectedImageFile || undefined);
-    setCurrentPage(1);
+    setIsSubmittingPost(true);
+    try {
+      const persisted = await onAddPost(newPost, selectedImageFile || undefined);
+      setCurrentPage(1);
 
-    setAuthorName('');
-    setAuthorRole('');
-    setContent('');
-    setHashtagsField(DEFAULT_EVENT_HASHTAGS);
-    setImagePreview(null);
-    setSelectedImageFile(null);
-    setImageUploadError(null);
-    setIsPosting(false);
+      setAuthorName('');
+      setAuthorRole('');
+      setContent('');
+      setHashtagsField(DEFAULT_EVENT_HASHTAGS);
+      handleClearImage();
+      setSubmitPostError(null);
+      setIsPosting(false);
+
+      const isImmediatelyApproved = persisted && persisted.status === 'approved';
+      setWallNotice({
+        type: 'success',
+        text: isImmediatelyApproved
+          ? 'Publicação gravada e exibida no mural com sucesso!'
+          : 'Publicação enviada e gravada no servidor! Ela aguarda aprovação da moderação para aparecer no mural público.'
+      });
+    } catch (err) {
+      setSubmitPostError(
+        formatSocialErrorMessage(
+          err,
+          'Não foi possível publicar no servidor agora. Verifique sua conexão e tente novamente.'
+        )
+      );
+    } finally {
+      setIsSubmittingPost(false);
+    }
+  };
+
+  const handleLikeClick = async (postId: string) => {
+    if (likingPostIds[postId]) return;
+    setLikingPostIds((prev) => ({ ...prev, [postId]: true }));
+    try {
+      await onLikePost(postId);
+    } catch (err) {
+      setWallNotice({
+        type: 'error',
+        text: formatSocialErrorMessage(
+          err,
+          'Não foi possível confirmar sua curtida no servidor. Tente novamente.'
+        )
+      });
+    } finally {
+      setLikingPostIds((prev) => {
+        const next = { ...prev };
+        delete next[postId];
+        return next;
+      });
+    }
   };
 
   const activeCaption = useMemo(
@@ -403,13 +525,27 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                 </h3>
                 <button
                   type="button"
-                  onClick={() => setIsPosting(false)}
-                  className="text-stone-400 hover:text-stone-700 p-1 rounded-lg cursor-pointer"
+                  disabled={isSubmittingPost}
+                  onClick={() => {
+                    setSubmitPostError(null);
+                    setIsPosting(false);
+                  }}
+                  className="text-stone-400 hover:text-stone-700 p-1 rounded-lg cursor-pointer disabled:opacity-40"
                   aria-label="Fechar modal"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
+
+              {submitPostError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{submitPostError}</span>
+                </div>
+              )}
 
               <form onSubmit={handleSubmitPost} className="space-y-3.5">
                 <div>
@@ -487,12 +623,14 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">Anexar Foto (Opcional)</label>
+                  <label className="block text-xs font-bold text-stone-700 mb-1">Anexar Foto (Opcional · JPEG, PNG ou WebP até 5MB)</label>
                   <input
+                    ref={fileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={isSubmittingPost}
                     onChange={handleImageChange}
-                    className="text-xs text-stone-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#0a3641] file:text-white hover:file:bg-[#0f4b59] cursor-pointer"
+                    className="text-xs text-stone-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#0a3641] file:text-white hover:file:bg-[#0f4b59] cursor-pointer disabled:opacity-50"
                   />
                   {imageUploadError && (
                     <p className="mt-1.5 text-xs text-rose-600 font-medium">{imageUploadError}</p>
@@ -506,8 +644,9 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                       />
                       <button
                         type="button"
-                        onClick={() => setImagePreview(null)}
-                        className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white rounded-full p-1 text-xs cursor-pointer"
+                        disabled={isSubmittingPost}
+                        onClick={handleClearImage}
+                        className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white rounded-full p-1 text-xs cursor-pointer disabled:opacity-50"
                         aria-label="Remover imagem"
                       >
                         <X className="w-3 h-3" />
@@ -519,17 +658,31 @@ export const SocialWall: React.FC<SocialWallProps> = ({
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-stone-200">
                   <button
                     type="button"
-                    onClick={() => setIsPosting(false)}
-                    className="px-3.5 py-2 text-xs font-semibold text-stone-600 hover:text-stone-900 cursor-pointer"
+                    disabled={isSubmittingPost}
+                    onClick={() => {
+                      setSubmitPostError(null);
+                      setIsPosting(false);
+                    }}
+                    className="px-3.5 py-2 text-xs font-semibold text-stone-600 hover:text-stone-900 cursor-pointer disabled:opacity-40"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#028090] rounded-lg cursor-pointer transition-colors"
+                    disabled={isSubmittingPost}
+                    className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-[#0a3641] hover:bg-[#028090] rounded-lg cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Publicar Agora</span>
+                    {isSubmittingPost ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Enviando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Publicar Agora</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -702,10 +855,51 @@ export const SocialWall: React.FC<SocialWallProps> = ({
           </div>
         )}
 
-        {/* Paginated Newest-First Posts Grid */}
+        {/* Feedback banner (postagem confirmada ou erro real de curtida) */}
+        {wallNotice && (
+          <div
+            role={wallNotice.type === 'error' ? 'alert' : 'status'}
+            className={`mb-6 p-3.5 rounded-xl border text-xs font-medium flex items-center justify-between gap-3 ${
+              wallNotice.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {wallNotice.type === 'success' ? (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>{wallNotice.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setWallNotice(null)}
+              className="p-1 rounded-lg hover:bg-black/5 cursor-pointer shrink-0"
+              aria-label="Fechar aviso"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Paginated Approved Posts Grid (Pinned first, then newest-first) */}
+        {paginatedPosts.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-stone-300 bg-[#faf8f5] p-10 text-center space-y-2">
+            <Camera className="w-7 h-7 text-stone-400 mx-auto" />
+            <p className="text-sm font-bold text-[#0a3641]">
+              Ainda não há publicações aprovadas no mural
+            </p>
+            <p className="text-xs text-stone-500 max-w-md mx-auto">
+              Envie seu relato ou fotografia clicando em &quot;Publicar Foto ou Publicação&quot;. Assim que aprovada pela moderação, ela aparecerá aqui para toda a comunidade.
+            </p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {paginatedPosts.map((post) => {
             const postHashtags = (post.hashtags && post.hashtags.trim()) || DEFAULT_EVENT_HASHTAGS;
+            const isLiking = Boolean(likingPostIds[post.id]);
             return (
               <article
                 key={post.id}
@@ -713,13 +907,21 @@ export const SocialWall: React.FC<SocialWallProps> = ({
               >
                 <div>
                   {/* Author Header */}
-                  <div className="mb-3">
-                    <h3 className="text-sm font-bold text-[#0a3641] leading-tight">
-                      {post.authorName}
-                    </h3>
-                    <div className="text-[11px] text-stone-500 font-medium mt-0.5">
-                      {post.authorRole} · <span className="text-[#d96522]">{post.city}</span>
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-[#0a3641] leading-tight">
+                        {post.authorName}
+                      </h3>
+                      <div className="text-[11px] text-stone-500 font-medium mt-0.5">
+                        {post.authorRole} · <span className="text-[#d96522]">{post.city}</span>
+                      </div>
                     </div>
+                    {post.pinned && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                        <Pin className="w-2.5 h-2.5" />
+                        <span>Fixado</span>
+                      </span>
+                    )}
                   </div>
 
                   {/* Optional Post Image */}
@@ -785,8 +987,9 @@ export const SocialWall: React.FC<SocialWallProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => onLikePost(post.id)}
-                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer ml-1 ${
+                      disabled={isLiking}
+                      onClick={() => handleLikeClick(post.id)}
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg transition-colors cursor-pointer ml-1 disabled:opacity-50 disabled:cursor-wait ${
                         post.hasLiked
                           ? 'text-rose-600 font-bold bg-rose-50'
                           : 'hover:text-rose-600 hover:bg-stone-100'
@@ -804,6 +1007,7 @@ export const SocialWall: React.FC<SocialWallProps> = ({
             );
           })}
         </div>
+        )}
 
         {/* Pagination Controls */}
         {totalPages > 1 && (

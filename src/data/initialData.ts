@@ -732,9 +732,11 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
     content: 'Momento histórico para nossa microrregião. Discutir o cuidado em liberdade e o fortalecimento do SUS nunca foi tão urgente e necessário!',
     hashtags: DEFAULT_EVENT_HASHTAGS,
     likes: 0,
-    hasLiked: true,
-    createdAt: 'Há 35 minutos',
-    timestamp: 1796726100000
+    hasLiked: false,
+    createdAt: '16/11/2026 às 10:35',
+    timestamp: 1794825300000,
+    status: 'approved',
+    pinned: false
   }
 ];
 

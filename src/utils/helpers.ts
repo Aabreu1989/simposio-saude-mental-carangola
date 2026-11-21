@@ -1,5 +1,5 @@
 import { Registration, EventConfig, DownloadMaterial, SocialPost, PushNotificationItem, NewsletterSubscriber, EvaluationFeedback, CertificateDownloadRecord, CertificateDesignConfig, BadgeDesignConfig, SpeakerProfile } from '../types.ts';
-import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, INITIAL_BADGE_DESIGN, INITIAL_REGISTRATIONS, INITIAL_MATERIALS, INITIAL_SCHEDULE, THEMATIC_AXES, INITIAL_SOCIAL_POSTS, INITIAL_NOTIFICATIONS, INITIAL_SUBSCRIBERS, INITIAL_EVALUATIONS, DEFAULT_EVENT_HASHTAGS, SPEAKERS_PROFILES } from '../data/initialData.ts';
+import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, INITIAL_BADGE_DESIGN, INITIAL_REGISTRATIONS, INITIAL_MATERIALS, INITIAL_SCHEDULE, THEMATIC_AXES, INITIAL_NOTIFICATIONS, INITIAL_SUBSCRIBERS, INITIAL_EVALUATIONS, DEFAULT_EVENT_HASHTAGS, SPEAKERS_PROFILES } from '../data/initialData.ts';
 import { generateScheduleHTML, openSchedulePDFWindow } from './schedulePdfGenerator.ts';
 import { fetchChunkedMaterialBlobUrl } from '../services/firebaseDb.ts';
 
@@ -145,23 +145,15 @@ export const loadStoredData = () => {
     loadedConfig.locationAddress = 'Praça Cel. Maximiano, 180 - Centro, Carangola - MG, 36800-000';
     loadedConfig.eventHours = '7h30 às 16h30';
   }
-  loadedConfig.certificateDesign = {
+  const mergedCertDesign: CertificateDesignConfig = {
     ...INITIAL_CERTIFICATE_DESIGN,
-    ...(loadedConfig.certificateDesign || {}),
-    showBannerImage: false,
-    bannerImageUrl:
-      loadedConfig.certificateDesign?.bannerImageUrl &&
-      !loadedConfig.certificateDesign.bannerImageUrl.includes('WhatsApp_Image')
-        ? loadedConfig.certificateDesign.bannerImageUrl
-        : '/assets/banner-oficial-simposio-saude-mental-carangola.jpg',
-    footerQuote: '',
-    badgeLabel: '',
-    mainTitle: 'CERTIFICADO',
-    primaryColor: '#0a3641',
-    accentColor: '#ea7a38',
-    secondaryColor: '#028090',
-    backgroundColor: '#ffffff'
+    ...(loadedConfig.certificateDesign || {})
   };
+  mergedCertDesign.bannerImageUrl = sanitizeCertificateBannerUrl(mergedCertDesign.bannerImageUrl);
+  if (!mergedCertDesign.bannerImageUrl) {
+    mergedCertDesign.showBannerImage = false;
+  }
+  loadedConfig.certificateDesign = mergedCertDesign;
   loadedConfig.badgeDesign = {
     ...INITIAL_BADGE_DESIGN,
     ...(loadedConfig.badgeDesign || {})
@@ -247,33 +239,24 @@ export const loadStoredData = () => {
     }
   }
 
-  const INVENTED_POST_IDS = new Set([
-    'post-1',
-    'post-2',
-    'post-3',
-    'post-4',
-    'post-5',
-    'post-6',
-    'post-8'
-  ]);
   const deletedPostIds = getDeletedPostIds();
-  const storedPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, INITIAL_SOCIAL_POSTS) || [];
-  const storedIds = new Set(storedPosts.map((p) => p.id));
-  const missingInitialPosts = INITIAL_SOCIAL_POSTS.filter(
-    (sp) => !storedIds.has(sp.id) && !deletedPostIds.has(sp.id) && !INVENTED_POST_IDS.has(sp.id)
-  );
-  const rawPosts = [...storedPosts, ...missingInitialPosts].filter(
-    (p) => p && !deletedPostIds.has(p.id) && !INVENTED_POST_IDS.has(p.id)
+  const storedPosts = getItem<SocialPost[]>(STORAGE_KEYS.POSTS, []) || [];
+  const rawPosts = storedPosts.filter(
+    (p) => p && p.id && !deletedPostIds.has(p.id) && !INVENTED_POST_IDS.has(p.id)
   );
   const mergedPosts: SocialPost[] = rawPosts
     .map((post, index) => ({
       ...post,
+      imageUrl: post.imageUrl && !post.imageUrl.startsWith('data:') ? post.imageUrl : undefined,
       hashtags: post.hashtags?.trim() ? post.hashtags : DEFAULT_EVENT_HASHTAGS,
-      timestamp: typeof post.timestamp === 'number' ? post.timestamp : Date.now() - (index + 1) * 600000
+      timestamp: typeof post.timestamp === 'number' ? post.timestamp : Date.now() - (index + 1) * 600000,
+      pinned: Boolean(post.pinned),
+      status:
+        post.status === 'approved' || post.status === 'pending' || post.status === 'rejected'
+          ? post.status
+          : 'pending'
     }))
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
-  saveToStorage(STORAGE_KEYS.POSTS, mergedPosts);
 
   const EXAMPLE_REG_IDS = new Set([
     'reg-001','reg-002','reg-003','reg-004','reg-005',
@@ -881,10 +864,24 @@ export const getOrCreateParticipantRegistrationIdentity = (
   return identity;
 };
 
-export const generateCertificateHash = (code: string, cpf: string): string => {
-  const cleanCpf = cpf.replace(/\D/g, '');
-  const suffix = cleanCpf.length >= 4 ? cleanCpf.slice(-4) : code.slice(-4);
-  return `SUS-MG-${code}-${suffix}-VERIFIED`.toUpperCase();
+export const sanitizeCertificateBannerUrl = (rawUrl?: string): string => {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed || trimmed.length > 500) return '';
+  if (trimmed.includes('WhatsApp_Image')) return '';
+  if (/^(data|javascript|vbscript):/i.test(trimmed)) return '';
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return trimmed;
+  }
+  if (/^https?:\/\/.+/i.test(trimmed)) {
+    return trimmed;
+  }
+  return '';
+};
+
+export const generateCertificateHash = (code: string, _cpf?: string): string => {
+  const normalizedCode = (code || '').trim().toUpperCase() || 'SEM-CODIGO';
+  const digest = sha256Hex(`SUS-MG-CARANGOLA-2026|${normalizedCode}`).slice(0, 8).toUpperCase();
+  return `SUS-MG-${normalizedCode}-${digest}`;
 };
 
 // O evento encerra em 08 de Dezembro de 2026 às 16h30 (horário de Brasília, UTC-3)
@@ -901,16 +898,10 @@ export const getCertificateDesign = (config: EventConfig): CertificateDesignConf
     ...(config.certificateDesign || {})
   };
 
-  // Enforce official design directives:
-  merged.showBannerImage = false;
-  merged.bannerImageUrl = '';
-  merged.footerQuote = '';
-  merged.badgeLabel = '';
-  merged.mainTitle = 'CERTIFICADO';
-  merged.primaryColor = '#0a3641';
-  merged.accentColor = '#ea7a38';
-  merged.secondaryColor = '#028090';
-  merged.backgroundColor = '#ffffff';
+  merged.bannerImageUrl = sanitizeCertificateBannerUrl(merged.bannerImageUrl);
+  if (!merged.bannerImageUrl) {
+    merged.showBannerImage = false;
+  }
 
   return merged;
 };
@@ -2066,5 +2057,98 @@ export const classifySubscribersForDashboard = (
     emailSubscribers,
     registrationOriginSubscribers
   };
+};
+
+export interface SocialPostsSnapshotMeta {
+  fromCache: boolean;
+}
+
+/**
+ * Remove qualquer data:URI Base64 e postagens fictícias antes de persistir cache de posts em localStorage.
+ */
+export const sanitizePostsForStorage = (posts: SocialPost[]): SocialPost[] => {
+  return (Array.isArray(posts) ? posts : [])
+    .filter((p) => Boolean(p) && Boolean(p.id) && !INVENTED_POST_IDS.has(p.id))
+    .map((p) => ({
+      ...p,
+      imageUrl: p.imageUrl && !p.imageUrl.startsWith('data:') ? p.imageUrl : undefined
+    }));
+};
+
+/**
+ * Reconcilia snapshot de social_posts diferenciando cache local de resposta autoritativa do servidor.
+ * - Snapshot autoritativo (fromCache === false): fonte única da verdade (propaga inclusive [] sem ressuscitar localOnly).
+ * - Snapshot de cache (fromCache === true): se vier vazio e houver posts confirmados em memória/storage,
+ *   preserva os existentes filtrados por deletedPostIds/INVENTED_POST_IDS até resposta do servidor;
+ *   se vier preenchido, filtra deletedPostIds locais e INVENTED_POST_IDS sem ressuscitar excluídos.
+ * - Nunca persiste/re-injeta Base64 data:URI nem altera automaticamente o status de posts pendentes.
+ */
+export const reconcileSocialPostsSnapshot = (
+  remotePosts: SocialPost[],
+  currentPosts: SocialPost[],
+  deletedPostIds: Set<string>,
+  meta: SocialPostsSnapshotMeta
+): SocialPost[] => {
+  const safeCurrent = (Array.isArray(currentPosts) ? currentPosts : []).filter(
+    (p) => Boolean(p) && Boolean(p.id) && !INVENTED_POST_IDS.has(p.id)
+  );
+  const prevMap = new Map<string, SocialPost>();
+  safeCurrent.forEach((p) => {
+    prevMap.set(p.id, p);
+  });
+
+  const incomingList = Array.isArray(remotePosts) ? remotePosts : [];
+
+  if (meta.fromCache && incomingList.length === 0 && safeCurrent.length > 0) {
+    return safeCurrent
+      .filter((p) => !deletedPostIds.has(p.id))
+      .map((p) => ({
+        ...p,
+        imageUrl: p.imageUrl && !p.imageUrl.startsWith('data:') ? p.imageUrl : undefined
+      }))
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  }
+
+  const safeRemote = incomingList.filter((p) => {
+    if (!p || !p.id) return false;
+    if (INVENTED_POST_IDS.has(p.id)) return false;
+    if (meta.fromCache && deletedPostIds.has(p.id)) return false;
+    return true;
+  });
+
+  const reconciled: SocialPost[] = safeRemote.map((rp) => {
+    const localCopy = prevMap.get(rp.id);
+    const safeRemoteImageUrl =
+      rp.imageUrl && !rp.imageUrl.startsWith('data:') ? rp.imageUrl : undefined;
+    const normalizedStatus: SocialPost['status'] =
+      rp.status === 'approved' || rp.status === 'pending' || rp.status === 'rejected'
+        ? rp.status
+        : 'pending';
+    return {
+      ...rp,
+      imageUrl: safeRemoteImageUrl,
+      hasLiked: rp.hasLiked ?? localCopy?.hasLiked ?? false,
+      hashtags: rp.hashtags?.trim() ? rp.hashtags : DEFAULT_EVENT_HASHTAGS,
+      timestamp: typeof rp.timestamp === 'number' ? rp.timestamp : Date.now(),
+      pinned: Boolean(rp.pinned),
+      status: normalizedStatus
+    };
+  });
+
+  return reconciled.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+};
+
+/**
+ * Filtra exclusivamente postagens com status === 'approved' para o mural público,
+ * ordenando postagens fixadas (pinned) primeiro e depois das mais recentes para as anteriores.
+ */
+export const sortAndFilterPublicSocialPosts = (posts: SocialPost[]): SocialPost[] => {
+  return (Array.isArray(posts) ? posts : [])
+    .filter((p) => Boolean(p) && p.status === 'approved' && !INVENTED_POST_IDS.has(p.id))
+    .sort((a, b) => {
+      const pinDiff = Number(Boolean(b.pinned)) - Number(Boolean(a.pinned));
+      if (pinDiff !== 0) return pinDiff;
+      return (b.timestamp || 0) - (a.timestamp || 0);
+    });
 };
 
