@@ -141,22 +141,47 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     location: 'Auditório UEMG Carangola',
     speakers: [
       {
-        name: 'Superintendência de Saúde Mental',
-        role: 'Coordenação do Simpósio',
-        institution: 'Coordenação RAPS'
+        name: 'Silas Vieira',
+        role: 'Mesa de Abertura',
+        institution: ''
       },
       {
-        name: 'Supervisão clínico institucional da RAPS',
-        role: 'Coordenação do Simpósio',
-        institution: 'Coordenação RAPS'
+        name: 'Gisella Loiola Consensa',
+        role: 'Secretária Municipal de Saúde',
+        institution: ''
       },
       {
-        name: 'Secretaria Municipal de Saúde de Carangola',
-        role: 'Coordenação do Simpósio',
-        institution: 'Prefeitura de Carangola'
+        name: 'Camila Lima',
+        role: 'Mesa de Abertura',
+        institution: ''
+      },
+      {
+        name: 'Camila Andrade',
+        role: 'Mesa de Abertura',
+        institution: ''
+      },
+      {
+        name: 'Ludmila',
+        role: 'Mesa de Abertura',
+        institution: ''
+      },
+      {
+        name: 'Representante da Câmara',
+        role: 'Mesa de Abertura',
+        institution: 'Câmara Municipal de Carangola'
+      },
+      {
+        name: 'Dr. Breno',
+        role: 'Mesa de Abertura',
+        institution: ''
+      },
+      {
+        name: 'Dra. Patrícia',
+        role: 'Mesa de Abertura',
+        institution: ''
       }
     ],
-    description: 'Abertura oficial: Quando nos encontramos, a Rede ganha vida! Coordenação do Simpósio: Superintendência de Saúde Mental, Supervisão clínico institucional da RAPS e Secretaria Municipal de Saúde de Carangola.'
+    description: 'Mesa solene de abertura do 1º Simpósio de Saúde Mental da Microrregião de Carangola.'
   },
   {
     id: 'sch-4',
@@ -282,11 +307,6 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
         name: 'Cristiana Marina Barros de Souza',
         role: 'Coordenação Pedagógica Nós na Rede (MS/Fiocruz)',
         institution: 'Nós na Rede · Ministério da Saúde / Fiocruz'
-      },
-      {
-        name: 'Marcos Alexandre',
-        role: 'Debatedor',
-        institution: 'Mesa 3'
       },
       {
         name: 'Ricardo Moebus',
@@ -740,6 +760,20 @@ export const INITIAL_SOCIAL_POSTS: SocialPost[] = [
   }
 ];
 
+// IDs/nomes de palestrantes oficialmente removidos da programação (evita ressurreição por cache local/Firestore)
+export const REMOVED_SPEAKER_IDS = new Set<string>(['spk-marcos-alexandre']);
+
+export const isRemovedSpeaker = (speaker?: { id?: string; name?: string } | null): boolean => {
+  if (!speaker) return false;
+  if (speaker.id && REMOVED_SPEAKER_IDS.has(speaker.id)) return true;
+  const normalizedName = (speaker.name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return normalizedName === 'marcos alexandre';
+};
+
 export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   {
     id: 'spk-camila-lima',
@@ -906,17 +940,6 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     socials: {}
   },
   {
-    id: 'spk-marcos-alexandre',
-    name: 'Marcos Alexandre',
-    role: 'Debatedor',
-    institution: 'Mesa 3 · A judiciarização da saúde mental e o cuidado em liberdade',
-    sessionGroup: 'mesa-3',
-    sessionLabel: 'Mesa 3 · Judicialização e Direitos',
-    sessionTime: '14:30 – 15:30',
-    bio: '',
-    socials: {}
-  },
-  {
     id: 'spk-ricardo-moebus',
     name: 'Dr. Ricardo Luiz Narciso Moebus',
     role: 'Médico Psiquiatra · Professor e Pesquisador',
@@ -935,7 +958,7 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     role: 'Secretária Municipal de Saúde',
     institution: 'Secretaria Municipal de Saúde de Carangola',
     sessionGroup: 'abertura',
-    sessionLabel: 'Abertura Solene Oficial',
+    sessionLabel: 'Mesa de Abertura',
     sessionTime: '08:30 – 09:15',
     photoUrl: 'https://lh3.googleusercontent.com/d/1bfOsNTplIqDFlTgNeulg_0Bnx4fzZI7Z',
     photoPosition: 'center 18%',

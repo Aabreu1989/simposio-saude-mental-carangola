@@ -265,14 +265,18 @@ export const SchedulePrintModal: React.FC<SchedulePrintModalProps> = ({
                       {session.speakers && session.speakers.length > 0 && (
                         <div className="mt-2 pt-2 border-t border-stone-100 bg-stone-50/80 p-2 rounded">
                           <span className="text-[10px] font-bold text-stone-500 uppercase tracking-wider block mb-1">
-                            Palestrantes e Debatedores:
+                            {session.type === 'abertura'
+                              ? 'Composição da Mesa de Abertura:'
+                              : 'Palestrantes e Debatedores:'}
                           </span>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px]">
                             {session.speakers.map((s, idx) => (
                               <div key={idx} className="leading-tight">
                                 <span className="font-bold text-[#0a3641]">{s.name}</span>
-                                <span className="text-stone-600"> · {s.role}</span>
-                                <div className="text-[10px] text-stone-500 italic">{s.institution}</div>
+                                {s.role && <span className="text-stone-600"> · {s.role}</span>}
+                                {s.institution && (
+                                  <div className="text-[10px] text-stone-500 italic">{s.institution}</div>
+                                )}
                               </div>
                             ))}
                           </div>

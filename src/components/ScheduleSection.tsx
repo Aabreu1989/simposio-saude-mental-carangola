@@ -192,7 +192,7 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar por palestrante, mediadora ou tema (ex: Raquel, Christine, Camila, Gisella)..."
+              placeholder="Buscar por palestrante, mediadora, abertura ou tema (ex: Camila, Raquel, Christine, Gisella)..."
               className="w-full pl-11 pr-10 py-3.5 text-sm sm:text-base bg-white border-2 border-stone-200 rounded-2xl focus:outline-none focus:border-[#0a3641] focus:ring-4 focus:ring-[#0a3641]/10 text-stone-800 placeholder-stone-400 shadow-2xs transition-all"
             />
             {searchTerm && (
@@ -216,7 +216,7 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
               { label: 'Mesa 1 (Fluxograma da RAPS · Camila Lima)', query: 'Mesa 1' },
               { label: 'Mesa 2 (Hospital Geral & Urgência · Raquel Pinheiro)', query: 'Mesa 2' },
               { label: 'Mesa 3 (Judicialização & Direitos · Christine Vianna)', query: 'Mesa 3' },
-              { label: 'Gisella Loiola Consensa (Abertura Oficial)', query: 'Gisella' }
+              { label: 'Gisella Loiola Consensa (Mesa de Abertura)', query: 'Gisella' }
             ].map((chip) => {
               const isSelected = searchTerm.toLowerCase().includes(chip.query.toLowerCase());
               return (
@@ -323,7 +323,7 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
                 Nenhuma atividade encontrada para "{searchTerm}"
               </div>
               <p className="text-xs text-stone-500 max-w-md mx-auto">
-                Tente buscar pelo nome das palestrantes e mediadoras como "Raquel", "Christine", "Camila" ou "Gisella", ou limpe os filtros para ver a grade completa.
+                Tente buscar pelo nome das palestrantes, mediadoras ou integrantes da Mesa de Abertura (como "Raquel", "Christine", "Camila" ou "Gisella"), ou limpe os filtros para ver a grade completa.
               </p>
               <button
                 type="button"
@@ -424,7 +424,11 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
                         <div className="pt-4 border-t border-stone-100 mt-3">
                           <div className="text-[11px] font-mono font-bold text-stone-500 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5 text-[#ea7a38]" />
-                            <span>Palestrantes e Debatedores Confirmados:</span>
+                            <span>
+                              {session.type === 'abertura'
+                                ? 'Composição da Mesa de Abertura:'
+                                : 'Palestrantes e Debatedores Confirmados:'}
+                            </span>
                           </div>
 
                           <div
@@ -454,14 +458,18 @@ export const ScheduleSection: React.FC<ScheduleProps> = ({
                                     <div className="font-bold text-[#0a3641] text-sm">{spk.name}</div>
                                     {isSpeakerMatch && (
                                       <span className="text-[9px] font-mono font-bold text-[#d96522] bg-[#fef1e8] px-1.5 py-0.5 rounded">
-                                        Palestrante
+                                        {session.type === 'abertura' ? 'Mesa de Abertura' : 'Palestrante'}
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-stone-600 text-xs mt-0.5">{spk.role}</div>
-                                  <div className="text-stone-500 text-[11px] leading-tight break-words mt-0.5">
-                                    {spk.institution}
-                                  </div>
+                                  {spk.role && (
+                                    <div className="text-stone-600 text-xs mt-0.5">{spk.role}</div>
+                                  )}
+                                  {spk.institution && (
+                                    <div className="text-stone-500 text-[11px] leading-tight break-words mt-0.5">
+                                      {spk.institution}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}

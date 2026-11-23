@@ -107,16 +107,26 @@ export const Footer: React.FC<FooterProps> = ({
         <div className="mt-6 pt-5 border-t border-stone-800/80 space-y-5">
           {/* Nível 1: Realização */}
           <div className="rounded-2xl bg-white/[0.03] border border-white/10 p-3.5 sm:p-4">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-1.5 mb-3 text-center sm:text-left">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-[#ea7a38] font-mono block">
-                  Realização
-                </span>
-                <h4 className="text-sm sm:text-base font-extrabold text-white tracking-tight mt-0.5">
-                  Superintendência de Saúde Mental de Carangola
-                </h4>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 text-center sm:text-left">
+              <div className="flex flex-col sm:flex-row items-center gap-3">
+                <div className="bg-white rounded-xl px-2.5 py-1.5 shadow-sm shrink-0 inline-flex items-center justify-center">
+                  <img
+                    src="/assets/logo-saude-mental-carangola.png"
+                    alt="Saúde Mental de Carangola - Superintendência de Saúde Mental"
+                    loading="lazy"
+                    className="h-14 sm:h-16 w-auto object-contain"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#ea7a38] font-mono block">
+                    Realização
+                  </span>
+                  <h4 className="text-sm sm:text-base font-extrabold text-white tracking-tight mt-0.5">
+                    Superintendência de Saúde Mental de Carangola
+                  </h4>
+                </div>
               </div>
-              <span className="text-[10px] uppercase tracking-wider text-stone-400 font-mono">
+              <span className="text-[10px] uppercase tracking-wider text-stone-400 font-mono sm:self-end">
                 Serviços da RAPS
               </span>
             </div>

@@ -1,5 +1,5 @@
 import { EventConfig, SpeakerProfile } from '../types.ts';
-import { INITIAL_EVENT_CONFIG } from '../data/initialData.ts';
+import { INITIAL_EVENT_CONFIG, isRemovedSpeaker } from '../data/initialData.ts';
 import { normalizeGoogleDriveImageUrl } from './helpers.ts';
 
 const escapeHtml = (value: string): string =>
@@ -42,7 +42,7 @@ const getSessionGroupLabel = (group: SpeakerProfile['sessionGroup']): string => 
     case 'mesa-3':
       return 'Mesa 3 · Justiça & Direitos';
     default:
-      return 'Abertura & Mediação';
+      return 'Mesa de Abertura';
   }
 };
 
@@ -50,6 +50,7 @@ export const exportSpeakersPdf = async (
   speakers: SpeakerProfile[],
   config: EventConfig = INITIAL_EVENT_CONFIG
 ): Promise<void> => {
+  const validSpeakers = (speakers || []).filter((s) => !isRemovedSpeaker(s));
   const generatedAt = new Date().toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: '2-digit',
@@ -213,7 +214,7 @@ export const exportSpeakersPdf = async (
       </div>
 
       <div class="spk-list">
-        ${speakers
+        ${validSpeakers
           .map((spk) => {
             const accent = getSessionAccent(spk.sessionGroup);
             const socialParts = [

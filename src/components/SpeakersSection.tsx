@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { FileDown, GraduationCap, Search, Users, ExternalLink, CheckCircle2, Clock } from 'lucide-react';
 import { EventConfig, SpeakerProfile } from '../types.ts';
+import { isRemovedSpeaker } from '../data/initialData.ts';
 import { exportSpeakersPdf } from '../utils/speakersPdfGenerator.ts';
 import { normalizeGoogleDriveImageUrl } from '../utils/helpers.ts';
 
@@ -23,7 +24,7 @@ const LinkedInGlyph = ({ className = 'w-3.5 h-3.5' }: { className?: string }) =>
 
 const FILTER_TABS: Array<{ id: 'todos' | SpeakerProfile['sessionGroup']; label: string }> = [
   { id: 'todos', label: 'Todos' },
-  { id: 'abertura', label: 'Abertura & Gestão' },
+  { id: 'abertura', label: 'Mesa de Abertura' },
   { id: 'mesa-1', label: 'Mesa 1 · RAPS' },
   { id: 'mesa-2', label: 'Mesa 2 · Hospital & Urgência' },
   { id: 'mesa-3', label: 'Mesa 3 · Justiça & Direitos' }
@@ -59,7 +60,7 @@ const getGroupBadge = (group: SpeakerProfile['sessionGroup']) => {
     case 'mesa-3':
       return { label: 'Mesa 3 · Justiça & Direitos', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
     default:
-      return { label: 'Abertura & Mediação', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+      return { label: 'Mesa de Abertura', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
   }
 };
 
@@ -70,9 +71,14 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
   const [exportDone, setExportDone] = useState(false);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
 
+  const visibleSpeakers = useMemo(
+    () => speakers.filter((spk) => !isRemovedSpeaker(spk)),
+    [speakers]
+  );
+
   const filteredSpeakers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return speakers.filter((spk) => {
+    return visibleSpeakers.filter((spk) => {
       const matchesGroup =
         selectedGroup === 'todos' ||
         spk.sessionGroup === selectedGroup ||
@@ -87,13 +93,13 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
         spk.bio.toLowerCase().includes(q)
       );
     });
-  }, [speakers, selectedGroup, searchQuery]);
+  }, [visibleSpeakers, selectedGroup, searchQuery]);
 
   const handleDownloadPdf = async () => {
     if (isExporting) return;
     setIsExporting(true);
     try {
-      await exportSpeakersPdf(speakers, config);
+      await exportSpeakersPdf(visibleSpeakers, config);
       setExportDone(true);
       setTimeout(() => setExportDone(false), 3500);
     } finally {
