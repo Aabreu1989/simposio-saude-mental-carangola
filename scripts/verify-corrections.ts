@@ -101,6 +101,7 @@ import {
 } from '../src/services/firebaseDb.ts';
 
 import emailHandler, {
+  buildServerInstitutionalEmail,
   resetEmailServerStateForTests,
   setRegistrationLookupForTests,
   setSmtpSendForTests,
@@ -729,6 +730,79 @@ async function runTests() {
   );
 
   // Restaurar ambiente
+  // 4.10 Regressão anti-bloqueio Gmail 69585: sem links *.vercel.app, cabeçalhos transacionais e suporte a SMTP_FROM
+  {
+    const prevPortalUrl = process.env.PUBLIC_PORTAL_URL;
+    const prevSmtpFrom = process.env.SMTP_FROM;
+    const prevSmtpFromName = process.env.SMTP_FROM_NAME;
+    const prevSmtpReplyTo = process.env.SMTP_REPLY_TO;
+    try {
+      delete process.env.PUBLIC_PORTAL_URL;
+      const sampleRec: TrustedRegistrationRecord = {
+        id: 'reg-69585',
+        code: 'CAR-SM-69585OK',
+        fullName: 'Maria Silva',
+        email: 'maria@exemplo.com',
+        city: 'Carangola',
+        professionalRole: 'Enfermeira',
+        institution: 'UBS Centro',
+        axisInterest: 'Eixo 1',
+        status: 'confirmada'
+      };
+      const defaultMail = buildServerInstitutionalEmail(sampleRec);
+
+      process.env.PUBLIC_PORTAL_URL = 'https://simposio-saude-mental-carangola.vercel.app';
+      const vercelIgnoredMail = buildServerInstitutionalEmail(sampleRec);
+
+      process.env.PUBLIC_PORTAL_URL = 'https://simposiocarangola.org.br/pagina';
+      const customDomainMail = buildServerInstitutionalEmail(sampleRec);
+
+      process.env.SMTP_PASS = 'mock-app-password-16ch';
+      process.env.SMTP_FROM = 'inscricoes@simposiocarangola.org.br';
+      process.env.SMTP_FROM_NAME = 'Simpósio Carangola';
+      process.env.SMTP_REPLY_TO = 'contato@simposiocarangola.org.br';
+      trustedDbRecords.set('CAR-SM-69585OK', sampleRec);
+
+      let capturedHeaders: Record<string, string> | undefined;
+      let capturedFrom: { name: string; address: string } | undefined;
+      let capturedReplyTo = '';
+      setSmtpSendForTests(async (mailOpts) => {
+        capturedHeaders = mailOpts.headers;
+        capturedFrom = mailOpts.from;
+        capturedReplyTo = mailOpts.replyTo;
+        return { messageId: '<mock-69585@simposiocarangola.org.br>', accepted: [mailOpts.to], rejected: [] };
+      });
+      const req69585 = createMockHttp('POST', { code: 'CAR-SM-69585OK', registrationId: 'reg-69585' });
+      await emailHandler(req69585.req, req69585.res);
+
+      assert(
+        !defaultMail.bodyHtml.includes('vercel.app') &&
+          !defaultMail.bodyText.includes('vercel.app') &&
+          !defaultMail.subject.includes('[Nº') &&
+          !defaultMail.subject.includes('SUS') &&
+          !vercelIgnoredMail.bodyHtml.includes('vercel.app') &&
+          customDomainMail.bodyHtml.includes('https://simposiocarangola.org.br') &&
+          req69585.getStatus() === 200 &&
+          capturedFrom?.address === 'inscricoes@simposiocarangola.org.br' &&
+          capturedFrom?.name === 'Simpósio Carangola' &&
+          capturedReplyTo === 'contato@simposiocarangola.org.br' &&
+          capturedHeaders?.['Auto-Submitted'] === 'auto-generated' &&
+          capturedHeaders?.['X-Auto-Response-Suppress'] === 'OOF, AutoReply',
+        'Template de confirmação elimina links *.vercel.app/gatilhos 69585, envia cabeçalhos transacionais e respeita SMTP_FROM/PUBLIC_PORTAL_URL',
+        suite4
+      );
+    } finally {
+      if (prevPortalUrl !== undefined) process.env.PUBLIC_PORTAL_URL = prevPortalUrl;
+      else delete process.env.PUBLIC_PORTAL_URL;
+      if (prevSmtpFrom !== undefined) process.env.SMTP_FROM = prevSmtpFrom;
+      else delete process.env.SMTP_FROM;
+      if (prevSmtpFromName !== undefined) process.env.SMTP_FROM_NAME = prevSmtpFromName;
+      else delete process.env.SMTP_FROM_NAME;
+      if (prevSmtpReplyTo !== undefined) process.env.SMTP_REPLY_TO = prevSmtpReplyTo;
+      else delete process.env.SMTP_REPLY_TO;
+    }
+  }
+
   if (prevSmtpUser !== undefined) process.env.SMTP_USER = prevSmtpUser;
   else delete process.env.SMTP_USER;
   if (prevSmtpPass !== undefined) process.env.SMTP_PASS = prevSmtpPass;
@@ -2855,7 +2929,7 @@ async function runTests() {
   const rawConfirmEmail = fs.readFileSync(path.join(process.cwd(), 'api/email/confirm-registration.ts'));
   const shaConfirmEmail = crypto.createHash('sha256').update(rawConfirmEmail).digest('hex');
   assert(
-    shaConfirmEmail === '44168ce4164eb4b6c8a14bb55270a6effd5f9340dc032cf76a5c85972eb7f344',
+    shaConfirmEmail === '42b9140e950275cfa5aa1dec0e055e4be9701525ec630200d371327d7347c598',
     'api/email/confirm-registration.ts preservado byte a byte (SHA-256 idêntico à versão homologada)',
     suite15
   );
@@ -3630,7 +3704,7 @@ async function runTests() {
   const builtLongSubId = buildSubscriberIdFromRegistrationId(longValidRegId);
 
   assert(
-    allSpeakers.length === 16 &&
+    allSpeakers.length === 15 && !allSpeakers.some((s) => s.id === 'spk-marcos-alexandre') &&
       allSpeakers.some((s) => s.id === 'spk-gisella-consensa') &&
       initialSubs.length === 0 &&
       sampleDeterministicId === 'sub-reg-ex-999' &&
@@ -4985,7 +5059,7 @@ async function runTests() {
   const rawStorageRules17 = fs.readFileSync(path.join(process.cwd(), 'storage.rules'), 'utf-8');
   assert(
     shaFirestoreRules === 'c742b761a4aaa35e43cfddcd0b6dbae8a19005c2581eaf3a70627679bc54989c' &&
-      shaConfirmEmail === '44168ce4164eb4b6c8a14bb55270a6effd5f9340dc032cf76a5c85972eb7f344' &&
+      shaConfirmEmail === '42b9140e950275cfa5aa1dec0e055e4be9701525ec630200d371327d7347c598' &&
       rawStorageRules17.includes('match /social_posts/{postId}/{fileName}') &&
       rawStorageRules17.includes('request.resource.size <= 5 * 1024 * 1024') &&
       rawStorageRules17.includes("request.resource.contentType.matches('image/(jpeg|jpg|png|webp)')"),
@@ -5490,7 +5564,7 @@ async function runTests() {
     assert(
       fileSha256('firestore.rules') === 'C742B761A4AAA35E43CFDDCD0B6DBAE8A19005C2581EAF3A70627679BC54989C' &&
         fileSha256('storage.rules') === '290FD2E779E5C5B8FFCB0FB8838DF8CCB7333F1ED9DB3C435509FE5649500B48' &&
-        fileSha256('api/email/confirm-registration.ts') === '44168CE4164EB4B6C8A14BB55270A6EFFD5F9340DC032CF76A5C85972EB7F344',
+        fileSha256('api/email/confirm-registration.ts') === '42B9140E950275CFA5AA1DEC0E055E4BE9701525EC630200D371327D7347C598',
       '18.6 arquivos protegidos (firestore.rules, storage.rules, api/email/confirm-registration.ts) mantêm SHA-256 bit-a-bit idêntico',
       suite18
     );

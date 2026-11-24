@@ -97,6 +97,7 @@ export type SmtpSendFn = (mailOptions: {
   text: string;
   html: string;
   encoding: string;
+  headers?: Record<string, string>;
 }) => Promise<SmtpMailResult>;
 
 export interface EmailConfirmationRecord {
@@ -1059,6 +1060,20 @@ export function setSmtpSendForTests(fn: SmtpSendFn | null): void {
   customSmtpSendForTests = fn;
 }
 
+function resolveTrustedCustomPortalUrl(): string | null {
+  const raw = (process.env.PUBLIC_PORTAL_URL || '').trim().replace(/\/+$/, '');
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return null;
+    // Evita inserir links *.vercel.app no corpo do e-mail (gatilho conhecido do filtro antiphishing 69585 do Gmail)
+    if (parsed.hostname.toLowerCase().endsWith('.vercel.app')) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function buildServerInstitutionalEmail(record: TrustedRegistrationRecord): {
   subject: string;
   bodyText: string;
@@ -1071,10 +1086,17 @@ export function buildServerInstitutionalEmail(record: TrustedRegistrationRecord)
   const safeInst = escapeHtml(record.institution);
   const safeAxis = escapeHtml(record.axisInterest);
 
-  const subject = `Inscrição Confirmada [Nº ${record.code}] · 1º Simpósio de Saúde Mental de Carangola - SUS`;
-  const baseUrl = 'https://simposio-saude-mental-carangola.vercel.app';
-  const certUrl = `${baseUrl}/#certificado?code=${encodeURIComponent(record.code)}`;
-  const scheduleUrl = `${baseUrl}/#programacao`;
+  const subject = `Confirmação de inscrição - 1º Simpósio de Saúde Mental de Carangola (${record.code})`;
+  const customPortalUrl = resolveTrustedCustomPortalUrl();
+  const safeCustomPortalUrl = customPortalUrl ? escapeHtml(customPortalUrl) : null;
+
+  const portalHtmlNote = safeCustomPortalUrl
+    ? `<p style="font-size: 13px; color: #475569; margin: 16px 0 0 0;">Portal oficial do evento: <a href="${safeCustomPortalUrl}" style="color: #0f766e;">${safeCustomPortalUrl}</a></p>`
+    : `<p style="font-size: 13px; color: #475569; margin: 16px 0 0 0;">Guarde este e-mail para apresentar seu código no credenciamento e emitir o certificado no portal oficial do evento.</p>`;
+
+  const portalTextNote = customPortalUrl
+    ? `Portal oficial do evento: ${customPortalUrl}`
+    : 'Guarde este e-mail para apresentar seu código no credenciamento e emitir o certificado no portal oficial do evento.';
 
   const bodyHtml = `
 <!DOCTYPE html>
@@ -1084,108 +1106,90 @@ export function buildServerInstitutionalEmail(record: TrustedRegistrationRecord)
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${escapeHtml(subject)}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; line-height: 1.6;">
-  <div style="max-width: 620px; margin: 30px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
-    <div style="background-color: #0a3641; padding: 28px 24px; text-align: center; border-bottom: 4px solid #ea7a38;">
-      <span style="display: inline-block; background-color: rgba(234, 122, 56, 0.2); color: #ea7a38; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 12px; border-radius: 9999px; margin-bottom: 8px;">
-        SUS · Microrregião de Carangola MG
-      </span>
-      <h1 style="color: #ffffff; margin: 0 0 6px 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">
-        1º Simpósio de Saúde Mental
-      </h1>
-      <p style="color: #cbd5e1; margin: 0; font-size: 13px;">
-        Comprovante Oficial de Inscrição e Instruções do Participante
-      </p>
+<body style="margin: 0; padding: 16px; background-color: #f8fafc; font-family: Arial, Helvetica, sans-serif; color: #1e293b; line-height: 1.6;">
+  <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px;">
+    <h1 style="margin: 0 0 4px 0; font-size: 18px; color: #0f172a;">1º Simpósio de Saúde Mental da Microrregião de Carangola</h1>
+    <p style="margin: 0 0 20px 0; font-size: 13px; color: #64748b;">Comprovante de Inscrição</p>
+
+    <p style="font-size: 14px; margin: 0 0 12px 0;">Olá, <strong>${safeName}</strong>.</p>
+    <p style="font-size: 14px; margin: 0 0 18px 0; color: #334155;">
+      Sua inscrição foi confirmada com sucesso. Apresente o código abaixo no credenciamento presencial:
+    </p>
+
+    <div style="margin: 0 0 20px 0; padding: 14px 16px; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; text-align: center;">
+      <div style="font-size: 12px; color: #475569; margin-bottom: 4px;">Número de Participante</div>
+      <div style="font-size: 22px; font-weight: bold; color: #0f172a; font-family: 'Courier New', monospace;">${safeCode}</div>
     </div>
-    <div style="padding: 28px 24px;">
-      <p style="font-size: 15px; margin-top: 0;">Olá, <strong>${safeName}</strong>!</p>
-      <p style="font-size: 14px; color: #334155;">
-        Sua inscrição para o <strong>1º Simpósio de Saúde Mental da Microrregião de Carangola</strong> está registada no banco de dados oficial do evento.
-      </p>
-      <div style="margin: 24px 0; padding: 20px; background-color: #f8fafc; border: 2px solid #028090; border-radius: 12px; text-align: center;">
-        <span style="display: block; font-size: 11px; font-weight: 700; color: #ea7a38; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">
-          Seu Número Oficial de Participante
-        </span>
-        <div style="font-size: 26px; font-weight: 900; color: #0a3641; letter-spacing: 1px; font-family: 'Courier New', monospace;">
-          ${safeCode}
-        </div>
-        <span style="display: inline-block; margin-top: 8px; font-size: 12px; color: #0f766e; background-color: #ccfbf1; padding: 2px 10px; border-radius: 6px; font-weight: 600;">
-          Inscrição Confirmada
-        </span>
-      </div>
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px;">
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 0; color: #64748b; width: 35%;">Município:</td>
-          <td style="padding: 8px 0; font-weight: 600; color: #0f172a;">${safeCity}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 0; color: #64748b;">Função / Ocupação:</td>
-          <td style="padding: 8px 0; font-weight: 600; color: #0f172a;">${safeRole}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 0; color: #64748b;">Instituição:</td>
-          <td style="padding: 8px 0; font-weight: 600; color: #0f172a;">${safeInst}</td>
-        </tr>
-        <tr style="border-bottom: 1px solid #e2e8f0;">
-          <td style="padding: 8px 0; color: #64748b;">Eixo de Interesse:</td>
-          <td style="padding: 8px 0; font-weight: 600; color: #0f172a;">${safeAxis}</td>
-        </tr>
-      </table>
-      <div style="background-color: #fdfaf6; border-left: 4px solid #ea7a38; padding: 14px 16px; border-radius: 0 8px 8px 0; margin-bottom: 24px;">
-        <div style="font-weight: 800; color: #0a3641; font-size: 14px; margin-bottom: 4px;">Informações do Evento</div>
-        <div style="font-size: 13px; color: #475569;">
-          <strong>Data:</strong> 08 de Dezembro de 2026 (Terça-feira)<br />
-          <strong>Horário:</strong> 07h30 às 16h30 (Credenciamento às 07h30)<br />
-          <strong>Local:</strong> UEMG Carangola — Praça Cel. Maximiano, 180, Centro, Carangola - MG
-        </div>
-      </div>
-      <div style="background-color: #ecfeff; border-left: 4px solid #028090; padding: 14px 16px; border-radius: 0 8px 8px 0; margin-bottom: 24px;">
-        <div style="font-weight: 800; color: #0a3641; font-size: 14px; margin-bottom: 4px;">Emissão do Certificado Oficial de 8 Horas</div>
-        <div style="font-size: 13px; color: #475569;">
-          Após sua participação presencial no dia 08/12, acesse o link abaixo e informe seu Número de Participante (<strong>${safeCode}</strong>) para validação e download:
-        </div>
-        <div style="margin-top: 10px;">
-          <a href="${certUrl}" style="display: inline-block; background-color: #028090; color: #ffffff; text-decoration: none; font-size: 12px; font-weight: 700; padding: 8px 16px; border-radius: 8px;">
-            Acessar Validação de Certificado
-          </a>
-        </div>
-      </div>
-      <p style="font-size: 13px; color: #64748b; text-align: center; margin: 20px 0 0 0;">
-        Programação completa: <a href="${scheduleUrl}" style="color: #028090; font-weight: 600;">${scheduleUrl}</a>
-      </p>
-    </div>
-    <div style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px 24px; text-align: center; font-size: 11px; color: #94a3b8;">
-      1º Simpósio de Saúde Mental da Microrregião de Carangola · SUS Carangola MG
-    </div>
+
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;">
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 6px 0; color: #64748b; width: 38%;">Participante:</td>
+        <td style="padding: 6px 0; color: #0f172a;">${safeName}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 6px 0; color: #64748b;">Município:</td>
+        <td style="padding: 6px 0; color: #0f172a;">${safeCity}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 6px 0; color: #64748b;">Função / Ocupação:</td>
+        <td style="padding: 6px 0; color: #0f172a;">${safeRole}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 6px 0; color: #64748b;">Instituição:</td>
+        <td style="padding: 6px 0; color: #0f172a;">${safeInst}</td>
+      </tr>
+      <tr style="border-bottom: 1px solid #e2e8f0;">
+        <td style="padding: 6px 0; color: #64748b;">Eixo de Interesse:</td>
+        <td style="padding: 6px 0; color: #0f172a;">${safeAxis}</td>
+      </tr>
+    </table>
+
+    <p style="font-size: 13px; margin: 0 0 12px 0; color: #334155;">
+      <strong>Data:</strong> 08 de Dezembro de 2026 (Terça-feira)<br />
+      <strong>Horário:</strong> 07h30 às 16h30 (Credenciamento às 07h30)<br />
+      <strong>Local:</strong> UEMG Carangola — Praça Cel. Maximiano, 180, Centro, Carangola - MG
+    </p>
+
+    <p style="font-size: 13px; margin: 0; color: #334155;">
+      <strong>Certificado (8 horas):</strong> Após sua participação presencial em 08/12/2026 (a partir das 16h30), acesse a aba Certificado no portal oficial do simpósio e informe o código <strong>${safeCode}</strong>.
+    </p>
+    ${portalHtmlNote}
+
+    <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0 12px 0;" />
+    <p style="margin: 0; font-size: 11px; color: #64748b;">
+      Comissão Organizadora — 1º Simpósio de Saúde Mental da Microrregião de Carangola (MG). Esta é uma confirmação automática da sua inscrição.
+    </p>
   </div>
 </body>
 </html>`.trim();
 
   const bodyText = [
-    '1º Simpósio de Saúde Mental da Microrregião de Carangola - SUS',
-    'Comprovante Oficial de Inscrição',
+    '1º Simpósio de Saúde Mental da Microrregião de Carangola',
+    'Comprovante de Inscrição',
     '',
-    `Olá, ${record.fullName}!`,
+    `Olá, ${record.fullName}.`,
     '',
-    `NÚMERO DE PARTICIPANTE: ${record.code}`,
-    '(Apresente este código no credenciamento em 08/12/2026 às 07h30)',
+    `Número de Participante: ${record.code}`,
+    '(Apresente este código no credenciamento presencial em 08/12/2026 às 07h30)',
     '',
-    'DADOS DA INSCRIÇÃO:',
+    'Dados da Inscrição:',
     `- Participante: ${record.fullName}`,
     `- Município: ${record.city}`,
     `- Função/Ocupação: ${record.professionalRole}`,
     `- Instituição: ${record.institution}`,
     `- Eixo: ${record.axisInterest}`,
     '',
-    'LOCAL E DATA:',
+    'Local e Data:',
     '- Data: 08 de Dezembro de 2026 (Terça-feira)',
-    '- Horário: 07h30 às 16h30',
+    '- Horário: 07h30 às 16h30 (Credenciamento às 07h30)',
     '- Local: UEMG Carangola (Praça Cel. Maximiano, 180, Centro, Carangola - MG)',
     '',
-    'CERTIFICADO OFICIAL (8 HORAS):',
-    `Após o evento, acesse ${certUrl} e informe seu código ${record.code}.`,
+    'Certificado (8 horas):',
+    `Após sua participação presencial em 08/12/2026 (a partir das 16h30), acesse a aba Certificado no portal oficial do simpósio e informe o código ${record.code}.`,
     '',
-    `Programação completa: ${scheduleUrl}`
+    portalTextNote,
+    '',
+    'Comissão Organizadora — 1º Simpósio de Saúde Mental da Microrregião de Carangola (MG).'
   ].join('\n');
 
   return { subject, bodyText, bodyHtml };
@@ -1435,17 +1439,33 @@ export default async function handler(req: ExtendedRequest, res: ExtendedRespons
         return await transporter.sendMail(mailOpts);
       });
 
+    const fromAddress =
+      process.env.SMTP_FROM && isValidSingleRecipientEmail(process.env.SMTP_FROM)
+        ? process.env.SMTP_FROM.trim()
+        : smtpUser;
+    const replyToAddress =
+      process.env.SMTP_REPLY_TO && isValidSingleRecipientEmail(process.env.SMTP_REPLY_TO)
+        ? process.env.SMTP_REPLY_TO.trim()
+        : fromAddress;
+    const fromName = (
+      process.env.SMTP_FROM_NAME || '1º Simpósio de Saúde Mental de Carangola'
+    ).trim();
+
     const info = await sendFn({
       from: {
-        name: '1º Simpósio de Saúde Mental - SUS Carangola',
-        address: smtpUser
+        name: fromName,
+        address: fromAddress
       },
       to: trustedRecord.email,
-      replyTo: smtpUser,
+      replyTo: replyToAddress,
       subject,
       text: bodyText,
       html: bodyHtml,
-      encoding: 'utf-8'
+      encoding: 'utf-8',
+      headers: {
+        'Auto-Submitted': 'auto-generated',
+        'X-Auto-Response-Suppress': 'OOF, AutoReply'
+      }
     });
 
     const hasAccepted =
