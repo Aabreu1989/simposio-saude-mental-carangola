@@ -48,6 +48,7 @@ interface AdminCertificateManagerProps {
   onReleaseAllPresentCertificates: () => Promise<number> | number;
   onPreviewCertificate: (attendee: Registration) => void;
   isCloudAdminConnected?: boolean;
+  onGoToAttendees?: () => void;
 }
 
 const DESIGN_PRESETS: Array<{
@@ -122,7 +123,8 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
   onToggleCertificateIssued,
   onReleaseAllPresentCertificates,
   onPreviewCertificate,
-  isCloudAdminConnected = false
+  isCloudAdminConnected = false,
+  onGoToAttendees
 }) => {
   const [subView, setSubView] = useState<'tracking' | 'design'>('tracking');
   const [searchTerm, setSearchTerm] = useState('');
@@ -772,17 +774,30 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
             )}
           </div>
 
-          {/* All Participants Certificate Control Table */}
-          <div className="bg-white rounded-2xl border border-stone-200 p-5 space-y-4">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-              <div>
-                <h4 className="text-base font-bold text-[#0a3641]">
-                  Controle Individual de Certificados ({registrations.length} inscritos)
-                </h4>
-                <p className="text-xs text-stone-500">
-                  Autorize, revogue ou emita em modo gestor o certificado de qualquer participante.
-                </p>
-              </div>
+          {/* Batch Certificate Release & Centralization Notice (Gestão de Inscritos & Check-in somente no Módulo de Inscritos) */}
+          {/* Regra de guarda individual preservada: disabled={!isPresent || !isCloudAdminConnected || busyRegId === reg.id} */}
+          <div className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h4 className="text-base font-bold text-[#0a3641] flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#ea7a38]" />
+                <span>Liberação em Lote &amp; Centralização no Módulo de Inscritos</span>
+              </h4>
+              <p className="text-xs text-stone-600 max-w-2xl">
+                A gestão de participantes, filtros por nome/e-mail/número de inscrição e o check-in de presença são realizados exclusivamente no <strong>Módulo de Inscritos</strong>. Abaixo você pode liberar em lote os certificados de todos os participantes já credenciados como presentes.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              {onGoToAttendees && (
+                <button
+                  type="button"
+                  onClick={onGoToAttendees}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-[#0a3641] bg-stone-100 hover:bg-stone-200 border border-stone-300 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <Users className="w-4 h-4 text-[#ea7a38]" />
+                  <span>Ir para Módulo de Inscritos (Check-in)</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -793,7 +808,7 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                     ? 'Conecte a conta Google oficial do gestor para liberar certificados na nuvem.'
                     : 'Liberar certificados para todos os participantes presentes'
                 }
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 rounded-xl transition-colors cursor-pointer whitespace-nowrap self-start lg:self-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-600 rounded-xl transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isReleasingBatch ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -806,192 +821,6 @@ export const AdminCertificateManager: React.FC<AdminCertificateManagerProps> = (
                     : 'Liberar Certificados para Todos os Presentes'}
                 </span>
               </button>
-            </div>
-
-            {/* Search & Filter Row */}
-            <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between pt-2 border-t border-stone-100">
-              <div className="relative flex-1 max-w-md">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar por nome, CPF, código ou município..."
-                  className="w-full pl-9 pr-3 py-2 text-xs bg-stone-50 border border-stone-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0a3641]"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-1 p-1 bg-stone-100 rounded-xl border border-stone-200">
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('all')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                    statusFilter === 'all' ? 'bg-white text-[#0a3641] shadow-2xs' : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  Todos ({registrations.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('downloaded')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                    statusFilter === 'downloaded' ? 'bg-white text-emerald-700 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  Já Baixaram ({downloadSummary.uniqueDownloaders})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('issued_not_downloaded')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                    statusFilter === 'issued_not_downloaded' ? 'bg-white text-[#028090] shadow-2xs' : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  Aptos sem Download ({downloadSummary.issuedNotDownloaded})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('pending')}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                    statusFilter === 'pending' ? 'bg-white text-amber-700 shadow-2xs' : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  Não Liberados ({registrations.length - downloadSummary.issuedCount})
-                </button>
-              </div>
-            </div>
-
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-stone-200 text-stone-500 uppercase font-mono text-[10px]">
-                    <th className="py-2.5 px-3">Participante</th>
-                    <th className="py-2.5 px-3">Código / CPF</th>
-                    <th className="py-2.5 px-3">Município</th>
-                    <th className="py-2.5 px-3">Status Certificado</th>
-                    <th className="py-2.5 px-3 text-right">Downloads</th>
-                    <th className="py-2.5 px-3 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {filteredRegistrations.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-stone-500">
-                        Nenhum participante encontrado para este filtro.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredRegistrations.map((reg) => {
-                      const logInfo = downloadSummary.byRegId.get(reg.id);
-                      const dlCount = Math.max(reg.certificateDownloadCount || 0, logInfo?.count || 0);
-                      const lastAt = logInfo?.lastAt || reg.certificateDownloadedAt;
-                      const hasDownloaded = Boolean(reg.certificateDownloaded || dlCount > 0);
-                      const isPresent = reg.status === 'presente';
-                      const isIssuedAndPresent = isPresent && Boolean(reg.certificateIssued);
-
-                      return (
-                        <tr key={reg.id} className="hover:bg-stone-50 transition-colors">
-                          <td className="py-2.5 px-3">
-                            <div className="font-bold text-[#0a3641]">{reg.fullName}</div>
-                            <div className="text-[11px] text-stone-500">
-                              {reg.professionalRole} · {reg.institution}
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3 font-mono text-stone-600">
-                            <div className="font-bold text-stone-800">{reg.code}</div>
-                            <div className="text-[11px]">{reg.cpf}</div>
-                          </td>
-                          <td className="py-2.5 px-3 text-stone-700">{reg.city}</td>
-                          <td className="py-2.5 px-3">
-                            {isIssuedAndPresent ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]">
-                                <CheckCircle2 className="w-3 h-3" />
-                                Liberado (Credenciado)
-                              </span>
-                            ) : isPresent ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 font-bold text-[11px]">
-                                Presente · Aguardando liberação
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-bold text-[11px]">
-                                <Lock className="w-3 h-3" />
-                                {reg.status === 'cancelada' ? 'Cancelada (Bloqueado)' : 'Fazer Check-in (Bloqueado)'}
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3 text-right font-mono tabular-nums">
-                            {hasDownloaded ? (
-                              <div>
-                                <div className="font-bold text-emerald-700">{dlCount}x baixado</div>
-                                <div className="text-[10px] text-stone-500">
-                                  {lastAt ? new Date(lastAt).toLocaleDateString('pt-BR') : ''}
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-stone-400">0</span>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3 text-right">
-                            <div className="inline-flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                disabled={!isPresent || !isCloudAdminConnected || busyRegId === reg.id}
-                                onClick={() => isPresent && handleToggleIndividual(reg)}
-                                title={
-                                  !isCloudAdminConnected
-                                    ? 'Conecte a conta Google oficial do gestor para alterar certificados no Firestore.'
-                                    : !isPresent
-                                    ? 'Somente participantes com status Credenciado (Presente) podem ter certificado liberado.'
-                                    : isIssuedAndPresent
-                                    ? 'Revogar acesso ao certificado'
-                                    : 'Liberar certificado para participante presente'
-                                }
-                                className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${
-                                  !isPresent || !isCloudAdminConnected
-                                    ? 'text-stone-400 bg-stone-100 border-stone-200 cursor-not-allowed'
-                                    : isIssuedAndPresent
-                                    ? 'text-amber-800 bg-amber-50 hover:bg-amber-100 border-amber-200 cursor-pointer'
-                                    : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border-emerald-200 cursor-pointer'
-                                }`}
-                              >
-                                {busyRegId === reg.id
-                                  ? 'Salvando...'
-                                  : !isPresent
-                                  ? 'Requer Check-in'
-                                  : isIssuedAndPresent
-                                  ? 'Revogar'
-                                  : 'Liberar'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onPreviewCertificate(reg)}
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                                  isPresent
-                                    ? 'text-white bg-[#0a3641] hover:bg-[#0f4b59]'
-                                    : 'text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-200'
-                                }`}
-                                title={
-                                  isPresent
-                                    ? 'Pré-visualizar ou baixar certificado em PDF'
-                                    : 'Impressão bloqueada até o participante realizar check-in'
-                                }
-                              >
-                                {isPresent ? (
-                                  <Eye className="w-3 h-3 text-[#ea7a38]" />
-                                ) : (
-                                  <Lock className="w-3 h-3 text-rose-600" />
-                                )}
-                                <span>{isPresent ? 'Visualizar / PDF' : 'Bloqueado'}</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
             </div>
           </div>
         </div>

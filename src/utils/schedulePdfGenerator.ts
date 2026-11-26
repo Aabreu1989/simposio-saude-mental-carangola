@@ -564,13 +564,13 @@ export const generateScheduleHTML = (
 
             ${session.speakers && session.speakers.length > 0 ? `
               <div class="speakers-container">
-                <div class="speakers-heading">Palestrantes e Debatedores Convidados:</div>
+                <div class="speakers-heading">${session.type === 'abertura' ? 'Composição da Mesa de Abertura:' : 'Palestrantes e Debatedores Convidados:'}</div>
                 <div class="speakers-grid">
                   ${session.speakers.map(s => `
                     <div class="speaker-item">
                       <span class="speaker-name">${s.name}</span>
-                      <span class="speaker-role"> · ${s.role}</span>
-                      <div class="speaker-inst">${s.institution}</div>
+                      ${s.role ? `<span class="speaker-role"> · ${s.role}</span>` : ''}
+                      ${s.institution ? `<div class="speaker-inst">${s.institution}</div>` : ''}
                     </div>
                   `).join('')}
                 </div>

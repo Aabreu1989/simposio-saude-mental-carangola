@@ -18,6 +18,7 @@ const STORAGE_KEYS = {
   DELETED_MATERIALS: 'carangola_sm_deleted_materials',
   DELETED_REGISTRATIONS: 'carangola_sm_deleted_registrations',
   DELETED_POSTS: 'carangola_sm_deleted_posts',
+  DELETED_SPEAKERS: 'carangola_sm_deleted_speakers',
   SPEAKERS: 'carangola_sm_speakers'
 };
 
@@ -114,6 +115,51 @@ export const addDeletedPostId = (id: string): void => {
     broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_POSTS);
   } catch (err) {
     console.error('Error persisting deleted post id:', err);
+  }
+};
+
+export const getDeletedSpeakerIds = (): Set<string> => {
+  try {
+    if (typeof localStorage === 'undefined') return new Set<string>();
+    const raw = localStorage.getItem(STORAGE_KEYS.DELETED_SPEAKERS);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set<string>(
+      Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string' && id.trim().length > 0) : []
+    );
+  } catch {
+    return new Set<string>();
+  }
+};
+
+export const setDeletedSpeakerIds = (ids: Iterable<string>): void => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const cleaned = Array.from(
+      new Set(
+        Array.from(ids).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      )
+    );
+    localStorage.setItem(STORAGE_KEYS.DELETED_SPEAKERS, JSON.stringify(cleaned));
+    broadcastRealtimeUpdate(STORAGE_KEYS.DELETED_SPEAKERS);
+  } catch (err) {
+    console.error('Error persisting deleted speaker ids:', err);
+  }
+};
+
+export const addDeletedSpeakerId = (id: string): void => {
+  const cleanId = (id || '').trim();
+  if (!cleanId) return;
+  const set = getDeletedSpeakerIds();
+  set.add(cleanId);
+  setDeletedSpeakerIds(set);
+};
+
+export const removeDeletedSpeakerId = (id: string): void => {
+  const cleanId = (id || '').trim();
+  if (!cleanId) return;
+  const set = getDeletedSpeakerIds();
+  if (set.delete(cleanId)) {
+    setDeletedSpeakerIds(set);
   }
 };
 
@@ -278,7 +324,8 @@ export const loadStoredData = () => {
   ).filter((n) => n && !LEGACY_NOTIF_IDS.has(n.id));
 
   const rawStoredSpeakers = getItem<SpeakerProfile[]>(STORAGE_KEYS.SPEAKERS, SPEAKERS_PROFILES);
-  const syncedSpeakers = mergeSpeakersWithDefaults(rawStoredSpeakers);
+  const deletedSpeakerIds = getDeletedSpeakerIds();
+  const syncedSpeakers = mergeSpeakersWithDefaults(rawStoredSpeakers, [], deletedSpeakerIds);
 
   const LEGACY_FAKE_SUB_IDS = new Set(['sub-1', 'sub-2', 'sub-3', 'sub-4']);
   const loadedSubscribers = getItem<NewsletterSubscriber[]>(
@@ -325,19 +372,35 @@ export const broadcastRealtimeUpdate = (key: string): boolean => {
 
 export const mergeSpeakersWithDefaults = (
   incomingList: SpeakerProfile[],
-  currentList: SpeakerProfile[] = []
+  currentList: SpeakerProfile[] = [],
+  deletedIds?: Set<string>,
+  options?: { authoritativeRemote?: boolean }
 ): SpeakerProfile[] => {
+  const effectiveDeleted = new Set<string>(deletedIds ?? getDeletedSpeakerIds());
+  const isAuthoritativeRemote = Boolean(options?.authoritativeRemote);
+
+  const isDeletedSpeakerDoc = (s?: (SpeakerProfile & { deleted?: boolean }) | null): boolean =>
+    Boolean(s && (s.deleted === true || (s.id && effectiveDeleted.has(s.id))));
+
+  (incomingList || []).forEach((s) => {
+    if (s && s.id && (s as SpeakerProfile & { deleted?: boolean }).deleted === true) {
+      effectiveDeleted.add(s.id);
+    }
+  });
+
   const currentMap = new Map<string, SpeakerProfile>();
   (currentList || []).forEach((s) => {
-    if (s && s.id) currentMap.set(s.id, s);
+    if (s && s.id && !isDeletedSpeakerDoc(s)) currentMap.set(s.id, s);
   });
 
   const incomingMap = new Map<string, SpeakerProfile>();
   (incomingList || []).forEach((s) => {
-    if (s && s.id) incomingMap.set(s.id, s);
+    if (s && s.id && !isDeletedSpeakerDoc(s)) incomingMap.set(s.id, s);
   });
 
-  const mergedOfficials = SPEAKERS_PROFILES.map((official) => {
+  const mergedOfficials = SPEAKERS_PROFILES
+    .filter((official) => !effectiveDeleted.has(official.id))
+    .map((official) => {
     const current = currentMap.get(official.id);
     const incoming = incomingMap.get(official.id);
 
@@ -388,9 +451,21 @@ export const mergeSpeakersWithDefaults = (
     const isLegacyCristiana = official.id === 'spk-cristiana-marina' && (
       !incoming?.name || incoming.name === 'Cristiana Marina Souza'
     );
+    const isPlaceholderRole = (val?: string) =>
+      !val || val.trim() === '' || (val.trim() === 'Mesa de Abertura' && official.role !== 'Mesa de Abertura');
+    const isPlaceholderInstitution = (val?: string) =>
+      !val || val.trim() === '' || (val.trim() === 'Abertura Oficial' && official.institution !== 'Abertura Oficial');
     const name = isLegacyCristiana ? official.name : (incoming?.name || current?.name || official.name);
-    const role = isLegacyCristiana ? official.role : (incoming?.role || current?.role || official.role);
-    const institution = isLegacyCristiana ? official.institution : (incoming?.institution || current?.institution || official.institution);
+    const role = isLegacyCristiana
+      ? official.role
+      : (!isPlaceholderRole(incoming?.role)
+          ? incoming!.role
+          : (!isPlaceholderRole(current?.role) ? current!.role : official.role));
+    const institution = isLegacyCristiana
+      ? official.institution
+      : (!isPlaceholderInstitution(incoming?.institution)
+          ? incoming!.institution
+          : (!isPlaceholderInstitution(current?.institution) ? current!.institution : official.institution));
     const sessionGroup = incoming?.sessionGroup || current?.sessionGroup || official.sessionGroup;
     const sessionLabel = incoming?.sessionLabel || current?.sessionLabel || official.sessionLabel;
     const sessionTime = incoming?.sessionTime || current?.sessionTime || official.sessionTime;
@@ -418,15 +493,18 @@ export const mergeSpeakersWithDefaults = (
   const officialIdSet = new Set(SPEAKERS_PROFILES.map((s) => s.id));
   const customMap = new Map<string, SpeakerProfile>();
 
-  (currentList || []).forEach((s) => {
-    if (s && s.id && !officialIdSet.has(s.id)) {
-      customMap.set(s.id, s);
-    }
-  });
+  // Em snapshots remotos autoritativos do Firestore, palestrantes customizados ausentes no servidor foram excluídos e NÃO podem ressuscitar de currentList.
+  if (!isAuthoritativeRemote) {
+    (currentList || []).forEach((s) => {
+      if (s && s.id && !officialIdSet.has(s.id) && !isDeletedSpeakerDoc(s)) {
+        customMap.set(s.id, s);
+      }
+    });
+  }
 
   (incomingList || []).forEach((incoming) => {
-    if (incoming && incoming.id && !officialIdSet.has(incoming.id)) {
-      const current = customMap.get(incoming.id);
+    if (incoming && incoming.id && !officialIdSet.has(incoming.id) && !isDeletedSpeakerDoc(incoming)) {
+      const current = customMap.get(incoming.id) || currentMap.get(incoming.id);
       if (!current) {
         customMap.set(incoming.id, incoming);
       } else {
@@ -1373,17 +1451,17 @@ export const escapeIcsText = (str: string): string => {
 };
 
 export const getCalendarEventData = (config: EventConfig) => {
-  // Event: 08 de Dezembro de 2026, 08:30 às 16:00 BRT (UTC-3)
-  // In UTC: 2026-12-08 11:30:00 to 19:00:00 UTC
+  // Event: 08 de Dezembro de 2026, 07:30 às 16:30 BRT (UTC-3)
+  // In UTC: 2026-12-08 10:30:00 to 19:30:00 UTC
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   return {
     title: `${config.editionTitle} ${config.regionTitle}`,
     description: `${config.subtitle}\n\nEixos Temáticos Estratégicos:\n1. Fluxograma da RAPS (Atenção Básica & CAPS)\n2. Hospital Geral, Leitos de Retaguarda e Urgência\n3. Judicialização da Saúde Mental e Cuidado em Liberdade\n\nCertificado oficial SUS de 8 horas.\nLocal: ${config.locationName} - ${config.locationAddress}\nMais informações e inscrições: ${origin}`,
     location: `${config.locationName}, ${config.locationAddress}`,
-    startUtc: '20261208T113000Z',
-    endUtc: '20261208T190000Z',
-    startIsoLocal: '2026-12-08T08:30:00',
-    endIsoLocal: '2026-12-08T16:00:00'
+    startUtc: '20261208T103000Z',
+    endUtc: '20261208T193000Z',
+    startIsoLocal: '2026-12-08T07:30:00',
+    endIsoLocal: '2026-12-08T16:30:00'
   };
 };
 

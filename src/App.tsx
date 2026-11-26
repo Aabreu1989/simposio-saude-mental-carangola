@@ -34,6 +34,10 @@ import {
   addDeletedRegistrationId,
   getDeletedPostIds,
   addDeletedPostId,
+  getDeletedSpeakerIds,
+  setDeletedSpeakerIds,
+  addDeletedSpeakerId,
+  removeDeletedSpeakerId,
   broadcastRealtimeUpdate,
   mergeSpeakersWithDefaults,
   INVENTED_POST_IDS,
@@ -397,14 +401,24 @@ export default function App() {
         });
     });
 
-    const unsubSpeakers = subscribeSpeakers((remoteSpeakers) => {
-      if (remoteSpeakers && remoteSpeakers.length > 0) {
-        setSpeakers((currentSpeakers) => {
-          const merged = mergeSpeakersWithDefaults(remoteSpeakers, currentSpeakers);
-          saveSpeakersToStorage(merged);
-          return merged;
-        });
+    const unsubSpeakers = subscribeSpeakers((remoteSpeakers, meta) => {
+      const remoteDeleted = new Set<string>(meta?.deletedIds || []);
+      const effectiveDeleted = meta?.isAuthoritative
+        ? remoteDeleted
+        : new Set<string>([...getDeletedSpeakerIds(), ...remoteDeleted]);
+      if (meta?.isAuthoritative) {
+        setDeletedSpeakerIds(effectiveDeleted);
       }
+      setSpeakers((currentSpeakers) => {
+        const merged = mergeSpeakersWithDefaults(
+          remoteSpeakers || [],
+          currentSpeakers,
+          effectiveDeleted,
+          { authoritativeRemote: Boolean(meta?.isAuthoritative) }
+        );
+        saveSpeakersToStorage(merged);
+        return merged;
+      });
     });
 
     const unsubPosts = subscribeSocialPosts((remotePosts, meta) => {
@@ -871,7 +885,13 @@ export default function App() {
       if (!changedKey || changedKey === STORAGE_KEYS.OFFLINE_QUEUE) setOfflineQueue(fresh.offlineQueue);
       if (!changedKey || changedKey === STORAGE_KEYS.LAST_REGISTERED) setLastRegistered(fresh.lastRegistered);
       if (!changedKey || changedKey === STORAGE_KEYS.CERT_DOWNLOADS) setCertificateDownloads(fresh.certificateDownloads);
-      if (!changedKey || changedKey === STORAGE_KEYS.SPEAKERS) setSpeakers(fresh.speakers);
+      if (
+        !changedKey ||
+        changedKey === STORAGE_KEYS.SPEAKERS ||
+        changedKey === STORAGE_KEYS.DELETED_SPEAKERS
+      ) {
+        setSpeakers(fresh.speakers);
+      }
     };
 
     const handleStorageEvent = (e: StorageEvent) => {
@@ -1701,55 +1721,43 @@ export default function App() {
     }
   };
 
-  // Speakers Handlers (fully editable in Admin Dashboard)
-  const handleUpdateSpeaker = (updated: SpeakerProfile) => {
+  // Speakers Handlers (remote-first: confirma no Firestore antes de atualizar estado local e sem ressurreição)
+  const handleUpdateSpeaker = async (updated: SpeakerProfile): Promise<void> => {
+    await saveSpeakerToDb(updated);
+    removeDeletedSpeakerId(updated.id);
     setSpeakers((prev) => {
       const exists = prev.some((s) => s.id === updated.id);
       const next = exists ? prev.map((s) => (s.id === updated.id ? updated : s)) : [...prev, updated];
       saveSpeakersToStorage(next);
       return next;
     });
-    if (isVerifiedAdminUser(firebaseUser)) {
-      saveSpeakerToDb(updated).catch((err) => {
-        console.warn('Aviso ao persistir palestrante no Firestore:', err);
-      });
-    }
   };
 
-  const handleAddSpeaker = (newSpeaker: SpeakerProfile) => {
+  const handleAddSpeaker = async (newSpeaker: SpeakerProfile): Promise<void> => {
+    await saveSpeakerToDb(newSpeaker);
+    removeDeletedSpeakerId(newSpeaker.id);
     setSpeakers((prev) => {
-      const next = [...prev, newSpeaker];
+      const next = [...prev.filter((s) => s.id !== newSpeaker.id), newSpeaker];
       saveSpeakersToStorage(next);
       return next;
     });
-    if (isVerifiedAdminUser(firebaseUser)) {
-      saveSpeakerToDb(newSpeaker).catch((err) => {
-        console.warn('Aviso ao cadastrar palestrante no Firestore:', err);
-      });
-    }
   };
 
-  const handleDeleteSpeaker = (speakerId: string) => {
+  const handleDeleteSpeaker = async (speakerId: string): Promise<void> => {
+    await deleteSpeakerInDb(speakerId);
+    addDeletedSpeakerId(speakerId);
     setSpeakers((prev) => {
       const next = prev.filter((s) => s.id !== speakerId);
       saveSpeakersToStorage(next);
       return next;
     });
-    if (isVerifiedAdminUser(firebaseUser)) {
-      deleteSpeakerInDb(speakerId).catch((err) => {
-        console.warn('Aviso ao excluir palestrante do Firestore:', err);
-      });
-    }
   };
 
-  const handleResetSpeakers = () => {
+  const handleResetSpeakers = async (): Promise<void> => {
+    await saveAllSpeakersToDb(SPEAKERS_PROFILES);
+    setDeletedSpeakerIds([]);
     setSpeakers(SPEAKERS_PROFILES);
     saveSpeakersToStorage(SPEAKERS_PROFILES);
-    if (isVerifiedAdminUser(firebaseUser)) {
-      saveAllSpeakersToDb(SPEAKERS_PROFILES).catch((err) => {
-        console.warn('Aviso ao restaurar palestrantes no Firestore:', err);
-      });
-    }
   };
 
   const handleShareEvent = () => {

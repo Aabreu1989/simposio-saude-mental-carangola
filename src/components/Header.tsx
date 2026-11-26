@@ -442,7 +442,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <Users className="w-4 h-4" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-stone-900 group-hover:text-[#028090] leading-snug break-words">Palestrantes e Mediadores</div>
+                    <div className="text-stone-900 group-hover:text-[#028090] leading-snug break-words">Mesa de Abertura, Palestrantes e Mediadores</div>
                     <div className="text-[11px] text-stone-500 font-normal leading-snug break-words">Mini-bios, redes sociais e PDF completo</div>
                   </div>
                 </button>

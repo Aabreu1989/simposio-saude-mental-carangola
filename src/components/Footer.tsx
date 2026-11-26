@@ -131,7 +131,7 @@ export const Footer: React.FC<FooterProps> = ({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
               <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
                 <img
                   src="/assets/logo-caps-1.jpg"
@@ -156,7 +156,7 @@ export const Footer: React.FC<FooterProps> = ({
                 </span>
               </div>
 
-              <div className="col-span-2 w-[calc(50%-0.25rem)] justify-self-center sm:col-span-1 sm:w-full bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
                 <img
                   src="/assets/logo-caps-ij.png"
                   alt="CAPS Infanto Juvenil Tucurupi"
@@ -165,6 +165,22 @@ export const Footer: React.FC<FooterProps> = ({
                 />
                 <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
                   CAPS Infanto Juvenil
+                </span>
+              </div>
+
+              <div className="bg-[#07242c] rounded-xl px-2 py-1.5 border border-white/10 flex flex-col items-center justify-center gap-1 min-h-[76px] md:h-20">
+                <div className="h-9 sm:h-10 w-full flex items-center justify-center">
+                  <div className="bg-white rounded-md px-2 py-0.5 inline-flex items-center justify-center max-w-full max-h-full">
+                    <img
+                      src="/assets/logo-caps-ad-ataru.png"
+                      alt="CAPS AD Ataru - Centro de Atenção Psicossocial Álcool e Outras Drogas"
+                      loading="lazy"
+                      className="h-8 sm:h-9 w-auto max-w-full object-contain"
+                    />
+                  </div>
+                </div>
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wide text-stone-200 text-center leading-tight">
+                  CAPS AD Ataru
                 </span>
               </div>
             </div>

@@ -142,8 +142,8 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     speakers: [
       {
         name: 'Silas Vieira',
-        role: 'Mesa de Abertura',
-        institution: ''
+        role: 'Prefeito de Carangola',
+        institution: 'Prefeitura Municipal de Carangola'
       },
       {
         name: 'Gisella Loiola Consensa',
@@ -151,8 +151,8 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
         institution: ''
       },
       {
-        name: 'Camila Lima',
-        role: 'Mesa de Abertura',
+        name: 'Camila Oliveira Carneiro Lima',
+        role: 'Superintendente de Saúde Mental',
         institution: ''
       },
       {
@@ -201,8 +201,8 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
     axisId: 'eixo-1',
     location: 'Auditório UEMG Carangola',
     mediator: {
-      name: 'Camila Lima',
-      role: 'Mediadora',
+      name: 'Camila Oliveira Carneiro Lima',
+      role: 'Mediadora · Superintendente de Saúde Mental',
       institution: 'Mesa 1 · Fluxograma'
     },
     speakers: [
@@ -280,6 +280,11 @@ export const INITIAL_SCHEDULE: ScheduleSession[] = [
         name: 'Gisele de Souza Gomes',
         role: 'Assistente Social',
         institution: 'UFJF · CAPS I Carangola'
+      },
+      {
+        name: 'Thaiz Borges Muniz',
+        role: 'Médica pós-graduada em Psiquiatria',
+        institution: 'CAPS I de Espera Feliz'
       },
       {
         name: 'Juliana',
@@ -777,15 +782,15 @@ export const isRemovedSpeaker = (speaker?: { id?: string; name?: string } | null
 export const SPEAKERS_PROFILES: SpeakerProfile[] = [
   {
     id: 'spk-camila-lima',
-    name: 'Camila Lima',
-    role: 'Mediadora',
-    institution: 'Mesa 1 · Fluxograma',
+    name: 'Camila Oliveira Carneiro Lima',
+    role: 'Mediadora · Superintendente de Saúde Mental',
+    institution: 'Superintendência de Saúde Mental de Carangola/MG',
     sessionGroup: 'mesa-1',
-    sessionLabel: 'Mesa 1 · Fluxograma',
+    sessionLabel: 'Mesa de Abertura & Mesa 1 · Fluxograma',
     sessionTime: '09:30 – 11:30',
     photoUrl: 'https://lh3.googleusercontent.com/d/1qPmMioljImchVKsJXMxcdD2DtBR-F5ea',
     photoPosition: 'center 18%',
-    bio: '',
+    bio: 'Fisioterapeuta, atuou por aproximadamente 25 anos na APAE de Carangola como fisioterapeuta e coordenadora técnica, adquirindo ampla experiência na reabilitação da pessoa com deficiência e na gestão de serviços de saúde e assistência social.\n\nAtualmente, exerce o cargo de Superintendente de Saúde Mental do município de Carangola/MG, atuando na gestão, articulação e fortalecimento da Rede de Atenção Psicossocial (RAPS).\n\nSua trajetória profissional é pautada na defesa dos direitos, na inclusão social, na humanização da assistência e no fortalecimento das políticas públicas, com ênfase no cuidado integral e em liberdade.',
     socials: {
       instagram: '@saudemental.carangola',
       instagramUrl: 'https://www.instagram.com/saudemental.carangola'
@@ -900,6 +905,19 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     socials: {}
   },
   {
+    id: 'spk-thaiz-muniz',
+    name: 'Thaiz Borges Muniz',
+    role: 'Médica pós-graduada em Psiquiatria',
+    institution: 'CAPS I de Espera Feliz',
+    sessionGroup: 'mesa-2',
+    sessionLabel: 'Mesa 2 · Hospital Geral e Urgência',
+    sessionTime: '13:30 – 14:30',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1qkNyD_b9Iry8NAkEijMPnh0m-9DrK07m',
+    photoPosition: 'center 18%',
+    bio: 'Médica pós-graduada em Psiquiatria, atua no CAPS I de Espera Feliz e tem experiência em CAPS AD III, assistência horizontal em leitos psiquiátricos e pronto atendimento psiquiátrico.\n\n“Acredito na horizontalidade do cuidado e em uma psiquiatria que reconhece que, antes do diagnóstico, existe uma pessoa e, depois dele, também.”',
+    socials: {}
+  },
+  {
     id: 'spk-juliana-grs',
     name: 'Juliana',
     role: 'Debatedora',
@@ -953,6 +971,19 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
     socials: {}
   },
   {
+    id: 'spk-silas-vieira',
+    name: 'Silas Vieira',
+    role: 'Prefeito de Carangola',
+    institution: 'Prefeitura Municipal de Carangola',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Mesa de Abertura',
+    sessionTime: '08:30 – 09:15',
+    photoUrl: 'https://lh3.googleusercontent.com/d/1NUTyyts48jDgoeI4hvSXepMzCsg_cOx_',
+    photoPosition: 'center 18%',
+    bio: 'Empresário, foi eleito Prefeito pelo Partido REPUBLICANOS na coligação UNINDO CAMINHOS E ESPERANÇAS obtendo no pleito de 2020, 5.498 votos. Natural de Carangola, mais precisamente na Serra do Papagaio, Silas Vieira nasceu em 23/09/1954. É casado com Maria de Fátima Brinati Vieira. Pai de 2 filhos e vovô apaixonado de um casal de netos.',
+    socials: {}
+  },
+  {
     id: 'spk-gisella-consensa',
     name: 'Gisella Loiola Consensa',
     role: 'Secretária Municipal de Saúde',
@@ -969,6 +1000,61 @@ export const SPEAKERS_PROFILES: SpeakerProfile[] = [
       linkedin: 'Secretaria Municipal de Saúde · Carangola',
       linkedinUrl: 'https://www.linkedin.com/'
     }
+  },
+  {
+    id: 'spk-camila-andrade',
+    name: 'Camila Andrade',
+    role: 'Mesa de Abertura',
+    institution: 'Abertura Oficial',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Mesa de Abertura',
+    sessionTime: '08:30 – 09:15',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-ludmila',
+    name: 'Ludmila',
+    role: 'Mesa de Abertura',
+    institution: 'Abertura Oficial',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Mesa de Abertura',
+    sessionTime: '08:30 – 09:15',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-representante-camara',
+    name: 'Representante da Câmara',
+    role: 'Mesa de Abertura',
+    institution: 'Câmara Municipal de Carangola',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Mesa de Abertura',
+    sessionTime: '08:30 – 09:15',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-dr-breno',
+    name: 'Dr. Breno',
+    role: 'Mesa de Abertura',
+    institution: 'Abertura Oficial',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Mesa de Abertura',
+    sessionTime: '08:30 – 09:15',
+    bio: '',
+    socials: {}
+  },
+  {
+    id: 'spk-dra-patricia',
+    name: 'Dra. Patrícia',
+    role: 'Mesa de Abertura',
+    institution: 'Abertura Oficial',
+    sessionGroup: 'abertura',
+    sessionLabel: 'Mesa de Abertura',
+    sessionTime: '08:30 – 09:15',
+    bio: '',
+    socials: {}
   }
 ];
 

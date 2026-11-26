@@ -39,6 +39,10 @@ import {
   sanitizePostsForStorage,
   sortAndFilterPublicSocialPosts,
   addDeletedPostId,
+  getDeletedSpeakerIds,
+  setDeletedSpeakerIds,
+  addDeletedSpeakerId,
+  removeDeletedSpeakerId,
   STORAGE_KEYS
 } from '../src/utils/helpers.ts';
 
@@ -89,6 +93,9 @@ import {
   setSignInAnonymouslyForTests,
   ACTIVE_FIREBASE_PROJECT_ID,
   ACTIVE_FIRESTORE_DATABASE_ID,
+  deleteSpeakerInDb,
+  saveAllSpeakersToDb,
+  setSpeakersMutationAdapterForTests,
   type RegistrationUpdateOperation
 } from '../src/services/firebaseDb.ts';
 import { generateCertificateHTML } from '../src/utils/certificatePdfGenerator.ts';
@@ -115,7 +122,7 @@ import emailHandler, {
 import statusHandler from '../api/email/status.ts';
 import mapsHandler from '../api/maps/config.ts';
 import vercelConfig from '../vercel.json' with { type: 'json' };
-import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS, INITIAL_SUBSCRIBERS } from '../src/data/initialData.ts';
+import { INITIAL_EVENT_CONFIG, INITIAL_CERTIFICATE_DESIGN, INITIAL_SCHEDULE, SPEAKERS_PROFILES, INITIAL_SOCIAL_POSTS, INITIAL_SUBSCRIBERS } from '../src/data/initialData.ts';
 import type { Registration, SpeakerProfile, SocialPost, PushNotificationItem, NewsletterSubscriber } from '../src/types.ts';
 
 interface TestResult {
@@ -2860,6 +2867,243 @@ async function runTests() {
   );
 
   // =========================================================================
+  // 14.15 Palestrantes: deleteSpeakerInDb exige sessão admin real, grava tombstone permanente para oficiais e remove customizados
+  {
+    let unauthRejected = false;
+    let officialDeleteCall: { id: string; isOfficial: boolean; tombstone?: Record<string, unknown> } | null = null;
+    let customDeleteCall: { id: string; isOfficial: boolean; tombstone?: Record<string, unknown> } | null = null;
+    const restoredPayloads: Array<{ id: string; payload: Record<string, unknown> }> = [];
+    try {
+      setAdminSessionCheckerForTests(async () => false);
+      setSpeakersMutationAdapterForTests({
+        saveSpeaker: async (id, payload) => {
+          restoredPayloads.push({ id, payload });
+        },
+        deleteSpeaker: async (id, isOfficial, tombstone) => {
+          if (isOfficial) officialDeleteCall = { id, isOfficial, tombstone };
+          else customDeleteCall = { id, isOfficial, tombstone };
+        }
+      });
+
+      try {
+        await deleteSpeakerInDb('spk-juliana-grs');
+      } catch (err: any) {
+        unauthRejected = String(err?.message || '').includes('ADMIN_AUTH_REQUIRED');
+      }
+
+      setAdminSessionCheckerForTests(async () => true);
+      await deleteSpeakerInDb('spk-juliana-grs');
+      await deleteSpeakerInDb('spk-custom-removido-99');
+      await saveAllSpeakersToDb([SPEAKERS_PROFILES[0]]);
+
+      assert(
+        unauthRejected &&
+          officialDeleteCall?.id === 'spk-juliana-grs' &&
+          officialDeleteCall?.isOfficial === true &&
+          officialDeleteCall?.tombstone?.deleted === true &&
+          typeof officialDeleteCall?.tombstone?.deletedAt === 'string' &&
+          customDeleteCall?.id === 'spk-custom-removido-99' &&
+          customDeleteCall?.isOfficial === false &&
+          customDeleteCall?.tombstone === undefined &&
+          restoredPayloads.length === 1 &&
+          restoredPayloads[0].payload.deleted === false,
+        '14.15 deleteSpeakerInDb bloqueia sem admin, grava tombstone permanente para oficial, exclui customizado e saveAllSpeakersToDb limpa deleted=false',
+        suite14
+      );
+    } finally {
+      setAdminSessionCheckerForTests(null);
+      setSpeakersMutationAdapterForTests(null);
+    }
+  }
+
+  // 14.16 Palestrantes: exclusão permanente resiste a F5 (loadStoredData) e snapshots remotos autoritativos (sem ressurreição)
+  {
+    try {
+      setDeletedSpeakerIds([]);
+      const customSpk: SpeakerProfile = {
+        id: 'spk-custom-temp-01',
+        name: 'Palestrante Temporário',
+        role: 'Convidado',
+        institution: 'RAPS',
+        sessionGroup: 'mesa-1',
+        sessionLabel: 'Mesa 1',
+        sessionTime: '09:30',
+        bio: 'Temporário',
+        socials: {}
+      };
+      const withCustom = mergeSpeakersWithDefaults([customSpk], []);
+      const hadCustomBefore = withCustom.some((s) => s.id === 'spk-custom-temp-01');
+
+      addDeletedSpeakerId('spk-juliana-grs');
+      const afterAuthoritativeEmptySnapshot = mergeSpeakersWithDefaults(
+        [],
+        withCustom,
+        new Set(['spk-juliana-grs']),
+        { authoritativeRemote: true }
+      );
+      saveSpeakersToStorage(afterAuthoritativeEmptySnapshot);
+      const reloadedAfterDelete = loadStoredData();
+
+      removeDeletedSpeakerId('spk-juliana-grs');
+      const restoredList = mergeSpeakersWithDefaults([], [], new Set(), { authoritativeRemote: true });
+
+      assert(
+        hadCustomBefore &&
+          !afterAuthoritativeEmptySnapshot.some((s) => s.id === 'spk-juliana-grs') &&
+          !afterAuthoritativeEmptySnapshot.some((s) => s.id === 'spk-custom-temp-01') &&
+          !reloadedAfterDelete.speakers.some((s) => s.id === 'spk-juliana-grs') &&
+          !reloadedAfterDelete.speakers.some((s) => s.id === 'spk-custom-temp-01') &&
+          getDeletedSpeakerIds().size === 0 &&
+          restoredList.some((s) => s.id === 'spk-juliana-grs'),
+        '14.16 Palestrantes excluídos (oficiais e customizados) nunca ressuscitam em F5 nem em snapshot remoto autoritativo',
+        suite14
+      );
+    } finally {
+      setDeletedSpeakerIds([]);
+    }
+  }
+
+  // 14.17 Contratos remote-first para palestrantes em App.tsx, AdminDashboard.tsx e firebaseDb.ts
+  {
+    const appSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/App.tsx'), 'utf-8');
+    const adminSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf-8');
+    const fbSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/services/firebaseDb.ts'), 'utf-8');
+    const subSpkIdx = fbSrc14.indexOf('export const subscribeSpeakers');
+    const subSpkBlock = fbSrc14.slice(subSpkIdx, subSpkIdx + 1200);
+    assert(
+      appSrc14.includes('await deleteSpeakerInDb(speakerId)') &&
+        appSrc14.includes('addDeletedSpeakerId(speakerId)') &&
+        appSrc14.includes('await saveSpeakerToDb(updated)') &&
+        appSrc14.includes('await saveAllSpeakersToDb(SPEAKERS_PROFILES)') &&
+        adminSrc14.includes('await onDeleteSpeaker?.(target.id)') &&
+        adminSrc14.includes('formatSpeakerPersistenceError') &&
+        !subSpkBlock.includes('if (snapshot.empty) return'),
+      '14.17 Exclusão/edição/restauração de palestrantes é remote-first com feedback de erro e subscribeSpeakers não ignora snapshot.empty',
+      suite14
+    );
+  }
+
+  // 14.18 Programação -> Palestrantes: 100% dos nomes da grade oficial aparecem em SPEAKERS_PROFILES
+  {
+    const normName = (v: string) =>
+      v
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/^(dra?\.|dr\.)\s+/i, '')
+        .trim();
+    const scheduleNames: string[] = [];
+    for (const session of INITIAL_SCHEDULE) {
+      if (session.mediator?.name) scheduleNames.push(session.mediator.name);
+      for (const spk of session.speakers || []) {
+        if (spk.name) scheduleNames.push(spk.name);
+      }
+    }
+    const profileNorms = SPEAKERS_PROFILES.map((p) => normName(p.name));
+    const missingFromProfiles = scheduleNames.filter((schedName) => {
+      const target = normName(schedName);
+      const targetTokens = target.split(/\s+/).filter(Boolean);
+      return !profileNorms.some(
+        (prof) => prof === target || targetTokens.every((tk) => prof.includes(tk))
+      );
+    });
+    const requiredOpeningIds = [
+      'spk-silas-vieira',
+      'spk-gisella-consensa',
+      'spk-camila-andrade',
+      'spk-ludmila',
+      'spk-representante-camara',
+      'spk-dr-breno',
+      'spk-dra-patricia'
+    ];
+    const allOpeningPresent = requiredOpeningIds.every((id) =>
+      SPEAKERS_PROFILES.some((p) => p.id === id && p.sessionGroup === 'abertura')
+    );
+    const thaizProfile = SPEAKERS_PROFILES.find((p) => p.id === 'spk-thaiz-muniz');
+    const thaizValid =
+      Boolean(thaizProfile) &&
+      thaizProfile?.name === 'Thaiz Borges Muniz' &&
+      thaizProfile?.sessionGroup === 'mesa-2' &&
+      thaizProfile?.photoUrl === 'https://lh3.googleusercontent.com/d/1qkNyD_b9Iry8NAkEijMPnh0m-9DrK07m' &&
+      thaizProfile?.bio.includes('CAPS I de Espera Feliz') &&
+      thaizProfile?.bio.includes('antes do diagnóstico, existe uma pessoa');
+    const silasProfile = SPEAKERS_PROFILES.find((p) => p.id === 'spk-silas-vieira');
+    const silasMergedFromLegacy = mergeSpeakersWithDefaults(
+      [{ id: 'spk-silas-vieira', name: 'Silas Vieira', role: 'Mesa de Abertura', institution: 'Abertura Oficial', sessionGroup: 'abertura', sessionLabel: 'Mesa de Abertura', sessionTime: '08:30 – 09:15', bio: '', socials: {} }],
+      []
+    ).find((p) => p.id === 'spk-silas-vieira');
+    const silasValid =
+      Boolean(silasProfile) &&
+      silasProfile?.role === 'Prefeito de Carangola' &&
+      silasProfile?.institution === 'Prefeitura Municipal de Carangola' &&
+      silasProfile?.photoUrl === 'https://lh3.googleusercontent.com/d/1NUTyyts48jDgoeI4hvSXepMzCsg_cOx_' &&
+      silasProfile?.bio.includes('Serra do Papagaio') &&
+      silasMergedFromLegacy?.role === 'Prefeito de Carangola' &&
+      silasMergedFromLegacy?.institution === 'Prefeitura Municipal de Carangola' &&
+      silasMergedFromLegacy?.photoUrl === 'https://lh3.googleusercontent.com/d/1NUTyyts48jDgoeI4hvSXepMzCsg_cOx_';
+    assert(
+      scheduleNames.length >= 22 &&
+        missingFromProfiles.length === 0 &&
+        allOpeningPresent &&
+        thaizValid &&
+        silasValid,
+      `14.18 Todos os nomes da programação (${scheduleNames.length}) estão presentes em SPEAKERS_PROFILES sem omissões (incluindo Thaiz Borges Muniz e Silas Vieira)`,
+      suite14
+    );
+
+    // 14.19 Fotos do Google Drive no Painel do Gestor, Vitrine Pública e PDF usam referrerPolicy="no-referrer"
+    const adminDashSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/components/AdminDashboard.tsx'), 'utf8');
+    const speakersSecSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/components/SpeakersSection.tsx'), 'utf8');
+    const speakersPdfSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/utils/speakersPdfGenerator.ts'), 'utf8');
+    const adminCardBlockIdx = adminDashSrc14.indexOf('const resolvedPhotoUrl = spk.photoUrl');
+    const adminCardSlice = adminCardBlockIdx >= 0 ? adminDashSrc14.slice(adminCardBlockIdx, adminCardBlockIdx + 1200) : '';
+    assert(
+      adminCardSlice.includes('referrerPolicy="no-referrer"') &&
+        adminCardSlice.includes('speakerCardImgErrors') &&
+        speakersSecSrc14.includes('referrerPolicy="no-referrer"') &&
+        speakersPdfSrc14.includes('referrerpolicy="no-referrer"'),
+      '14.19 Fotos de palestrantes (Google Drive) usam referrerPolicy="no-referrer" nos cards do Painel do Gestor, na vitrine pública e no PDF',
+      suite14
+    );
+
+    // 14.20 Mesa de Abertura nunca é rotulada automaticamente como Mediação/Mediador (ex.: Silas Vieira é somente Mesa de Abertura)
+    const schedulePdfSrc14 = fs.readFileSync(path.join(process.cwd(), 'src/utils/schedulePdfGenerator.ts'), 'utf8');
+    const openingSession = INITIAL_SCHEDULE.find((s) => s.id === 'sch-3' && s.type === 'abertura');
+    const openingProfiles = SPEAKERS_PROFILES.filter((p) => p.sessionGroup === 'abertura');
+    const mediatorRegex = /mediad|mediaç/i;
+    const noOpeningProfileHasMediator =
+      openingProfiles.length >= 7 &&
+      openingProfiles.every(
+        (p) =>
+          !mediatorRegex.test(p.role) &&
+          !mediatorRegex.test(p.institution) &&
+          !mediatorRegex.test(p.sessionLabel) &&
+          !mediatorRegex.test(p.bio)
+      );
+    const explicitMediatorIds = SPEAKERS_PROFILES.filter((p) => mediatorRegex.test(p.role))
+      .map((p) => p.id)
+      .sort();
+    const expectedMediatorIds = ['spk-camila-lima', 'spk-christine-vianna', 'spk-raquel-pinheiro'];
+    const onlyExplicitMediators =
+      explicitMediatorIds.length === expectedMediatorIds.length &&
+      explicitMediatorIds.every((id, i) => id === expectedMediatorIds[i]);
+    assert(
+      !adminDashSrc14.includes('Abertura & Mediação') &&
+        !speakersSecSrc14.includes('Abertura & Mediação') &&
+        !speakersPdfSrc14.includes('Abertura & Mediação') &&
+        adminDashSrc14.includes("return { label: 'Mesa de Abertura'") &&
+        adminDashSrc14.includes('<option value="abertura">Mesa de Abertura</option>') &&
+        schedulePdfSrc14.includes('Composição da Mesa de Abertura:') &&
+        Boolean(openingSession) &&
+        !openingSession?.mediator &&
+        noOpeningProfileHasMediator &&
+        onlyExplicitMediators,
+      '14.20 Mesa de Abertura (incluindo Silas Vieira) nunca recebe rótulo automático de Mediação/Mediador no painel, portal público ou PDFs',
+      suite14
+    );
+  }
+
+  // =========================================================================
   // SUITE 15: Encerramento Operacional, Autenticação Mural, Segurança e Assets
   // =========================================================================
   const suite15 = 'Encerramento Operacional & Segurança Pré-Deploy';
@@ -3031,9 +3275,12 @@ async function runTests() {
       fs.existsSync(path.join(process.cwd(), 'public/assets/logo-caps-1.jpg')) &&
       fs.existsSync(path.join(process.cwd(), 'public/assets/logo-ceco-carangola.png')) &&
       fs.existsSync(path.join(process.cwd(), 'public/assets/logo-caps-ij.png')) &&
+      fs.existsSync(path.join(process.cwd(), 'public/assets/logo-caps-ad-ataru.png')) &&
       defaultCristiana?.photoUrl === '/assets/cristiana-marina.jpg' &&
       footerSource.includes('bg-[#07242c]') &&
       footerSource.includes('/assets/logo-ceco-carangola.png') &&
+      footerSource.includes('/assets/logo-caps-ad-ataru.png') &&
+      footerSource.includes('CAPS AD Ataru') &&
       footerSource.includes('md:h-20') &&
       !footerSource.includes('contactEmail') &&
       !footerSource.includes('contactPhone'),
@@ -3704,7 +3951,8 @@ async function runTests() {
   const builtLongSubId = buildSubscriberIdFromRegistrationId(longValidRegId);
 
   assert(
-    allSpeakers.length === 15 && !allSpeakers.some((s) => s.id === 'spk-marcos-alexandre') &&
+    allSpeakers.length === 22 && !allSpeakers.some((s) => s.id === 'spk-marcos-alexandre') &&
+      allSpeakers.some((s) => s.id === 'spk-thaiz-muniz') &&
       allSpeakers.some((s) => s.id === 'spk-gisella-consensa') &&
       initialSubs.length === 0 &&
       sampleDeterministicId === 'sub-reg-ex-999' &&

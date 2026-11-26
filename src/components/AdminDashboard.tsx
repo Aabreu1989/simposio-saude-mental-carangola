@@ -103,7 +103,6 @@ import {
   createWhatsAppBroadcastUrl
 } from '../utils/whatsapp.ts';
 import { BadgeModal } from './BadgeModal.tsx';
-import { AdminBadgeDesigner } from './AdminBadgeDesigner.tsx';
 import { GmailNotificationHub } from './GmailNotificationHub.tsx';
 import { GoogleFormsSyncModal } from './GoogleFormsSyncModal.tsx';
 import { RechartsVisualDashboard } from './RechartsVisualDashboard.tsx';
@@ -151,10 +150,10 @@ interface AdminDashboardProps {
   onReleaseAllPresentCertificates?: () => Promise<number> | number;
   onPreviewCertificate?: (attendee: Registration) => void;
   speakers?: SpeakerProfile[];
-  onUpdateSpeaker?: (speaker: SpeakerProfile) => void;
-  onAddSpeaker?: (speaker: SpeakerProfile) => void;
-  onDeleteSpeaker?: (id: string) => void;
-  onResetSpeakers?: () => void;
+  onUpdateSpeaker?: (speaker: SpeakerProfile) => Promise<void> | void;
+  onAddSpeaker?: (speaker: SpeakerProfile) => Promise<void> | void;
+  onDeleteSpeaker?: (id: string) => Promise<void> | void;
+  onResetSpeakers?: () => Promise<void> | void;
   firebaseSyncState?: FirebaseSyncState;
   onConnectFirebaseAdmin?: (options?: { preferRedirect?: boolean }) => Promise<boolean | void>;
   onDisconnectFirebaseAdmin?: () => Promise<void>;
@@ -198,7 +197,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onRefreshRegistrations
 }) => {
   const [activeTab, setActiveTab] = useState<'analytics' | 'attendees' | 'certificates' | 'materials' | 'posts' | 'notifications' | 'subscribers' | 'customizer' | 'speakers'>('analytics');
-  const [customizerSubView, setCustomizerSubView] = useState<'event' | 'badge'>('event');
   const [isGoogleFormsModalOpen, setIsGoogleFormsModalOpen] = useState(false);
   const [batchImportReport, setBatchImportReport] = useState<AdminBatchImportResult | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<'all' | 'portal' | 'google_forms'>('all');
@@ -245,7 +243,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editingSpeaker, setEditingSpeaker] = useState<SpeakerProfile | null>(null);
   const [isSpeakerModalOpen, setIsSpeakerModalOpen] = useState(false);
   const [speakerToDelete, setSpeakerToDelete] = useState<SpeakerProfile | null>(null);
-  const [speakerNotice, setSpeakerNotice] = useState<{ type: 'success' | 'warning' | 'info'; text: string } | null>(null);
+  const [speakerNotice, setSpeakerNotice] = useState<{ type: 'success' | 'warning' | 'info' | 'error'; text: string } | null>(null);
+  const [isSpeakerActionBusy, setIsSpeakerActionBusy] = useState(false);
+  const [speakerCardImgErrors, setSpeakerCardImgErrors] = useState<Record<string, boolean>>({});
 
   const [speakerFormData, setSpeakerFormData] = useState({
     id: '',
@@ -271,8 +271,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       role: '',
       institution: '',
       sessionGroup: 'abertura',
-      sessionLabel: 'Sessão Solene de Abertura & Conferência Magna',
-      sessionTime: '08h30 às 09h30',
+      sessionLabel: 'Mesa de Abertura',
+      sessionTime: '08:30 – 09:15',
       photoUrl: '',
       photoPosition: 'center 18%',
       bio: '',
@@ -313,8 +313,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setIsSpeakerModalOpen(true);
   };
 
-  const handleSaveSpeakerSubmit = (e: React.FormEvent) => {
+  const formatSpeakerPersistenceError = (err: unknown, actionLabel: string): string => {
+    const raw = err instanceof Error ? err.message : String(err || '');
+    if (raw.includes('ADMIN_AUTH_REQUIRED') || raw.includes('permission-denied')) {
+      return `Não foi possível ${actionLabel} na nuvem: conecte sua conta Google de Gestor autorizada no topo do painel e tente novamente.`;
+    }
+    return `Erro ao ${actionLabel} no servidor (${raw || 'falha de comunicação'}). Nenhuma alteração foi confirmada.`;
+  };
+
+  const handleSaveSpeakerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSpeakerActionBusy) return;
     if (!speakerFormData.name.trim() || !speakerFormData.role.trim()) {
       setSpeakerNotice({ type: 'warning', text: 'Por favor, informe ao menos o nome completo e a especialidade/cargo do palestrante.' });
       return;
@@ -393,33 +402,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     };
 
-    if (editingSpeaker) {
-      onUpdateSpeaker?.(savedProfile);
-      setSpeakerNotice({ type: 'success', text: `Palestrante "${savedProfile.name}" atualizado com sucesso!` });
-    } else {
-      onAddSpeaker?.(savedProfile);
-      setSpeakerNotice({ type: 'success', text: `Palestrante "${savedProfile.name}" adicionado com sucesso!` });
+    setIsSpeakerActionBusy(true);
+    try {
+      if (editingSpeaker) {
+        await onUpdateSpeaker?.(savedProfile);
+        setSpeakerNotice({ type: 'success', text: `Palestrante "${savedProfile.name}" atualizado e salvo na nuvem com sucesso!` });
+      } else {
+        await onAddSpeaker?.(savedProfile);
+        setSpeakerNotice({ type: 'success', text: `Palestrante "${savedProfile.name}" cadastrado e salvo na nuvem com sucesso!` });
+      }
+      setIsSpeakerModalOpen(false);
+      setEditingSpeaker(null);
+      setTimeout(() => setSpeakerNotice(null), 5000);
+    } catch (err) {
+      setSpeakerNotice({
+        type: 'error',
+        text: formatSpeakerPersistenceError(err, editingSpeaker ? 'salvar as alterações do palestrante' : 'cadastrar o palestrante')
+      });
+    } finally {
+      setIsSpeakerActionBusy(false);
     }
-
-    setIsSpeakerModalOpen(false);
-    setEditingSpeaker(null);
-    setTimeout(() => setSpeakerNotice(null), 4000);
   };
 
-  const handleConfirmDeleteSpeaker = () => {
-    if (!speakerToDelete) return;
-    const name = speakerToDelete.name;
-    onDeleteSpeaker?.(speakerToDelete.id);
-    setSpeakerToDelete(null);
-    setSpeakerNotice({ type: 'success', text: `Palestrante "${name}" removido com sucesso.` });
-    setTimeout(() => setSpeakerNotice(null), 4000);
+  const handleConfirmDeleteSpeaker = async () => {
+    if (!speakerToDelete || isSpeakerActionBusy) return;
+    const target = speakerToDelete;
+    setIsSpeakerActionBusy(true);
+    try {
+      await onDeleteSpeaker?.(target.id);
+      setSpeakerToDelete(null);
+      setSpeakerNotice({
+        type: 'success',
+        text: `Palestrante "${target.name}" excluído permanentemente da plataforma e da nuvem.`
+      });
+      setTimeout(() => setSpeakerNotice(null), 5000);
+    } catch (err) {
+      setSpeakerToDelete(null);
+      setSpeakerNotice({
+        type: 'error',
+        text: formatSpeakerPersistenceError(err, `excluir "${target.name}"`)
+      });
+    } finally {
+      setIsSpeakerActionBusy(false);
+    }
   };
 
-  const handleConfirmResetSpeakers = () => {
-    if (window.confirm('Deseja realmente restaurar os palestrantes oficiais do Simpósio? Alterações personalizadas serão substituídas pela lista padrão.')) {
-      onResetSpeakers?.();
-      setSpeakerNotice({ type: 'info', text: 'Lista oficial de palestrantes restaurada.' });
-      setTimeout(() => setSpeakerNotice(null), 4000);
+  const handleConfirmResetSpeakers = async () => {
+    if (isSpeakerActionBusy) return;
+    if (window.confirm('Deseja realmente restaurar os palestrantes oficiais do Simpósio? Palestrantes oficiais excluídos voltarão a aparecer e alterações personalizadas serão substituídas pela lista padrão.')) {
+      setIsSpeakerActionBusy(true);
+      try {
+        await onResetSpeakers?.();
+        setSpeakerNotice({ type: 'info', text: 'Lista oficial de palestrantes restaurada na nuvem.' });
+        setTimeout(() => setSpeakerNotice(null), 5000);
+      } catch (err) {
+        setSpeakerNotice({
+          type: 'error',
+          text: formatSpeakerPersistenceError(err, 'restaurar os palestrantes oficiais')
+        });
+      } finally {
+        setIsSpeakerActionBusy(false);
+      }
     }
   };
 
@@ -443,8 +486,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     banner: 'bg-gradient-to-r from-emerald-50 via-teal-50 to-white border-emerald-200/90 text-emerald-950'
   };
 
-  // Search & Filter for Attendees
+  // Search & Filter for Attendees (Nome, E-mail de Inscrição e Número de Inscrição)
   const [attendeeSearch, setAttendeeSearch] = useState('');
+  const [attendeeNameFilter, setAttendeeNameFilter] = useState('');
+  const [attendeeEmailFilter, setAttendeeEmailFilter] = useState('');
+  const [attendeeCodeFilter, setAttendeeCodeFilter] = useState('');
   const [filterCity, setFilterCity] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterRole, setFilterRole] = useState('all');
@@ -723,12 +769,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const rawSearch = attendeeSearch.trim();
     const searchLower = rawSearch.toLowerCase();
     const cleanSearchDigits = rawSearch.replace(/\D/g, '');
+    const cleanSearchAlnum = rawSearch.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const regCodeAlnum = (reg.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const matchesSearch =
       rawSearch === '' ||
       reg.fullName.toLowerCase().includes(searchLower) ||
       (reg.email && reg.email.toLowerCase().includes(attendeeSearch.toLowerCase())) ||
       (reg.email && reg.email.toLowerCase().includes(searchLower)) ||
       reg.code.toLowerCase().includes(searchLower) ||
+      (cleanSearchAlnum.length >= 2 && regCodeAlnum.includes(cleanSearchAlnum)) ||
       reg.cpf.includes(rawSearch) ||
       (cleanSearchDigits.length >= 3 && (reg.cpf || '').replace(/\D/g, '').includes(cleanSearchDigits)) ||
       reg.institution.toLowerCase().includes(searchLower) ||
@@ -737,6 +786,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       (reg.instagram && reg.instagram.toLowerCase().includes(searchLower)) ||
       (reg.linkedin && reg.linkedin.toLowerCase().includes(searchLower)) ||
       (reg.otherSocial && reg.otherSocial.toLowerCase().includes(searchLower));
+
+    const nameFilterQuery = attendeeNameFilter.trim().toLowerCase();
+    const matchesNameFilter =
+      nameFilterQuery === '' || (reg.fullName || '').toLowerCase().includes(nameFilterQuery);
+
+    const emailFilterQuery = attendeeEmailFilter.trim().toLowerCase();
+    const matchesEmailFilter =
+      emailFilterQuery === '' || Boolean(reg.email && reg.email.toLowerCase().includes(emailFilterQuery));
+
+    const codeFilterQuery = attendeeCodeFilter.trim().toLowerCase();
+    const codeFilterAlnum = codeFilterQuery.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const matchesCodeFilter =
+      codeFilterQuery === '' ||
+      (reg.code || '').toLowerCase().includes(codeFilterQuery) ||
+      (codeFilterAlnum.length >= 1 && regCodeAlnum.includes(codeFilterAlnum));
 
     const matchesCity =
       filterCity === 'all' ||
@@ -762,7 +826,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       (filterOrigin === 'google_forms' && reg.origin === 'google_forms') ||
       (filterOrigin === 'portal' && reg.origin !== 'google_forms');
 
-    return matchesSearch && matchesCity && matchesStatus && matchesRole && matchesSusCare && matchesOrigin;
+    return (
+      matchesSearch &&
+      matchesNameFilter &&
+      matchesEmailFilter &&
+      matchesCodeFilter &&
+      matchesCity &&
+      matchesStatus &&
+      matchesRole &&
+      matchesSusCare &&
+      matchesOrigin
+    );
   });
 
   // Filtered Social Posts for Moderation Tab
@@ -1763,6 +1837,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleAttendeeCertificateToggle = async (reg: Registration) => {
+    if (!onToggleCertificateIssued) return;
+    if (!firebaseSyncState?.isVerifiedAdmin) {
+      setStatusUpdateFeedback({
+        type: 'error',
+        message: 'Conecte a conta Google oficial do gestor antes de liberar ou bloquear certificados.'
+      });
+      return;
+    }
+    if (reg.status !== 'presente') {
+      setStatusUpdateFeedback({
+        type: 'error',
+        message: `O participante ${reg.fullName} precisa estar com Check-in confirmado (Presente) para liberar o certificado.`
+      });
+      return;
+    }
+    setUpdatingStatusRegId(reg.id);
+    setStatusUpdateFeedback(null);
+    try {
+      await onToggleCertificateIssued(reg.id);
+      setStatusUpdateFeedback({
+        type: 'success',
+        message: `Certificado de ${reg.fullName} ${reg.certificateIssued ? 'bloqueado' : 'liberado'} com confirmação no Firestore.`
+      });
+      setTimeout(() => setStatusUpdateFeedback(null), 4000);
+    } catch (err: unknown) {
+      const rawMsg = err instanceof Error ? err.message : 'Falha ao atualizar certificado no Firestore.';
+      setStatusUpdateFeedback({
+        type: 'error',
+        message: `Não foi possível atualizar o certificado de ${reg.fullName}: ${rawMsg}`
+      });
+    } finally {
+      setUpdatingStatusRegId((curr) => (curr === reg.id ? null : curr));
+    }
+  };
+
   // Save Event Customizer
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2410,6 +2520,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               })
             }
             onPreviewCertificate={onPreviewCertificate || (() => {})}
+            onGoToAttendees={() => setActiveTab('attendees')}
           />
         )}
 
@@ -3466,19 +3577,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
 
                 <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('customizer');
-                    setCustomizerSubView('badge');
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-[#0a3641] bg-[#faeee5] hover:bg-[#f6dfd0] border border-[#ea7a38]/40 active:scale-95 rounded-lg shadow-xs transition-all cursor-pointer"
-                  title="Alterar layout, cores e campos do Crachá Oficial"
-                >
-                  <Palette className="w-4 h-4 text-[#d96522]" />
-                  <span>Design do Crachá</span>
-                </button>
-
-                <button
                   onClick={() => setIsGoogleFormsModalOpen(true)}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-black text-white bg-gradient-to-r from-purple-700 via-purple-600 to-indigo-700 hover:brightness-110 active:scale-95 rounded-lg shadow-sm transition-all cursor-pointer"
                   title="Importar respostas do Google Forms (Arquivo Excel / CSV ou link)"
@@ -3591,83 +3689,226 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            {/* Filters Row */}
-            <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 p-3.5 rounded-xl border transition-colors ${theme.subCard}`}>
-              <div className="relative">
-                <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
-                <input
-                  type="text"
-                  value={attendeeSearch}
-                  onChange={(e) => setAttendeeSearch(e.target.value)}
-                  placeholder="Buscar por nome, CPF, redes..."
-                  className={`w-full pl-9 pr-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                />
+            {/* Filters Row: Filtrar por Nome, E-mail de Inscrição e Número de Inscrição */}
+            <div className={`space-y-3 p-4 rounded-xl border transition-colors ${theme.subCard}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#0a3641]">
+                  <Filter className="w-3.5 h-3.5 text-[#ea7a38]" />
+                  <span>Filtros de Participantes (Nome, E-mail de Inscrição e Número de Inscrição)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-stone-600 font-semibold">
+                    Exibindo <strong>{filteredAttendees.length}</strong> de <strong>{totalRegistrations}</strong> inscritos
+                  </span>
+                  {(attendeeSearch ||
+                    attendeeNameFilter ||
+                    attendeeEmailFilter ||
+                    attendeeCodeFilter ||
+                    filterCity !== 'all' ||
+                    filterStatus !== 'all' ||
+                    filterRole !== 'all' ||
+                    filterSusCareLevel !== 'all' ||
+                    filterOrigin !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAttendeeSearch('');
+                        setAttendeeNameFilter('');
+                        setAttendeeEmailFilter('');
+                        setAttendeeCodeFilter('');
+                        setFilterCity('all');
+                        setFilterStatus('all');
+                        setFilterRole('all');
+                        setFilterSusCareLevel('all');
+                        setFilterOrigin('all');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                      <span>Limpar Filtros</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div>
-                <select
-                  value={filterCity}
-                  onChange={(e) => setFilterCity(e.target.value)}
-                  className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                >
-                  <option value="all">Todos os Municípios</option>
-                  {REGIONAL_CITIES.map((c) => (
-                    <option key={c} value={c} className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>{c}</option>
-                  ))}
-                </select>
+              {/* Primary Search & 3 Dedicated Filter Fields (Nome, E-mail de Inscrição, Número de Inscrição) */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                    Busca Rápida Unificada
+                  </label>
+                  <div className="relative">
+                    <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
+                    <input
+                      type="text"
+                      value={attendeeSearch}
+                      onChange={(e) => setAttendeeSearch(e.target.value)}
+                      placeholder="Nome, e-mail, nº de inscrição ou CPF..."
+                      aria-label="Busca rápida por nome, e-mail de inscrição ou número de inscrição"
+                      className={`w-full pl-9 pr-7 py-2 text-xs rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                    />
+                    {attendeeSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setAttendeeSearch('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                        title="Limpar busca rápida"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                    Filtrar por Nome
+                  </label>
+                  <div className="relative">
+                    <Users className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
+                    <input
+                      type="text"
+                      value={attendeeNameFilter}
+                      onChange={(e) => setAttendeeNameFilter(e.target.value)}
+                      placeholder="Digite o nome do participante..."
+                      aria-label="Filtrar participante pelo nome"
+                      className={`w-full pl-8 pr-7 py-2 text-xs rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                    />
+                    {attendeeNameFilter && (
+                      <button
+                        type="button"
+                        onClick={() => setAttendeeNameFilter('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                        title="Limpar filtro de nome"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                    Filtrar por E-mail de Inscrição
+                  </label>
+                  <div className="relative">
+                    <Mail className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
+                    <input
+                      type="text"
+                      value={attendeeEmailFilter}
+                      onChange={(e) => setAttendeeEmailFilter(e.target.value)}
+                      placeholder="Digite o e-mail de inscrição..."
+                      aria-label="Filtrar participante pelo e-mail de inscrição"
+                      className={`w-full pl-8 pr-7 py-2 text-xs rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                    />
+                    {attendeeEmailFilter && (
+                      <button
+                        type="button"
+                        onClick={() => setAttendeeEmailFilter('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                        title="Limpar filtro de e-mail"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                    Filtrar por Número de Inscrição
+                  </label>
+                  <div className="relative">
+                    <ShieldCheck className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 ${theme.textMuted}`} />
+                    <input
+                      type="text"
+                      value={attendeeCodeFilter}
+                      onChange={(e) => setAttendeeCodeFilter(e.target.value)}
+                      placeholder="Ex: CAR-SM-001..."
+                      aria-label="Filtrar participante pelo número de inscrição"
+                      className={`w-full pl-8 pr-7 py-2 text-xs font-mono rounded-lg border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                    />
+                    {attendeeCodeFilter && (
+                      <button
+                        type="button"
+                        onClick={() => setAttendeeCodeFilter('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                        title="Limpar filtro de número de inscrição"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <select
-                  value={filterStatus}
-                  onChange={(e) => setFilterStatus(e.target.value)}
-                  className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                >
-                  <option value="all">Todos os Status</option>
-                  <option value="confirmada" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Fazer Check-in (Pendente)</option>
-                  <option value="presente" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Credenciado (Presente)</option>
-                  <option value="cancelada" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Cancelada</option>
-                </select>
-              </div>
+              {/* Secondary Dropdown Filters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 border-t border-stone-200/70">
+                <div>
+                  <select
+                    value={filterCity}
+                    onChange={(e) => setFilterCity(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                  >
+                    <option value="all">Todos os Municípios</option>
+                    {REGIONAL_CITIES.map((c) => (
+                      <option key={c} value={c} className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>{c}</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div>
-                <select
-                  value={filterRole}
-                  onChange={(e) => setFilterRole(e.target.value)}
-                  className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                >
-                  <option value="all">Todas as Funções</option>
-                  {PROFESSIONAL_ROLES.map((r) => (
-                    <option key={r} value={r} className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>{r}</option>
-                  ))}
-                </select>
-              </div>
+                <div>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                  >
+                    <option value="all">Todos os Status (Check-in)</option>
+                    <option value="confirmada" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Fazer Check-in (Pendente)</option>
+                    <option value="presente" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Credenciado (Presente)</option>
+                    <option value="cancelada" className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>Cancelada</option>
+                  </select>
+                </div>
 
-              <div>
-                <select
-                  value={filterSusCareLevel}
-                  onChange={(e) => setFilterSusCareLevel(e.target.value)}
-                  className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                >
-                  <option value="all">Todos os Vínculos SUS</option>
-                  {SUS_CARE_LEVEL_LIST.map((lvl) => (
-                    <option key={lvl} value={lvl} className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>
-                      {lvl.split('/')[0]}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <div>
+                  <select
+                    value={filterRole}
+                    onChange={(e) => setFilterRole(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                  >
+                    <option value="all">Todas as Funções</option>
+                    {PROFESSIONAL_ROLES.map((r) => (
+                      <option key={r} value={r} className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>{r}</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div>
-                <select
-                  value={filterOrigin}
-                  onChange={(e) => setFilterOrigin(e.target.value as any)}
-                  className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
-                >
-                  <option value="all">Todas as Origens ({totalRegistrations})</option>
-                  <option value="portal">Apenas Portal Oficial ({portalCount})</option>
-                  <option value="google_forms">Apenas Google Forms ({googleFormsCount})</option>
-                </select>
+                <div>
+                  <select
+                    value={filterSusCareLevel}
+                    onChange={(e) => setFilterSusCareLevel(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                  >
+                    <option value="all">Todos os Vínculos SUS</option>
+                    {SUS_CARE_LEVEL_LIST.map((lvl) => (
+                      <option key={lvl} value={lvl} className={isDarkMode ? 'bg-[#06151c] text-stone-100' : 'bg-white text-stone-900'}>
+                        {lvl.split('/')[0]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <select
+                    value={filterOrigin}
+                    onChange={(e) => setFilterOrigin(e.target.value as any)}
+                    className={`w-full px-3 py-1.5 text-xs rounded-md border focus:outline-none focus:ring-1 transition-colors ${theme.input}`}
+                  >
+                    <option value="all">Todas as Origens ({totalRegistrations})</option>
+                    <option value="portal">Apenas Portal Oficial ({portalCount})</option>
+                    <option value="google_forms">Apenas Google Forms ({googleFormsCount})</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -3906,15 +4147,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </select>
 
                         {reg.status === 'presente' && reg.certificateIssued ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700">
-                            <Award className="w-3 h-3 shrink-0" />
-                            <span>Certificado Liberado</span>
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+                              <Award className="w-3 h-3 shrink-0" />
+                              <span>Certificado Liberado</span>
+                            </span>
+                            {onToggleCertificateIssued && (
+                              <button
+                                type="button"
+                                onClick={() => handleAttendeeCertificateToggle(reg)}
+                                disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 cursor-pointer disabled:opacity-50"
+                              >
+                                Bloquear
+                              </button>
+                            )}
+                            {onPreviewCertificate && (
+                              <button
+                                type="button"
+                                onClick={() => onPreviewCertificate(reg)}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-50 hover:bg-teal-100 text-[#0a3641] border border-teal-200 cursor-pointer"
+                              >
+                                Ver Certificado
+                              </button>
+                            )}
+                          </div>
                         ) : reg.status === 'presente' ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700">
-                            <Lock className="w-3 h-3 shrink-0" />
-                            <span>Presente · Certificado não liberado</span>
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700">
+                              <Lock className="w-3 h-3 shrink-0" />
+                              <span>Presente · Certificado não liberado</span>
+                            </span>
+                            {onToggleCertificateIssued && (
+                              <button
+                                type="button"
+                                onClick={() => handleAttendeeCertificateToggle(reg)}
+                                disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0a3641] hover:bg-[#028090] text-white cursor-pointer disabled:opacity-50"
+                              >
+                                Liberar Certificado
+                              </button>
+                            )}
+                          </div>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700">
                             <Lock className="w-3 h-3 shrink-0" />
@@ -4049,14 +4323,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </select>
 
                               {reg.status === 'presente' && reg.certificateIssued ? (
-                                <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1">
-                                  <Award className="w-3 h-3 shrink-0" />
-                                  <span>Certificado Liberado</span>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div className="text-[10px] font-bold text-emerald-700 flex items-center gap-1">
+                                    <Award className="w-3 h-3 shrink-0" />
+                                    <span>Certificado Liberado</span>
+                                  </div>
+                                  {onToggleCertificateIssued && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAttendeeCertificateToggle(reg)}
+                                      disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}
+                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-200 cursor-pointer disabled:opacity-50"
+                                    >
+                                      Bloquear
+                                    </button>
+                                  )}
+                                  {onPreviewCertificate && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onPreviewCertificate(reg)}
+                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 hover:bg-teal-100 text-[#0a3641] border border-teal-200 cursor-pointer"
+                                    >
+                                      Ver
+                                    </button>
+                                  )}
                                 </div>
                               ) : reg.status === 'presente' ? (
-                                <div className="text-[10px] font-bold text-amber-700 flex items-center gap-1">
-                                  <Lock className="w-3 h-3 shrink-0" />
-                                  <span>Presente · Certificado pendente</span>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <div className="text-[10px] font-bold text-amber-700 flex items-center gap-1">
+                                    <Lock className="w-3 h-3 shrink-0" />
+                                    <span>Presente · Certificado pendente</span>
+                                  </div>
+                                  {onToggleCertificateIssued && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAttendeeCertificateToggle(reg)}
+                                      disabled={!firebaseSyncState?.isVerifiedAdmin || updatingStatusRegId === reg.id}
+                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#0a3641] hover:bg-[#028090] text-white cursor-pointer disabled:opacity-50"
+                                    >
+                                      Liberar
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
                                 <div className="text-[10px] font-bold text-rose-700 flex items-center gap-1">
@@ -4138,7 +4445,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             const q = speakerSearch.trim().toLowerCase();
             const matchesGroup =
               speakerGroupFilter === 'todos' ||
-              spk.sessionGroup === speakerGroupFilter;
+              spk.sessionGroup === speakerGroupFilter ||
+              (speakerGroupFilter === 'abertura' && spk.sessionLabel.toLowerCase().includes('abertura'));
             if (!matchesGroup) return false;
             if (!q) return true;
             return (
@@ -4167,7 +4475,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               case 'mesa-3':
                 return { label: 'Mesa 3 · Justiça & Direitos', bg: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
               default:
-                return { label: 'Abertura & Mediação', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
+                return { label: 'Mesa de Abertura', bg: 'bg-teal-50 text-teal-800 border-teal-200' };
             }
           };
 
@@ -4215,12 +4523,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div className={`p-3.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 border animate-in fade-in ${
                   speakerNotice.type === 'success'
                     ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : speakerNotice.type === 'error'
+                    ? 'bg-rose-50 text-rose-800 border-rose-200'
                     : speakerNotice.type === 'warning'
                     ? 'bg-amber-50 text-amber-800 border-amber-200'
                     : 'bg-blue-50 text-blue-800 border-blue-200'
                 }`}>
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    {speakerNotice.type === 'error' ? (
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    )}
                     <span>{speakerNotice.text}</span>
                   </div>
                   <button
@@ -4239,7 +4553,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div>
                     <h2 className="text-lg font-bold text-[#0a3641] flex items-center gap-2">
                       <GraduationCap className="w-5 h-5 text-[#ea7a38]" />
-                      <span>Gestão de Palestrantes & Mediadores</span>
+                      <span>Gestão de Mesa de Abertura, Palestrantes & Mediadores</span>
                       <span className="text-xs font-normal text-stone-500">({speakers.length} cadastrados)</span>
                     </h2>
                     <p className="text-xs text-stone-600 mt-0.5">
@@ -4295,7 +4609,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="flex flex-wrap items-center gap-1.5">
                     {[
                       { id: 'todos', label: 'Todos' },
-                      { id: 'abertura', label: 'Abertura' },
+                      { id: 'abertura', label: 'Mesa de Abertura' },
                       { id: 'mesa-1', label: 'Mesa 1 · RAPS' },
                       { id: 'mesa-2', label: 'Mesa 2 · Urgência' },
                       { id: 'mesa-3', label: 'Mesa 3 · Direitos' }
@@ -4345,6 +4659,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     const hasLinkedin = Boolean(spk.socials?.linkedinUrl || spk.socials?.linkedin);
                     const hasLattes = Boolean(spk.socials?.lattesUrl);
 
+                    const resolvedPhotoUrl = spk.photoUrl ? normalizeGoogleDriveImageUrl(spk.photoUrl).url : '';
+                    const photoErrorKey = `${spk.id}::${resolvedPhotoUrl}`;
+
                     return (
                       <div
                         key={spk.id}
@@ -4354,23 +4671,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {/* Card Top: Photo/Initials + Badges */}
                           <div className="flex items-start justify-between gap-3 mb-3">
                             <div className="flex items-center gap-3">
-                              {spk.photoUrl ? (
+                              {resolvedPhotoUrl && !speakerCardImgErrors[photoErrorKey] ? (
                                 <img
-                                  src={normalizeGoogleDriveImageUrl(spk.photoUrl).url}
+                                  key={photoErrorKey}
+                                  src={resolvedPhotoUrl}
                                   alt={spk.name}
+                                  referrerPolicy="no-referrer"
+                                  loading="lazy"
                                   style={{ objectPosition: spk.photoPosition || 'center 18%' }}
                                   className="w-12 h-12 rounded-xl object-cover border border-stone-200 shadow-2xs shrink-0"
-                                  onError={(e) => {
-                                    e.currentTarget.style.display = 'none';
-                                    e.currentTarget.parentElement?.querySelector('.fallback-initials')?.classList.remove('hidden');
-                                  }}
+                                  onError={() =>
+                                    setSpeakerCardImgErrors((prev) => ({ ...prev, [photoErrorKey]: true }))
+                                  }
                                 />
-                              ) : null}
-                              <div
-                                className={`fallback-initials ${spk.photoUrl ? 'hidden' : 'flex'} w-12 h-12 rounded-xl bg-gradient-to-br from-[#0a3641] to-[#028090] text-white font-extrabold text-sm items-center justify-center shrink-0 shadow-2xs`}
-                              >
-                                {getSpeakerInitials(spk.name)}
-                              </div>
+                              ) : (
+                                <div
+                                  className="fallback-initials flex w-12 h-12 rounded-xl bg-gradient-to-br from-[#0a3641] to-[#028090] text-white font-extrabold text-sm items-center justify-center shrink-0 shadow-2xs"
+                                >
+                                  {getSpeakerInitials(spk.name)}
+                                </div>
+                              )}
 
                               <div>
                                 <h3 className="text-sm font-bold text-[#0a3641] leading-snug line-clamp-1">
@@ -4495,7 +4815,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <div className="flex items-center gap-2">
                         <GraduationCap className="w-5 h-5 text-[#ea7a38]" />
                         <h3 className="text-base font-bold">
-                          {editingSpeaker ? `Editar Palestrante: ${editingSpeaker.name}` : 'Cadastrar Novo Palestrante / Mediador'}
+                          {editingSpeaker ? `Editar Perfil: ${editingSpeaker.name}` : 'Cadastrar Novo Integrante / Palestrante'}
                         </h3>
                       </div>
                       <button
@@ -4509,6 +4829,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     {/* Modal Form */}
                     <form onSubmit={handleSaveSpeakerSubmit} className="p-5 sm:p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                      {speakerNotice && (speakerNotice.type === 'error' || speakerNotice.type === 'warning') && (
+                        <div className={`p-3 rounded-xl border text-xs font-medium flex items-start justify-between gap-2 ${
+                          speakerNotice.type === 'error'
+                            ? 'bg-rose-50 border-rose-200 text-rose-800'
+                            : 'bg-amber-50 border-amber-200 text-amber-800'
+                        }`}>
+                          <div className="flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>{speakerNotice.text}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSpeakerNotice(null)}
+                            className="p-0.5 rounded hover:bg-black/5 cursor-pointer shrink-0"
+                            aria-label="Fechar aviso"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         {/* Nome Completo */}
                         <div>
@@ -4564,7 +4904,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onChange={(e) => {
                               const group = e.target.value as SpeakerProfile['sessionGroup'];
                               let defaultLabel = speakerFormData.sessionLabel;
-                              if (group === 'abertura') defaultLabel = 'Sessão Solene de Abertura & Conferência Magna';
+                              if (group === 'abertura') defaultLabel = 'Mesa de Abertura';
                               if (group === 'mesa-1') defaultLabel = 'Mesa 1 · Rede de Atenção Psicossocial (RAPS) Microrregional';
                               if (group === 'mesa-2') defaultLabel = 'Mesa 2 · O Papel do Hospital Geral e da Urgência em Saúde Mental';
                               if (group === 'mesa-3') defaultLabel = 'Mesa 3 · Saúde Mental, Direitos Humanos e Intersetorialidade';
@@ -4572,7 +4912,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             }}
                             className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#0a3641] bg-white cursor-pointer"
                           >
-                            <option value="abertura">Abertura & Mediação</option>
+                            <option value="abertura">Mesa de Abertura</option>
                             <option value="mesa-1">Mesa 1 · RAPS e Atenção Básica</option>
                             <option value="mesa-2">Mesa 2 · Urgência e Hospital Geral</option>
                             <option value="mesa-3">Mesa 3 · Direitos Humanos e Justiça</option>
@@ -4712,6 +5052,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <div className="flex flex-col items-center gap-1">
                                 <div className="w-20 h-20 rounded-2xl overflow-hidden border-2 border-[#028090] shadow-sm bg-stone-100 shrink-0">
                                   <img
+                                    key={`pub-${normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).url}`}
                                     src={normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).url}
                                     alt="Pré-visualização Vitrine Pública"
                                     referrerPolicy="no-referrer"
@@ -4728,6 +5069,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <div className="flex flex-col items-center gap-1">
                                 <div className="w-12 h-12 rounded-xl overflow-hidden border border-stone-300 shadow-2xs bg-stone-100 shrink-0">
                                   <img
+                                    key={`adm-${normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).url}`}
                                     src={normalizeGoogleDriveImageUrl(speakerFormData.photoUrl).url}
                                     alt="Pré-visualização Tabela Gestor"
                                     referrerPolicy="no-referrer"
@@ -4963,17 +5305,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex items-center justify-center gap-3">
                       <button
                         type="button"
+                        disabled={isSpeakerActionBusy}
                         onClick={() => setSpeakerToDelete(null)}
-                        className="px-4 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl cursor-pointer"
+                        className="px-4 py-2 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl cursor-pointer disabled:opacity-50"
                       >
                         Cancelar
                       </button>
                       <button
                         type="button"
+                        disabled={isSpeakerActionBusy}
                         onClick={handleConfirmDeleteSpeaker}
-                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer"
+                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer disabled:opacity-50"
                       >
-                        Confirmar Exclusão
+                        {isSpeakerActionBusy ? 'Excluindo...' : 'Confirmar Exclusão'}
                       </button>
                     </div>
                   </div>
@@ -5524,102 +5868,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
-            {/* LISTA: QUEM QUER RECEBER EMAIL */}
-            {(() => {
-              const wantEmail = registrations.filter((r) => r.acceptEmailNews);
-              const wantWhatsapp = registrations.filter((r) => r.acceptWhatsappNews && r.phone);
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Email opt-in */}
-                  <div className={`rounded-2xl border p-5 space-y-4 ${theme.card}`}>
-                    <div className="flex items-center justify-between">
-                      <h4 className={`font-bold flex items-center gap-2 ${theme.textHeading}`}>
-                        <Mail className="w-4 h-4 text-[#ea7a38]" />
-                        Aceite de E-mail
-                      </h4>
-                      <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${isDarkMode ? 'bg-[#102a33] text-teal-300' : 'bg-stone-100 text-stone-700'}`}>
-                        {wantEmail.length} inscritos
-                      </span>
-                    </div>
-                    <div className={`divide-y text-xs max-h-72 overflow-y-auto rounded-xl border ${isDarkMode ? 'divide-[#0e2730] border-[#133540]' : 'divide-stone-100 border-stone-200'}`}>
-                      {wantEmail.length === 0 ? (
-                        <div className={`p-4 text-center ${theme.textMuted}`}>Nenhum inscrito optou por e-mail ainda.</div>
-                      ) : wantEmail.map((r) => (
-                        <div key={r.id} className={`px-3 py-2 flex items-center justify-between gap-2 ${isDarkMode ? 'hover:bg-[#0e2730]' : 'hover:bg-stone-50'}`}>
-                          <div className="min-w-0">
-                            <div className={`font-semibold truncate ${theme.textHeading}`}>{r.fullName}</div>
-                            <div className={`font-mono truncate ${theme.textMuted}`}>{r.email}</div>
-                          </div>
-                          <span className={`shrink-0 text-[10px] font-mono px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-teal-900/50 text-teal-300' : 'bg-teal-50 text-teal-700 border border-teal-200'}`}>
-                            {r.code}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {wantEmail.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const lines = wantEmail.map((r) => `${r.fullName} <${r.email}>`).join('\n');
-                          navigator.clipboard.writeText(lines);
-                          alert(`${wantEmail.length} e-mails copiados!`);
-                        }}
-                        className={`w-full text-xs font-bold py-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${isDarkMode ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border-[#1a414e]' : 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'}`}
-                      >
-                        <Copy className="w-3.5 h-3.5" /> Copiar todos os e-mails
-                      </button>
-                    )}
-                  </div>
-
-                  {/* WhatsApp opt-in */}
-                  <div className={`rounded-2xl border p-5 space-y-4 ${theme.card}`}>
-                    <div className="flex items-center justify-between">
-                      <h4 className={`font-bold flex items-center gap-2 ${theme.textHeading}`}>
-                        <Smartphone className="w-4 h-4 text-emerald-500" />
-                        Aceite de WhatsApp
-                      </h4>
-                      <span className={`text-xs font-mono font-bold px-2.5 py-1 rounded-lg ${isDarkMode ? 'bg-[#102a33] text-teal-300' : 'bg-stone-100 text-stone-700'}`}>
-                        {wantWhatsapp.length} inscritos
-                      </span>
-                    </div>
-                    <div className={`divide-y text-xs max-h-72 overflow-y-auto rounded-xl border ${isDarkMode ? 'divide-[#0e2730] border-[#133540]' : 'divide-stone-100 border-stone-200'}`}>
-                      {wantWhatsapp.length === 0 ? (
-                        <div className={`p-4 text-center ${theme.textMuted}`}>Nenhum inscrito optou por WhatsApp ainda.</div>
-                      ) : wantWhatsapp.map((r) => (
-                        <div key={r.id} className={`px-3 py-2 flex items-center justify-between gap-2 ${isDarkMode ? 'hover:bg-[#0e2730]' : 'hover:bg-stone-50'}`}>
-                          <div className="min-w-0">
-                            <div className={`font-semibold truncate ${theme.textHeading}`}>{r.fullName}</div>
-                            <div className={`font-mono truncate ${theme.textMuted}`}>{r.phone}</div>
-                          </div>
-                          <a
-                            href={`https://wa.me/${r.phone?.replace(/\D/g, '')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="shrink-0 inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold rounded-lg transition-colors"
-                          >
-                            <Smartphone className="w-3 h-3" /> Abrir
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                    {wantWhatsapp.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const phones = wantWhatsapp.map((r) => r.phone).filter(Boolean).join('\n');
-                          navigator.clipboard.writeText(phones);
-                          alert(`${wantWhatsapp.length} números copiados para criar Lista de Transmissão!`);
-                        }}
-                        className={`w-full text-xs font-bold py-2 rounded-xl border transition-colors cursor-pointer flex items-center justify-center gap-1.5 ${isDarkMode ? 'bg-[#102a33] hover:bg-[#163742] text-stone-200 border-[#1a414e]' : 'bg-stone-100 hover:bg-stone-200 text-stone-700 border-stone-300'}`}
-                      >
-                        <Copy className="w-3.5 h-3.5" /> Copiar todos os números
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-
             {/* CRIAR NOVO ALERTA / LEMBRETE PARA O TOPO DO PORTAL */}
             <div className={`rounded-2xl border p-6 space-y-4 ${theme.card}`}>
               <div className="flex items-center gap-3 border-b pb-4">
@@ -6139,62 +6387,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           );
         })()}
 
-        {/* TAB 5: CUSTOMIZADOR PARA PRÓXIMOS EVENTOS & DESIGN DO CRACHÁ */}
+        {/* TAB 5: CUSTOMIZADOR PARA PRÓXIMOS EVENTOS */}
         {activeTab === 'customizer' && (
           <div className="space-y-6">
-            {/* Segmented Sub-view Switch inside Configurar Evento */}
-            <div className="bg-white rounded-2xl border border-stone-200 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-bold text-[#0a3641] flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-[#d96522]" />
-                  <span>Personalização da Plataforma & Credenciais</span>
-                </h3>
-                <p className="text-xs text-stone-500 mt-0.5">
-                  Configure os dados do evento ou edite o design oficial do crachá dos participantes.
-                </p>
-              </div>
-              <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-xl border border-stone-200 self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setCustomizerSubView('event')}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                    customizerSubView === 'event'
-                      ? 'bg-[#0a3641] text-white shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  <span>Configurações do Evento</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCustomizerSubView('badge')}
-                  className={`inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                    customizerSubView === 'badge'
-                      ? 'bg-[#ea7a38] text-white shadow-xs'
-                      : 'text-stone-600 hover:text-stone-900'
-                  }`}
-                >
-                  <IdCard className="w-3.5 h-3.5" />
-                  <span>Design do Crachá</span>
-                </button>
-              </div>
-            </div>
-
-            {customizerSubView === 'badge' ? (
-              <AdminBadgeDesigner
-                config={config}
-                registrations={registrations}
-                onUpdateConfig={(nextCfg) => {
-                  Promise.resolve(onUpdateConfig(nextCfg)).catch((err: unknown) => {
-                    const msg =
-                      err instanceof Error ? err.message : 'Falha ao salvar design do crachá.';
-                    setConfigSaveError(msg);
-                  });
-                }}
-              />
-            ) : (
-              <div className={`rounded-2xl border p-6 space-y-6 transition-colors ${theme.card}`}>
+            <div className={`rounded-2xl border p-6 space-y-6 transition-colors ${theme.card}`}>
                 <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4 ${isDarkMode ? 'border-[#133540]' : 'border-stone-200'}`}>
                   <div>
                     <h3 className={`text-lg font-bold flex items-center gap-2 ${theme.textHeading}`}>
@@ -6458,8 +6654,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
             </form>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -6472,10 +6667,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         registration={selectedBadgeAttendee}
         config={config}
         onClose={() => setSelectedBadgeAttendee(null)}
-        onOpenBadgeDesigner={() => {
-          setActiveTab('customizer');
-          setCustomizerSubView('badge');
-        }}
       />
 
       {/* Modal: Adicionar Novo Documento PDF */}

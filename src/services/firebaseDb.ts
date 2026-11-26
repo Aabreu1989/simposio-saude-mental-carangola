@@ -2502,9 +2502,28 @@ export const subscribeCertificateDownloads = (
   );
 };
 
+export interface SpeakersSnapshotMeta {
+  deletedIds: string[];
+  fromCache: boolean;
+  isAuthoritative: boolean;
+}
+
+export interface SpeakersMutationAdapter {
+  saveSpeaker: (speakerId: string, payload: Record<string, unknown>) => Promise<void>;
+  deleteSpeaker: (speakerId: string, isOfficial: boolean, tombstonePayload?: Record<string, unknown>) => Promise<void>;
+}
+
+let customSpeakersMutationAdapterForTests: SpeakersMutationAdapter | null = null;
+
+export const setSpeakersMutationAdapterForTests = (
+  adapter: SpeakersMutationAdapter | null
+): void => {
+  customSpeakersMutationAdapterForTests = adapter;
+};
+
 export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const authorized = await isAuthorizedServerAdminSession();
+  if (!authorized) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
   const speakerId = sanitizeId(speaker.id, 'spk');
@@ -2527,6 +2546,7 @@ export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> =>
 
   const payload = stripUndefined({
     id: speakerId,
+    deleted: false,
     name: (speaker.name || baseline?.name || '').trim().slice(0, 160),
     role: (speaker.role || baseline?.role || '').trim().slice(0, 160),
     institution: (speaker.institution || baseline?.institution || '').trim().slice(0, 200),
@@ -2546,6 +2566,11 @@ export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> =>
     updatedAt: new Date().toISOString()
   });
 
+  if (customSpeakersMutationAdapterForTests) {
+    await customSpeakersMutationAdapterForTests.saveSpeaker(speakerId, payload);
+    return;
+  }
+
   try {
     await setDoc(doc(db, 'speakers', speakerId), payload);
   } catch (error) {
@@ -2554,8 +2579,8 @@ export const saveSpeakerToDb = async (speaker: SpeakerProfile): Promise<void> =>
 };
 
 export const saveAllSpeakersToDb = async (speakers: SpeakerProfile[]): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const authorized = await isAuthorizedServerAdminSession();
+  if (!authorized) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
   for (const spk of speakers) {
@@ -2564,28 +2589,57 @@ export const saveAllSpeakersToDb = async (speakers: SpeakerProfile[]): Promise<v
 };
 
 export const deleteSpeakerInDb = async (speakerId: string): Promise<void> => {
-  const user = firestoreAuth.currentUser;
-  if (!isVerifiedAdminUser(user)) {
+  const authorized = await isAuthorizedServerAdminSession();
+  if (!authorized) {
     throw new Error('ADMIN_AUTH_REQUIRED');
   }
   const id = sanitizeId(speakerId, 'spk');
+  const isOfficial = SPEAKERS_PROFILES.some((p) => p.id === id);
+  const nowIso = new Date().toISOString();
+  const tombstonePayload = isOfficial
+    ? {
+        id,
+        deleted: true,
+        deletedAt: nowIso,
+        updatedAt: nowIso
+      }
+    : undefined;
+
+  if (customSpeakersMutationAdapterForTests) {
+    await customSpeakersMutationAdapterForTests.deleteSpeaker(id, isOfficial, tombstonePayload);
+    return;
+  }
+
   try {
-    await deleteDoc(doc(db, 'speakers', id));
+    if (isOfficial && tombstonePayload) {
+      // Palestrantes oficiais recebem tombstone permanente no Firestore para impedir ressurreição em F5 ou outros dispositivos
+      await setDoc(doc(db, 'speakers', id), tombstonePayload);
+    } else {
+      await deleteDoc(doc(db, 'speakers', id));
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `speakers/${id}`);
+    handleFirestoreError(error, isOfficial ? OperationType.WRITE : OperationType.DELETE, `speakers/${id}`);
   }
 };
 
-export const subscribeSpeakers = (onUpdate: (speakers: SpeakerProfile[]) => void) => {
+export const subscribeSpeakers = (
+  onUpdate: (speakers: SpeakerProfile[], meta: SpeakersSnapshotMeta) => void
+) => {
   const q = collection(db, 'speakers');
   return onSnapshot(
     q,
     (snapshot) => {
-      if (snapshot.empty) return;
-      const list: SpeakerProfile[] = snapshot.docs.map((d) => {
-        const data = d.data() as SpeakerProfile;
-        return {
-          id: data.id || d.id,
+      const deletedIds: string[] = [];
+      const list: SpeakerProfile[] = [];
+      snapshot.docs.forEach((d) => {
+        const data = d.data() as SpeakerProfile & { deleted?: boolean };
+        const resolvedId = data.id || d.id;
+        if (data.deleted === true) {
+          deletedIds.push(resolvedId);
+          return;
+        }
+        list.push({
+          id: resolvedId,
           name: data.name || '',
           role: data.role || '',
           institution: data.institution || '',
@@ -2596,9 +2650,13 @@ export const subscribeSpeakers = (onUpdate: (speakers: SpeakerProfile[]) => void
           photoPosition: data.photoPosition || 'center 18%',
           bio: data.bio || '',
           socials: data.socials || {}
-        };
+        });
       });
-      onUpdate(list);
+      onUpdate(list, {
+        deletedIds,
+        fromCache: snapshot.metadata.fromCache,
+        isAuthoritative: !snapshot.metadata.fromCache
+      });
     },
     (error) => {
       console.warn('Aviso ao sincronizar palestrantes do Firestore:', error);

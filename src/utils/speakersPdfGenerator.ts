@@ -201,13 +201,13 @@ export const exportSpeakersPdf = async (
       <div class="spk-header">
         <div>
           <div class="spk-kicker">SUS · Microrregião de Carangola / MG · Catálogo Oficial</div>
-          <h1 class="spk-title">Palestrantes e Mediadores Convidados</h1>
+          <h1 class="spk-title">Mesa de Abertura, Palestrantes e Mediadores</h1>
           <div class="spk-subtitle">
             ${escapeHtml(config.editionTitle)} ${escapeHtml(config.regionTitle)} · ${escapeHtml(config.eventFullDate)} · ${escapeHtml(config.locationName)}
           </div>
         </div>
         <div class="spk-meta">
-          <div><strong>Total:</strong> ${speakers.length} convidados</div>
+          <div><strong>Total:</strong> ${validSpeakers.length} convidados</div>
           <div><strong>Horário:</strong> ${escapeHtml(config.eventHours)}</div>
           <div><strong>Gerado em:</strong> ${escapeHtml(generatedAt)}</div>
         </div>
@@ -230,7 +230,7 @@ export const exportSpeakersPdf = async (
                 <div class="spk-avatar" style="background: ${accent};">
                   ${
                     spk.photoUrl
-                      ? `<img src="${escapeHtml(normalizeGoogleDriveImageUrl(spk.photoUrl).url)}" alt="${escapeHtml(spk.name)}" style="object-position: ${escapeHtml(spk.photoPosition || 'center 18%')};" />`
+                      ? `<img src="${escapeHtml(normalizeGoogleDriveImageUrl(spk.photoUrl).url)}" alt="${escapeHtml(spk.name)}" referrerpolicy="no-referrer" style="object-position: ${escapeHtml(spk.photoPosition || 'center 18%')};" />`
                       : `<span>${escapeHtml(getInitials(spk.name))}</span>`
                   }
                 </div>

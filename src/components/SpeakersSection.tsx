@@ -117,7 +117,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
               Corpo Técnico & Convidados
             </div>
             <h2 className="text-3xl sm:text-4xl font-extrabold text-[#0a3641] tracking-tight">
-              Palestrantes e Mediadores
+              Mesa de Abertura, Palestrantes e Mediadores
             </h2>
             <p className="mt-2 text-stone-600 text-sm max-w-2xl leading-relaxed">
               Conheça os especialistas, gestores, supervisores clínico-institucionais e representantes do Sistema de Justiça que conduzem os debates desta edição.
@@ -332,7 +332,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
             <Users className="w-4 h-4 text-[#028090] shrink-0" />
             <span>
               Exibindo <strong className="text-[#0a3641]">{filteredSpeakers.length}</strong> de{' '}
-              <strong className="text-[#0a3641]">{speakers.length}</strong> palestrantes e mediadores confirmados.
+              <strong className="text-[#0a3641]">{visibleSpeakers.length}</strong> integrantes confirmados (Mesa de Abertura, Palestrantes e Mediadores).
             </span>
           </div>
           <button
@@ -341,7 +341,7 @@ export const SpeakersSection: React.FC<SpeakersSectionProps> = ({ speakers, conf
             className="inline-flex items-center gap-1.5 font-bold text-[#0a3641] hover:text-[#d96522] transition-colors cursor-pointer self-start sm:self-auto"
           >
             <FileDown className="w-3.5 h-3.5" />
-            <span>Baixar catálogo completo em PDF ({speakers.length} perfis)</span>
+            <span>Baixar catálogo completo em PDF ({visibleSpeakers.length} perfis)</span>
           </button>
         </div>
       </div>

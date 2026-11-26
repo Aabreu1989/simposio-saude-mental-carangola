@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Printer, Download, Palette, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Printer, Download, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Registration, EventConfig } from '../types.ts';
 import { BadgeCardPreview } from './BadgeCardPreview.tsx';
 import { printBadgeInIframe, downloadBadgePdf } from '../utils/badgePrintGenerator.ts';
@@ -8,14 +8,12 @@ interface BadgeModalProps {
   registration: Registration | null;
   config: EventConfig;
   onClose: () => void;
-  onOpenBadgeDesigner?: () => void;
 }
 
 export const BadgeModal: React.FC<BadgeModalProps> = ({
   registration,
   config,
-  onClose,
-  onOpenBadgeDesigner
+  onClose
 }) => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
@@ -110,27 +108,13 @@ export const BadgeModal: React.FC<BadgeModalProps> = ({
 
         {/* Footer Actions */}
         <div className="px-4 py-3 bg-stone-50 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2">
-          {onOpenBadgeDesigner ? (
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onOpenBadgeDesigner();
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-[#0a3641] hover:bg-stone-200/70 rounded-lg transition-colors cursor-pointer"
-            >
-              <Palette className="w-3.5 h-3.5 text-[#ea7a38]" />
-              <span>Alterar Design</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 text-xs font-semibold text-stone-600 hover:text-stone-900 cursor-pointer"
-            >
-              Fechar
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs font-semibold text-stone-600 hover:text-stone-900 cursor-pointer"
+          >
+            Fechar
+          </button>
 
           <div className="flex items-center gap-2 ml-auto">
             <button
